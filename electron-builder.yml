@@ -1,0 +1,31 @@
+appId: com.rise.raise-editor
+productName: rAIse
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.{md,map}'
+asar: true
+
+# Icons live in build/. Replace build/icon.png (and add build/icon.icns,
+# build/icon.ico if you want platform-specific masters) when the real
+# artwork arrives — the paths below are the only thing pointing at them.
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+    - zip
+linux:
+  icon: build/icon.png
+  category: Development
+  target:
+    - AppImage
+    - deb
