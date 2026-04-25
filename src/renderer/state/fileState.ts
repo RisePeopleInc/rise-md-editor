@@ -50,6 +50,7 @@ export interface FileContextValue {
 
   setActiveCursor: (cursor: CursorPos) => void;
   setActiveScroll: (top: number) => void;
+  setActiveEditorMode: (mode: EditorMode) => void;
 
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
 }
@@ -210,6 +211,15 @@ export function FileProvider({ children }: FileProviderProps) {
       const id = activeTabIdRef.current;
       if (!id) return;
       updateTab(id, { scrollPosition: top });
+    },
+    [updateTab],
+  );
+
+  const setActiveEditorMode = useCallback(
+    (mode: EditorMode) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { editorMode: mode });
     },
     [updateTab],
   );
@@ -410,6 +420,7 @@ export function FileProvider({ children }: FileProviderProps) {
       reorderTabs,
       setActiveCursor,
       setActiveScroll,
+      setActiveEditorMode,
       withDirtyGuard,
     }),
     [
@@ -432,6 +443,7 @@ export function FileProvider({ children }: FileProviderProps) {
       reorderTabs,
       setActiveCursor,
       setActiveScroll,
+      setActiveEditorMode,
       withDirtyGuard,
     ],
   );

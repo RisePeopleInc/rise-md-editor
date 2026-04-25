@@ -7,6 +7,7 @@ import {
   type CursorPosition,
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
+import { WysiwygEditor } from './components/editors/WysiwygEditor';
 import { FileProvider, useFileState } from './state/fileState';
 import type { MenuActionEvent } from './env';
 
@@ -171,6 +172,14 @@ function AppContent() {
         case 'font-zoom-reset':
           editorRef.current?.zoomReset();
           break;
+        case 'source-mode':
+          file.setActiveEditorMode('source');
+          break;
+        case 'wysiwyg-mode':
+          file.setActiveEditorMode('wysiwyg');
+          break;
+        // 'split-mode' lands in RAISE-7 — accept the menu click without doing
+        // anything yet so the accelerator is reserved.
         default:
           break;
       }
@@ -247,12 +256,22 @@ function AppContent() {
       )}
       <main className="min-h-0 flex-1">
         {file.activeTab ? (
-          <SourceEditor
-            ref={editorRef}
-            content={file.activeTab.content}
-            onChange={file.setContent}
-            onCursorChange={setCursor}
-          />
+          file.activeTab.editorMode === 'wysiwyg' ? (
+            // Key by tab id so a tab switch fully remounts Milkdown with the
+            // new tab's content (the editor is uncontrolled-with-reset).
+            <WysiwygEditor
+              key={file.activeTab.id}
+              content={file.activeTab.content}
+              onChange={file.setContent}
+            />
+          ) : (
+            <SourceEditor
+              ref={editorRef}
+              content={file.activeTab.content}
+              onChange={file.setContent}
+              onCursorChange={setCursor}
+            />
+          )
         ) : (
           <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
@@ -262,7 +281,13 @@ function AppContent() {
           line={cursor.line}
           column={cursor.column}
           wordCount={wordCount}
-          mode="Source"
+          mode={
+            file.activeTab.editorMode === 'wysiwyg'
+              ? 'WYSIWYG'
+              : file.activeTab.editorMode === 'split'
+                ? 'Split'
+                : 'Source'
+          }
         />
       )}
     </div>
