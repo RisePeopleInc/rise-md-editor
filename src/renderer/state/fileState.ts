@@ -85,18 +85,24 @@ export function FileProvider({ children }: FileProviderProps) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
-  // Refs let actions (loadFile / closeTab) read the latest state after async
-  // gaps without re-creating the callback on every render — and let us avoid
-  // putting side-effect setStates inside the setTabs updater function, which
-  // React's strict-mode double-invoke can drop on the floor.
+  // Authoritative refs: every state mutation goes through `writeTabs` /
+  // `writeActiveTabId`, which update the ref *synchronously* and then queue
+  // the React state update. Subsequent calls in the same tick (e.g. a rapid
+  // double-open) see the latest state without waiting for the next commit —
+  // that's what prevents duplicate tabs when two `loadFile` calls land back
+  // to back before React has had a chance to flush.
   const tabsRef = useRef<Tab[]>([]);
   const activeTabIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    tabsRef.current = tabs;
-  }, [tabs]);
-  useEffect(() => {
-    activeTabIdRef.current = activeTabId;
-  }, [activeTabId]);
+
+  const writeTabs = useCallback((next: Tab[]) => {
+    tabsRef.current = next;
+    setTabs(next);
+  }, []);
+
+  const writeActiveTabId = useCallback((next: string | null) => {
+    activeTabIdRef.current = next;
+    setActiveTabId(next);
+  }, []);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
@@ -118,54 +124,61 @@ export function FileProvider({ children }: FileProviderProps) {
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab>) => {
-      setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+      writeTabs(
+        tabsRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      );
     },
-    [],
+    [writeTabs],
   );
 
   const setContent = useCallback(
     (content: string) => {
-      if (!activeTabId) return;
-      updateTab(activeTabId, { content });
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { content });
     },
-    [activeTabId, updateTab],
+    [updateTab],
   );
 
-  const switchTo = useCallback((id: string) => {
-    setActiveTabId(id);
-  }, []);
+  const switchTo = useCallback(
+    (id: string) => {
+      writeActiveTabId(id);
+    },
+    [writeActiveTabId],
+  );
 
-  const loadFile = useCallback((nextPath: string, nextContent: string) => {
-    // IMPORTANT: don't put `setActiveTabId` inside `setTabs`'s updater — in
-    // strict-mode dev React invokes the updater twice and the side-effect
-    // setState can be dropped, leaving the new tab in the list with the OLD
-    // tab still active (the editor would stick on the previous file until
-    // the user clicked the tab manually).
-    const existing = tabsRef.current.find((t) => t.path === nextPath);
-    if (existing) {
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === existing.id
-            ? { ...t, content: nextContent, savedContent: nextContent }
-            : t,
-        ),
-      );
-      setActiveTabId(existing.id);
-      return;
-    }
-    const tab = makeTab(nextPath, nextContent);
-    setTabs((prev) => [...prev, tab]);
-    setActiveTabId(tab.id);
-  }, []);
+  const loadFile = useCallback(
+    (nextPath: string, nextContent: string) => {
+      // Read + write against the synchronous ref so two `loadFile` calls in
+      // the same tick can't both miss an existing tab and create duplicates.
+      const existing = tabsRef.current.find((t) => t.path === nextPath);
+      if (existing) {
+        writeTabs(
+          tabsRef.current.map((t) =>
+            t.id === existing.id
+              ? { ...t, content: nextContent, savedContent: nextContent }
+              : t,
+          ),
+        );
+        writeActiveTabId(existing.id);
+        return;
+      }
+      const tab = makeTab(nextPath, nextContent);
+      writeTabs([...tabsRef.current, tab]);
+      writeActiveTabId(tab.id);
+    },
+    [writeTabs, writeActiveTabId],
+  );
 
   const newFile = useCallback(() => {
     const tab = makeTab(null, '');
-    setTabs((prev) => [...prev, tab]);
-    setActiveTabId(tab.id);
-  }, []);
+    writeTabs([...tabsRef.current, tab]);
+    writeActiveTabId(tab.id);
+  }, [writeTabs, writeActiveTabId]);
 
-  const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
-    setTabs((prev) => {
+  const reorderTabs = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const prev = tabsRef.current;
       if (
         fromIndex < 0 ||
         fromIndex >= prev.length ||
@@ -173,35 +186,38 @@ export function FileProvider({ children }: FileProviderProps) {
         toIndex >= prev.length ||
         fromIndex === toIndex
       ) {
-        return prev;
+        return;
       }
       const next = prev.slice();
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved!);
-      return next;
-    });
-  }, []);
+      writeTabs(next);
+    },
+    [writeTabs],
+  );
 
   const setActiveCursor = useCallback(
     (cursor: CursorPos) => {
-      if (!activeTabId) return;
-      updateTab(activeTabId, { cursorPosition: cursor });
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { cursorPosition: cursor });
     },
-    [activeTabId, updateTab],
+    [updateTab],
   );
 
   const setActiveScroll = useCallback(
     (top: number) => {
-      if (!activeTabId) return;
-      updateTab(activeTabId, { scrollPosition: top });
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { scrollPosition: top });
     },
-    [activeTabId, updateTab],
+    [updateTab],
   );
 
   const saveAs = useCallback(
     async (id?: string): Promise<boolean> => {
-      const targetId = id ?? activeTabId;
-      const tab = tabs.find((t) => t.id === targetId);
+      const targetId = id ?? activeTabIdRef.current;
+      const tab = tabsRef.current.find((t) => t.id === targetId);
       if (!tab) return false;
       try {
         const result = await window.api.files.saveAs(tab.content, basenameOf(tab.path));
@@ -217,13 +233,13 @@ export function FileProvider({ children }: FileProviderProps) {
         return false;
       }
     },
-    [activeTabId, tabs, updateTab],
+    [updateTab],
   );
 
   const save = useCallback(
     async (id?: string): Promise<boolean> => {
-      const targetId = id ?? activeTabId;
-      const tab = tabs.find((t) => t.id === targetId);
+      const targetId = id ?? activeTabIdRef.current;
+      const tab = tabsRef.current.find((t) => t.id === targetId);
       if (!tab) return false;
       if (!tab.path) return saveAs(tab.id);
       try {
@@ -238,54 +254,56 @@ export function FileProvider({ children }: FileProviderProps) {
         return false;
       }
     },
-    [activeTabId, tabs, updateTab, saveAs],
+    [updateTab, saveAs],
   );
 
   const saveAllDirty = useCallback(async (): Promise<boolean> => {
-    for (const tab of tabs) {
-      if (!isTabDirty(tab)) continue;
-      // Switch to the tab first so any saveAs dialog has obvious context.
-      setActiveTabId(tab.id);
-      const ok = await save(tab.id);
+    // Iterate from the live ref so an updated savedContent (after each save)
+    // doesn't re-trigger an already-saved tab.
+    for (const tab of tabsRef.current) {
+      const live = tabsRef.current.find((t) => t.id === tab.id);
+      if (!live || !isTabDirty(live)) continue;
+      // Switch first so any saveAs dialog has obvious context.
+      writeActiveTabId(live.id);
+      const ok = await save(live.id);
       if (!ok) return false;
     }
     return true;
-  }, [tabs, save]);
+  }, [save, writeActiveTabId]);
 
   // Walk dirty tabs one by one, prompting the user for each (Save / Don't
   // Save / Cancel). 'Don't Save' silently skips that tab; 'Cancel' aborts
   // the whole flow so the window stays open.
   const reviewEachDirtyTab = useCallback(async (): Promise<boolean> => {
-    for (const tab of tabs) {
-      if (!isTabDirty(tab)) continue;
-      setActiveTabId(tab.id);
-      const choice = await window.api.confirmUnsavedChanges(basenameOf(tab.path));
+    for (const tab of tabsRef.current) {
+      const live = tabsRef.current.find((t) => t.id === tab.id);
+      if (!live || !isTabDirty(live)) continue;
+      writeActiveTabId(live.id);
+      const choice = await window.api.confirmUnsavedChanges(basenameOf(live.path));
       if (choice === 'cancel') return false;
       if (choice === 'save') {
-        const ok = await save(tab.id);
+        const ok = await save(live.id);
         if (!ok) return false;
       }
     }
     return true;
-  }, [tabs, save]);
+  }, [save, writeActiveTabId]);
 
   const withDirtyGuard = useCallback(
     async (action: () => void | Promise<void>): Promise<boolean> => {
-      // Active-tab guard, used for actions that REPLACE the active document
-      // in place (would discard unsaved changes). Multi-tab opens just add a
-      // new tab and don't need this — they go through loadFile directly.
-      if (activeTab && isTabDirty(activeTab)) {
-        const choice = await window.api.confirmUnsavedChanges(basenameOf(activeTab.path));
+      const current = tabsRef.current.find((t) => t.id === activeTabIdRef.current);
+      if (current && isTabDirty(current)) {
+        const choice = await window.api.confirmUnsavedChanges(basenameOf(current.path));
         if (choice === 'cancel') return false;
         if (choice === 'save') {
-          const ok = await save(activeTab.id);
+          const ok = await save(current.id);
           if (!ok) return false;
         }
       }
       await action();
       return true;
     },
-    [activeTab, save],
+    [save],
   );
 
   const closeTab = useCallback(
@@ -295,7 +313,7 @@ export function FileProvider({ children }: FileProviderProps) {
       if (isTabDirty(tab)) {
         // Surface which tab the prompt is about — switch to it so the user
         // sees its content before deciding.
-        setActiveTabId(id);
+        writeActiveTabId(id);
         const choice = await window.api.confirmUnsavedChanges(basenameOf(tab.path));
         if (choice === 'cancel') return false;
         if (choice === 'save') {
@@ -303,46 +321,48 @@ export function FileProvider({ children }: FileProviderProps) {
           if (!ok) return false;
         }
       }
-      // Re-read after the await so we work against the current state, then
-      // dispatch the tabs and active-id updates separately (no side-effects
-      // inside setTabs's updater — strict-mode-safe).
+      // Re-read against the live ref after the await; another close in flight
+      // could have shifted the array.
       const fresh = tabsRef.current;
       const idx = fresh.findIndex((t) => t.id === id);
       if (idx === -1) return false;
       const next = fresh.slice();
       next.splice(idx, 1);
-      setTabs(next);
+      writeTabs(next);
       if (id === activeTabIdRef.current) {
         const neighbour = next[idx] ?? next[idx - 1] ?? null;
-        setActiveTabId(neighbour ? neighbour.id : null);
+        writeActiveTabId(neighbour ? neighbour.id : null);
       }
       return true;
     },
-    [save],
+    [save, writeTabs, writeActiveTabId],
   );
 
   const closeActiveTab = useCallback(async (): Promise<boolean> => {
-    if (!activeTabId) {
+    const id = activeTabIdRef.current;
+    if (!id) {
       // No tabs — close the window (matches macOS Cmd+W on the welcome screen).
       window.api.closeWindow();
       return true;
     }
-    return closeTab(activeTabId);
-  }, [activeTabId, closeTab]);
+    return closeTab(id);
+  }, [closeTab]);
 
   const nextTab = useCallback(() => {
-    if (tabs.length === 0) return;
-    const idx = tabs.findIndex((t) => t.id === activeTabId);
-    const next = tabs[(idx + 1) % tabs.length];
-    if (next) setActiveTabId(next.id);
-  }, [tabs, activeTabId]);
+    const list = tabsRef.current;
+    if (list.length === 0) return;
+    const idx = list.findIndex((t) => t.id === activeTabIdRef.current);
+    const next = list[(idx + 1) % list.length];
+    if (next) writeActiveTabId(next.id);
+  }, [writeActiveTabId]);
 
   const prevTab = useCallback(() => {
-    if (tabs.length === 0) return;
-    const idx = tabs.findIndex((t) => t.id === activeTabId);
-    const prev = tabs[(idx - 1 + tabs.length) % tabs.length];
-    if (prev) setActiveTabId(prev.id);
-  }, [tabs, activeTabId]);
+    const list = tabsRef.current;
+    if (list.length === 0) return;
+    const idx = list.findIndex((t) => t.id === activeTabIdRef.current);
+    const prev = list[(idx - 1 + list.length) % list.length];
+    if (prev) writeActiveTabId(prev.id);
+  }, [writeActiveTabId]);
 
   // Window-close dirty-tab resolution. Main asks for either a Save All sweep
   // or a tab-by-tab walkthrough; we run the chosen flow and report success.
@@ -359,16 +379,15 @@ export function FileProvider({ children }: FileProviderProps) {
   // path — no longer the primary route), update the matching tab.
   useEffect(() => {
     const off = window.api.onFileSavedAs(({ path: savedPath, content: savedBytes }) => {
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.path === savedPath || (t.id === activeTabId && !t.path)
-            ? { ...t, path: savedPath, savedContent: savedBytes }
-            : t,
-        ),
+      const next = tabsRef.current.map((t) =>
+        t.path === savedPath || (t.id === activeTabIdRef.current && !t.path)
+          ? { ...t, path: savedPath, savedContent: savedBytes }
+          : t,
       );
+      writeTabs(next);
     });
     return off;
-  }, [activeTabId]);
+  }, [writeTabs]);
 
   const value = useMemo<FileContextValue>(
     () => ({
