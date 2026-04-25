@@ -18,6 +18,17 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@milkdown/core": "^7.20.0",
+    "@milkdown/plugin-clipboard": "^7.20.0",
+    "@milkdown/plugin-cursor": "^7.20.0",
+    "@milkdown/plugin-history": "^7.20.0",
+    "@milkdown/plugin-listener": "^7.20.0",
+    "@milkdown/plugin-slash": "^7.20.0",
+    "@milkdown/plugin-tooltip": "^7.20.0",
+    "@milkdown/preset-commonmark": "^7.20.0",
+    "@milkdown/preset-gfm": "^7.20.0",
+    "@milkdown/react": "^7.20.0",
+    "@milkdown/theme-nord": "^7.20.0",
     "@monaco-editor/react": "^4.7.0",
     "electron-store": "^8.2.0",
     "monaco-editor": "^0.55.1",

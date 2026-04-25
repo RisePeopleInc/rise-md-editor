@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './milkdown.css';
 
 @theme {
   --color-brand-50: #f0fdfa;

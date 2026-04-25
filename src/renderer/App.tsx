@@ -7,6 +7,10 @@ import {
   type CursorPosition,
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
+import {
+  WysiwygEditor,
+  type WysiwygEditorHandle,
+} from './components/editors/WysiwygEditor';
 import { FileProvider, useFileState } from './state/fileState';
 import type { MenuActionEvent } from './env';
 
@@ -21,6 +25,9 @@ function AppContent() {
   const file = useFileState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
+  const wysiwygRef = useRef<WysiwygEditorHandle>(null);
+
+  const isWysiwyg = file.activeTab?.editorMode === 'wysiwyg';
 
   // Capture the current editor cursor/scroll into the (about-to-leave) active
   // tab before switching, so when the user switches back we can restore it.
@@ -151,16 +158,20 @@ function AppContent() {
           handlePrevTab();
           break;
         case 'undo':
-          editorRef.current?.triggerUndo();
+          if (isWysiwyg) wysiwygRef.current?.triggerUndo();
+          else editorRef.current?.triggerUndo();
           break;
         case 'redo':
-          editorRef.current?.triggerRedo();
+          if (isWysiwyg) wysiwygRef.current?.triggerRedo();
+          else editorRef.current?.triggerRedo();
           break;
         case 'find':
-          editorRef.current?.triggerFind();
+          // Milkdown doesn't ship a built-in find UI; only the source editor
+          // has one for now. (Future: bridge a search box to ProseMirror.)
+          if (!isWysiwyg) editorRef.current?.triggerFind();
           break;
         case 'replace':
-          editorRef.current?.triggerReplace();
+          if (!isWysiwyg) editorRef.current?.triggerReplace();
           break;
         case 'font-zoom-in':
           editorRef.current?.zoomIn();
@@ -171,6 +182,14 @@ function AppContent() {
         case 'font-zoom-reset':
           editorRef.current?.zoomReset();
           break;
+        case 'source-mode':
+          file.setActiveEditorMode('source');
+          break;
+        case 'wysiwyg-mode':
+          file.setActiveEditorMode('wysiwyg');
+          break;
+        // 'split-mode' lands in RAISE-7 — accept the menu click without doing
+        // anything yet so the accelerator is reserved.
         default:
           break;
       }
@@ -178,6 +197,7 @@ function AppContent() {
     return off;
   }, [
     file,
+    isWysiwyg,
     handleNewFile,
     handleOpenFile,
     handleOpenPath,
@@ -247,12 +267,24 @@ function AppContent() {
       )}
       <main className="min-h-0 flex-1">
         {file.activeTab ? (
-          <SourceEditor
-            ref={editorRef}
-            content={file.activeTab.content}
-            onChange={file.setContent}
-            onCursorChange={setCursor}
-          />
+          file.activeTab.editorMode === 'wysiwyg' ? (
+            // Key by tab id + load epoch so a tab switch OR a re-open of the
+            // same file (loadFile bumps loadEpoch) fully remounts Milkdown
+            // with the new content (the editor is uncontrolled-with-reset).
+            <WysiwygEditor
+              key={`${file.activeTab.id}-${file.activeTab.loadEpoch}`}
+              ref={wysiwygRef}
+              content={file.activeTab.content}
+              onChange={file.setContent}
+            />
+          ) : (
+            <SourceEditor
+              ref={editorRef}
+              content={file.activeTab.content}
+              onChange={file.setContent}
+              onCursorChange={setCursor}
+            />
+          )
         ) : (
           <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
@@ -262,7 +294,13 @@ function AppContent() {
           line={cursor.line}
           column={cursor.column}
           wordCount={wordCount}
-          mode="Source"
+          mode={
+            file.activeTab.editorMode === 'wysiwyg'
+              ? 'WYSIWYG'
+              : file.activeTab.editorMode === 'split'
+                ? 'Split'
+                : 'Source'
+          }
         />
       )}
     </div>
