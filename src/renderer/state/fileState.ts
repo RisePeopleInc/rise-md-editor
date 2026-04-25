@@ -25,6 +25,12 @@ export interface Tab {
   cursorPosition: CursorPos;
   scrollPosition: number;
   editorMode: EditorMode;
+  /**
+   * Bumped each time `loadFile` reloads this tab from disk while it is
+   * already open. Editors that are uncontrolled-with-reset (Milkdown) key
+   * off `${id}-${loadEpoch}` so a re-open visibly refreshes the document.
+   */
+  loadEpoch: number;
 }
 
 export interface FileContextValue {
@@ -79,6 +85,7 @@ function makeTab(path: string | null, content: string): Tab {
     cursorPosition: { line: 1, column: 1 },
     scrollPosition: 0,
     editorMode: 'source',
+    loadEpoch: 0,
   };
 }
 
@@ -157,7 +164,15 @@ export function FileProvider({ children }: FileProviderProps) {
         writeTabs(
           tabsRef.current.map((t) =>
             t.id === existing.id
-              ? { ...t, content: nextContent, savedContent: nextContent }
+              ? {
+                  ...t,
+                  content: nextContent,
+                  savedContent: nextContent,
+                  // Bump epoch so editors keyed by id+epoch (e.g., Milkdown,
+                  // which reads its initial value once) remount and pick up
+                  // the refreshed content.
+                  loadEpoch: t.loadEpoch + 1,
+                }
               : t,
           ),
         );

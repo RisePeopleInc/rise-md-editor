@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useInstance } from '@milkdown/react';
 import { callCommand } from '@milkdown/utils';
 import { editorViewCtx } from '@milkdown/core';
@@ -129,13 +129,17 @@ export function Toolbar() {
   }, [get]);
 
   // Subscribe to selection / doc changes so the toolbar reflects what the
-  // cursor is actually over. Listeners are auto-cleaned when the editor
-  // unmounts, so no explicit teardown needed.
+  // cursor is actually over. Milkdown's ListenerManager has no unsubscribe
+  // API — every call appends — so we guard registration on the editor
+  // identity to avoid stacking listeners if this effect re-runs.
+  const registeredFor = useRef<unknown>(null);
   useEffect(() => {
     if (loading) return;
     const editor = get();
     if (!editor) return;
     refreshState();
+    if (registeredFor.current === editor) return;
+    registeredFor.current = editor;
     editor.action((ctx) => {
       const ll = ctx.get(listenerCtx);
       ll.selectionUpdated(() => refreshState());
