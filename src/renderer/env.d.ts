@@ -4,9 +4,9 @@ export type MenuActionType =
   | 'new'
   | 'open-file'
   | 'open-folder'
+  | 'open-path'
   | 'save'
   | 'save-as'
-  | 'open-recent'
   | 'undo'
   | 'redo'
   | 'find'
@@ -21,19 +21,39 @@ export type MenuActionType =
   | 'font-zoom-reset'
   | 'about';
 
+export interface OpenedFile {
+  path: string;
+  content: string;
+}
+
 export interface MenuActionEvent {
   type: MenuActionType;
-  payload?: { path?: string; clear?: boolean };
+  payload?: { path?: string; content?: string };
+}
+
+export interface RaiseFilesApi {
+  open: () => Promise<OpenedFile | null>;
+  openPath: (filePath: string) => Promise<OpenedFile>;
+  save: (filePath: string, content: string) => Promise<void>;
+  saveAs: (content: string, suggestedName?: string) => Promise<{ path: string } | null>;
+  newFile: () => Promise<{ path: null; content: string }>;
+  getPathForFile: (file: File) => string;
 }
 
 export interface RaiseApi {
-  openFile: () => Promise<string | null>;
   openFolder: () => Promise<string | null>;
-  setTitle: (filename: string | null) => void;
+  confirmUnsavedChanges: (filename: string) => Promise<'save' | 'discard' | 'cancel'>;
+  files: RaiseFilesApi;
+  pushFileState: (state: {
+    path: string | null;
+    content: string;
+    isDirty: boolean;
+  }) => void;
+  getRecent: () => Promise<string[]>;
   addRecent: (filePath: string) => void;
   clearRecent: () => void;
-  getRecent: () => Promise<string[]>;
   onMenuAction: (callback: (event: MenuActionEvent) => void) => () => void;
+  onFileSavedAs: (callback: (event: { path: string }) => void) => () => void;
 }
 
 declare global {

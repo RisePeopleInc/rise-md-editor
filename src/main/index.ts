@@ -1,12 +1,24 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
+import * as fileOps from './fileOperations';
+import * as recentStore from './recentFilesStore';
 
 const APP_NAME = 'rAIse';
-const MAX_RECENT = 10;
 
 let mainWindow: BrowserWindow | null = null;
-let recentFiles: string[] = [];
+
+// The renderer is the source of truth for content and dirtiness; it pushes
+// updates here so close-with-unsaved and the live window title can react.
+const fileState = {
+  path: null as string | null,
+  content: '',
+  isDirty: false,
+};
+
+// Sentinel used to let close() proceed once the unsaved-changes flow has
+// resolved (Save succeeded or user chose Don't Save).
+let allowClose = false;
 
 app.setName(APP_NAME);
 app.setAboutPanelOptions({
@@ -19,62 +31,72 @@ function getWindow(): BrowserWindow | null {
   return mainWindow;
 }
 
-function setTitle(filename: string | null): void {
-  if (!mainWindow) return;
-  mainWindow.setTitle(filename ? `${filename} — ${APP_NAME}` : APP_NAME);
+function displayName(): string {
+  return fileState.path ? path.basename(fileState.path) : 'Untitled';
 }
 
-function addRecent(filePath: string): void {
-  recentFiles = [filePath, ...recentFiles.filter((p) => p !== filePath)].slice(0, MAX_RECENT);
+function refreshTitle(): void {
+  if (!mainWindow) return;
+  const dot = fileState.isDirty ? '• ' : '';
+  mainWindow.setTitle(`${dot}${displayName()} — ${APP_NAME}`);
+  mainWindow.setDocumentEdited(fileState.isDirty);
+  mainWindow.setRepresentedFilename(fileState.path ?? '');
+}
+
+function rememberRecent(filePath: string): void {
+  recentStore.addRecent(filePath);
   app.addRecentDocument(filePath);
   rebuildMenu();
 }
 
-function clearRecent(): void {
-  recentFiles = [];
-  app.clearRecentDocuments();
-  rebuildMenu();
-}
-
-async function openFileDialog(): Promise<void> {
-  if (!mainWindow) return;
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Open File',
-    properties: ['openFile'],
-  });
-  if (result.canceled || result.filePaths.length === 0) return;
-  const filePath = result.filePaths[0]!;
-  addRecent(filePath);
-  mainWindow.webContents.send('menu:action', {
-    type: 'open-file',
-    payload: { path: filePath },
-  });
-}
-
-async function openFolderDialog(): Promise<void> {
-  if (!mainWindow) return;
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Open Folder',
-    properties: ['openDirectory'],
-  });
-  if (result.canceled || result.filePaths.length === 0) return;
-  const folderPath = result.filePaths[0]!;
-  mainWindow.webContents.send('menu:action', {
-    type: 'open-folder',
-    payload: { path: folderPath },
-  });
-}
-
 const menuDeps: MenuDeps = {
   getWindow,
-  getRecentFiles: () => recentFiles,
+  getRecentFiles: () => recentStore.getRecent(),
   rebuildMenu: () => rebuildMenu(),
-  openFileDialog,
-  openFolderDialog,
+  clearRecent: () => {
+    recentStore.clearRecent();
+    app.clearRecentDocuments();
+    rebuildMenu();
+  },
 };
 
 function rebuildMenu(): void {
   Menu.setApplicationMenu(buildMenu(menuDeps));
+}
+
+type UnsavedChoice = 'save' | 'discard' | 'cancel';
+
+async function promptUnsavedChanges(filename = displayName()): Promise<UnsavedChoice> {
+  if (!mainWindow) return 'discard';
+  const choice = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    message: `Do you want to save changes to ${filename}?`,
+    detail: "Your changes will be lost if you don't save them.",
+  });
+  if (choice.response === 0) return 'save';
+  if (choice.response === 1) return 'discard';
+  return 'cancel';
+}
+
+async function saveCachedFile(): Promise<boolean> {
+  if (!mainWindow) return false;
+  if (fileState.path) {
+    await fileOps.saveFile(fileState.path, fileState.content);
+    return true;
+  }
+  const result = await fileOps.saveFileAs(
+    mainWindow,
+    fileState.content,
+    fileOps.suggestedNameFor(fileState.path),
+  );
+  if (!result) return false;
+  fileState.path = result.path;
+  rememberRecent(result.path);
+  mainWindow.webContents.send('file:saved-as', { path: result.path });
+  return true;
 }
 
 function createWindow(): void {
@@ -96,12 +118,33 @@ function createWindow(): void {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+
+  mainWindow.on('close', (e) => {
+    if (allowClose || !fileState.isDirty) return;
+    e.preventDefault();
+    void (async () => {
+      const choice = await promptUnsavedChanges();
+      if (choice === 'cancel') return;
+      if (choice === 'save') {
+        const ok = await saveCachedFile();
+        if (!ok) return;
+      }
+      allowClose = true;
+      mainWindow?.close();
+    })();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
-  // electron-vite injects ELECTRON_RENDERER_URL in dev for HMR; in prod we
-  // load the built HTML from disk.
+  // Block default file:// navigation for files dropped on the window.
+  // Drag-and-drop opens go through the renderer + files.openPath flow so
+  // they stream through the same recent-files / state pipeline.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith('file://')) e.preventDefault();
+  });
+
   const devUrl = process.env['ELECTRON_RENDERER_URL'];
   if (devUrl) {
     mainWindow.loadURL(devUrl);
@@ -123,17 +166,34 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-ipcMain.handle('dialog:open-file', async () => {
+// File operations exposed to the renderer. Recent-files tracking happens
+// renderer-side after a successful load — that way a canceled unsaved-changes
+// prompt doesn't pollute the recents list with files that were never opened.
+ipcMain.handle('files:open', async () => {
   if (!mainWindow) return null;
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Open File',
-    properties: ['openFile'],
-  });
-  if (result.canceled || result.filePaths.length === 0) return null;
-  const filePath = result.filePaths[0]!;
-  addRecent(filePath);
-  return filePath;
+  return fileOps.openFile(mainWindow);
 });
+
+ipcMain.handle('files:open-path', async (_, filePath: string) => fileOps.openPath(filePath));
+
+ipcMain.handle('files:save', async (_, filePath: string, content: string) => {
+  await fileOps.saveFile(filePath, content);
+});
+
+ipcMain.handle(
+  'files:save-as',
+  async (_, content: string, suggestedName?: string) => {
+    if (!mainWindow) return null;
+    return fileOps.saveFileAs(mainWindow, content, suggestedName);
+  },
+);
+
+ipcMain.handle('files:new', () => fileOps.newFile());
+
+ipcMain.handle(
+  'dialog:confirm-unsaved',
+  async (_, filename?: string): Promise<UnsavedChoice> => promptUnsavedChanges(filename),
+);
 
 ipcMain.handle('dialog:open-folder', async () => {
   if (!mainWindow) return null;
@@ -145,16 +205,53 @@ ipcMain.handle('dialog:open-folder', async () => {
   return result.filePaths[0]!;
 });
 
-ipcMain.on('window:set-title', (_, filename: string | null) => {
-  setTitle(filename);
-});
+// Renderer pushes its file state on every meaningful change
+ipcMain.on(
+  'file:state',
+  (_, state: { path: string | null; content: string; isDirty: boolean }) => {
+    fileState.path = state.path;
+    fileState.content = state.content;
+    fileState.isDirty = state.isDirty;
+    refreshTitle();
+  },
+);
 
-ipcMain.on('recent:add', (_, filePath: string) => {
-  addRecent(filePath);
-});
-
+// Recent files
+ipcMain.handle('recent:get', () => recentStore.getRecent());
+ipcMain.on('recent:add', (_, filePath: string) => rememberRecent(filePath));
 ipcMain.on('recent:clear', () => {
-  clearRecent();
+  recentStore.clearRecent();
+  app.clearRecentDocuments();
+  rebuildMenu();
 });
 
-ipcMain.handle('recent:get', () => recentFiles);
+// macOS: files passed via "Open With", Finder, or the dock arrive here.
+// Buffer until the renderer is loaded, then dispatch through the same
+// open-path flow used by the Recent Files menu (dirty-guard included).
+const pendingOpens: string[] = [];
+
+function flushPendingOpens(win: BrowserWindow): void {
+  while (pendingOpens.length > 0) {
+    const filePath = pendingOpens.shift()!;
+    win.webContents.send('menu:action', {
+      type: 'open-path',
+      payload: { path: filePath },
+    });
+  }
+}
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (mainWindow && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('menu:action', {
+      type: 'open-path',
+      payload: { path: filePath },
+    });
+  } else {
+    pendingOpens.push(filePath);
+  }
+});
+
+app.on('browser-window-created', (_, win) => {
+  win.webContents.once('did-finish-load', () => flushPendingOpens(win));
+});

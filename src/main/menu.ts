@@ -5,9 +5,9 @@ export type MenuAction =
   | 'new'
   | 'open-file'
   | 'open-folder'
+  | 'open-path'
   | 'save'
   | 'save-as'
-  | 'open-recent'
   | 'undo'
   | 'redo'
   | 'find'
@@ -26,8 +26,7 @@ export interface MenuDeps {
   getWindow: () => BrowserWindow | null;
   getRecentFiles: () => string[];
   rebuildMenu: () => void;
-  openFileDialog: () => Promise<void>;
-  openFolderDialog: () => Promise<void>;
+  clearRecent: () => void;
 }
 
 const isMac = process.platform === 'darwin';
@@ -47,14 +46,12 @@ function buildRecentSubmenu(deps: MenuDeps): MenuItemConstructorOptions[] {
     ...recent.map<MenuItemConstructorOptions>((filePath) => ({
       label: path.basename(filePath),
       sublabel: filePath,
-      click: () => send(deps, 'open-recent', { path: filePath }),
+      click: () => send(deps, 'open-path', { path: filePath }),
     })),
     { type: 'separator' },
     {
       label: 'Clear Recent',
-      click: () => {
-        send(deps, 'open-recent', { clear: true });
-      },
+      click: () => deps.clearRecent(),
     },
   ];
 }
@@ -90,12 +87,12 @@ export function buildMenu(deps: MenuDeps): Menu {
         {
           label: 'Open File…',
           accelerator: 'CmdOrCtrl+O',
-          click: () => deps.openFileDialog(),
+          click: () => send(deps, 'open-file'),
         },
         {
           label: 'Open Folder…',
           accelerator: 'CmdOrCtrl+Shift+O',
-          click: () => deps.openFolderDialog(),
+          click: () => send(deps, 'open-folder'),
         },
         { type: 'separator' },
         {
