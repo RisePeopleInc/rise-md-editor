@@ -108,20 +108,40 @@ async function promptUnsavedChanges(filename = displayName()): Promise<UnsavedCh
 
 async function saveCachedFile(): Promise<boolean> {
   if (!mainWindow) return false;
-  if (fileState.path) {
-    await fileOps.saveFile(fileState.path, fileState.content);
+  // Snapshot the bytes we're about to write so the renderer can mark exactly
+  // those as the saved baseline (file:saved-as).
+  const bytes = fileState.content;
+  try {
+    if (fileState.path) {
+      await fileOps.saveFile(fileState.path, bytes);
+      mainWindow.webContents.send('file:saved-as', {
+        path: fileState.path,
+        content: bytes,
+      });
+      return true;
+    }
+    const result = await fileOps.saveFileAs(
+      mainWindow,
+      bytes,
+      fileOps.suggestedNameFor(fileState.path),
+    );
+    if (!result) return false;
+    fileState.path = result.path;
+    rememberRecent(result.path);
+    mainWindow.webContents.send('file:saved-as', {
+      path: result.path,
+      content: bytes,
+    });
     return true;
+  } catch (err) {
+    dialog.showMessageBox(mainWindow, {
+      type: 'error',
+      title: 'Could not save file',
+      message: 'Save failed',
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return false;
   }
-  const result = await fileOps.saveFileAs(
-    mainWindow,
-    fileState.content,
-    fileOps.suggestedNameFor(fileState.path),
-  );
-  if (!result) return false;
-  fileState.path = result.path;
-  rememberRecent(result.path);
-  mainWindow.webContents.send('file:saved-as', { path: result.path });
-  return true;
 }
 
 function createWindow(): void {
@@ -193,18 +213,51 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  rebuildMenu();
-  createWindow();
+// Find a markdown/text file argument among the platform's launch argv.
+// Skips the executable (or the script in dev) and any flag-style entries.
+function findFileArg(argv: readonly string[]): string | null {
+  const start = app.isPackaged ? 1 : 2;
+  for (let i = start; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a || a.startsWith('-')) continue;
+    if (/\.(md|markdown|txt)$/i.test(a)) return a;
+  }
+  return null;
+}
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Single-instance lock: a second launch with a file arg should focus the
+// existing window and load that file, not spawn a duplicate process.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    const filePath = findFileArg(argv);
+    if (filePath) dispatchMenuAction('open-path', { path: filePath });
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.whenReady().then(() => {
+    rebuildMenu();
+    createWindow();
+
+    // Win/Linux file-association launches deliver the path through argv
+    // (macOS uses app.on('open-file') instead — handled below).
+    const filePath = findFileArg(process.argv);
+    if (filePath) dispatchMenuAction('open-path', { path: filePath });
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}
 
 // File operations exposed to the renderer. Recent-files tracking happens
 // renderer-side after a successful load — that way a canceled unsaved-changes
@@ -228,12 +281,20 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle('files:new', () => fileOps.newFile());
-
 ipcMain.handle(
   'dialog:confirm-unsaved',
   async (_, filename?: string): Promise<UnsavedChoice> => promptUnsavedChanges(filename),
 );
+
+ipcMain.on('dialog:show-error', (_, payload: { title: string; message: string }) => {
+  if (!mainWindow) return;
+  dialog.showMessageBox(mainWindow, {
+    type: 'error',
+    title: payload.title,
+    message: payload.title,
+    detail: payload.message,
+  });
+});
 
 ipcMain.handle('dialog:open-folder', async () => {
   if (!mainWindow) return null;
@@ -245,16 +306,22 @@ ipcMain.handle('dialog:open-folder', async () => {
   return result.filePaths[0]!;
 });
 
-// Renderer pushes its file state on every meaningful change
+// Renderer pushes path + isDirty synchronously (every change) so the close
+// handler can never read a stale "clean" flag immediately after a keystroke.
 ipcMain.on(
-  'file:state',
-  (_, state: { path: string | null; content: string; isDirty: boolean }) => {
-    fileState.path = state.path;
-    fileState.content = state.content;
-    fileState.isDirty = state.isDirty;
+  'file:meta',
+  (_, meta: { path: string | null; isDirty: boolean }) => {
+    fileState.path = meta.path;
+    fileState.isDirty = meta.isDirty;
     refreshTitle();
   },
 );
+
+// Content is debounced — only consumed by the Save-on-close path, so a small
+// lag here just costs a few keystrokes, never the dirty-prompt guarantee.
+ipcMain.on('file:content', (_, content: string) => {
+  fileState.content = content;
+});
 
 // Renderer signals it has subscribed to menu:action and is safe to dispatch
 // queued actions. Sent every time the listener is re-attached (mount, HMR).

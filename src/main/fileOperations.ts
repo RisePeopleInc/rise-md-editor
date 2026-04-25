@@ -46,10 +46,6 @@ export async function saveFileAs(
   return { path: result.filePath };
 }
 
-export function newFile(): { path: null; content: string } {
-  return { path: null, content: '' };
-}
-
 export function suggestedNameFor(filePath: string | null): string {
   if (!filePath) return 'Untitled.md';
   return path.basename(filePath);

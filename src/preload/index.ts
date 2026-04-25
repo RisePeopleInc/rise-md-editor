@@ -42,8 +42,6 @@ const files = {
     suggestedName?: string,
   ): Promise<{ path: string } | null> =>
     ipcRenderer.invoke('files:save-as', content, suggestedName),
-  newFile: (): Promise<{ path: null; content: string }> =>
-    ipcRenderer.invoke('files:new'),
   // webUtils.getPathForFile replaces the old File.path getter (removed in
   // Electron 32+) — needed for drag-and-drop in the sandboxed renderer.
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
@@ -53,16 +51,23 @@ const api = {
   openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:open-folder'),
   confirmUnsavedChanges: (filename: string): Promise<'save' | 'discard' | 'cancel'> =>
     ipcRenderer.invoke('dialog:confirm-unsaved', filename),
+  showError: (title: string, message: string): void => {
+    ipcRenderer.send('dialog:show-error', { title, message });
+  },
   notifyReady: (): void => {
     ipcRenderer.send('renderer:ready');
   },
   files,
-  pushFileState: (state: {
-    path: string | null;
-    content: string;
-    isDirty: boolean;
-  }): void => {
-    ipcRenderer.send('file:state', state);
+  // Synchronous push of cheap signal (path + isDirty). Drives the window
+  // title and the close-with-unsaved decision, so it must never lag behind
+  // a keystroke.
+  pushFileMeta: (meta: { path: string | null; isDirty: boolean }): void => {
+    ipcRenderer.send('file:meta', meta);
+  },
+  // Debounced push of the editor content; consumed by the Save-on-close
+  // path. A small lag here costs a few keystrokes, not the dirty guarantee.
+  pushFileContent: (content: string): void => {
+    ipcRenderer.send('file:content', content);
   },
   getRecent: (): Promise<string[]> => ipcRenderer.invoke('recent:get'),
   addRecent: (filePath: string): void => {
@@ -79,9 +84,13 @@ const api = {
       ipcRenderer.off('menu:action', handler);
     };
   },
-  onFileSavedAs: (callback: (event: { path: string }) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, event: { path: string }): void =>
-      callback(event);
+  onFileSavedAs: (
+    callback: (event: { path: string; content: string }) => void,
+  ): (() => void) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      event: { path: string; content: string },
+    ): void => callback(event);
     ipcRenderer.on('file:saved-as', handler);
     return () => {
       ipcRenderer.off('file:saved-as', handler);

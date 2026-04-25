@@ -53,19 +53,29 @@ export function FileProvider({ children }: FileProviderProps) {
 
   const isDirty = hasDocument && content !== savedContent;
 
-  // Mirror state up to main (debounced) so the window title and the
-  // close-with-unsaved flow have an up-to-date snapshot to work with.
+  // Push the cheap signal (path + isDirty) synchronously on every change so
+  // main's close-with-unsaved decision can never read a stale "clean" flag
+  // immediately after a keystroke. The window-title update rides on the
+  // same channel — also wants to stay in sync with isDirty.
+  useEffect(() => {
+    if (!hasDocument) return;
+    window.api.pushFileMeta({ path, isDirty });
+  }, [hasDocument, path, isDirty]);
+
+  // Content can be debounced — it's only consumed by the Save-on-close path
+  // and a small lag there costs at most a few keystrokes, not the whole
+  // dirty-state guarantee.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!hasDocument) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      window.api.pushFileState({ path, content, isDirty });
+      window.api.pushFileContent(content);
     }, 150);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [hasDocument, path, content, isDirty]);
+  }, [hasDocument, content]);
 
   const loadFile = useCallback((nextPath: string, nextContent: string) => {
     setHasDocument(true);
@@ -86,19 +96,35 @@ export function FileProvider({ children }: FileProviderProps) {
   }, []);
 
   const saveAs = useCallback(async (): Promise<boolean> => {
-    const result = await window.api.files.saveAs(content, basename(path));
-    if (!result) return false;
-    setPath(result.path);
-    setSavedContent(content);
-    window.api.addRecent(result.path);
-    return true;
+    try {
+      const result = await window.api.files.saveAs(content, basename(path));
+      if (!result) return false;
+      setPath(result.path);
+      setSavedContent(content);
+      window.api.addRecent(result.path);
+      return true;
+    } catch (err) {
+      window.api.showError(
+        'Could not save file',
+        err instanceof Error ? err.message : String(err),
+      );
+      return false;
+    }
   }, [content, path]);
 
   const save = useCallback(async (): Promise<boolean> => {
     if (!path) return saveAs();
-    await window.api.files.save(path, content);
-    setSavedContent(content);
-    return true;
+    try {
+      await window.api.files.save(path, content);
+      setSavedContent(content);
+      return true;
+    } catch (err) {
+      window.api.showError(
+        'Could not save file',
+        err instanceof Error ? err.message : String(err),
+      );
+      return false;
+    }
   }, [content, path, saveAs]);
 
   const withDirtyGuard = useCallback(
@@ -118,11 +144,13 @@ export function FileProvider({ children }: FileProviderProps) {
   );
 
   // If main saves on our behalf during the close-with-unsaved flow, it will
-  // tell us the new path — useful if the window survives (e.g. cancel later).
+  // tell us the new path and exact bytes written so the renderer can update
+  // its baseline. Currently the window is closing when this fires, but
+  // future "save without close" flows will need the correct savedContent.
   useEffect(() => {
-    const off = window.api.onFileSavedAs(({ path: savedPath }) => {
+    const off = window.api.onFileSavedAs(({ path: savedPath, content: savedBytes }) => {
       setPath(savedPath);
-      setSavedContent((prev) => prev);
+      setSavedContent(savedBytes);
     });
     return off;
   }, []);

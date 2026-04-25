@@ -36,25 +36,24 @@ export interface RaiseFilesApi {
   openPath: (filePath: string) => Promise<OpenedFile>;
   save: (filePath: string, content: string) => Promise<void>;
   saveAs: (content: string, suggestedName?: string) => Promise<{ path: string } | null>;
-  newFile: () => Promise<{ path: null; content: string }>;
   getPathForFile: (file: File) => string;
 }
 
 export interface RaiseApi {
   openFolder: () => Promise<string | null>;
   confirmUnsavedChanges: (filename: string) => Promise<'save' | 'discard' | 'cancel'>;
+  showError: (title: string, message: string) => void;
   notifyReady: () => void;
   files: RaiseFilesApi;
-  pushFileState: (state: {
-    path: string | null;
-    content: string;
-    isDirty: boolean;
-  }) => void;
+  pushFileMeta: (meta: { path: string | null; isDirty: boolean }) => void;
+  pushFileContent: (content: string) => void;
   getRecent: () => Promise<string[]>;
   addRecent: (filePath: string) => void;
   clearRecent: () => void;
   onMenuAction: (callback: (event: MenuActionEvent) => void) => () => void;
-  onFileSavedAs: (callback: (event: { path: string }) => void) => () => void;
+  onFileSavedAs: (
+    callback: (event: { path: string; content: string }) => void,
+  ) => () => void;
 }
 
 declare global {

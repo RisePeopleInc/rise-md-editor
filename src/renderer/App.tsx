@@ -39,7 +39,10 @@ function AppContent() {
           file.loadFile(result.path, result.content);
           window.api.addRecent(result.path);
         } catch (err) {
-          console.error('Failed to open file', filePath, err);
+          window.api.showError(
+            'Could not open file',
+            `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       });
     },
@@ -56,7 +59,9 @@ function AppContent() {
     });
   }, [file]);
 
-  // Drag-and-drop: dragging a markdown file onto the window opens it.
+  // Drag-and-drop: open the first matching file in the drop. Multi-file
+  // selection waits for the tab system (RAISE-5) — for now this is the
+  // intentional single-file fallback.
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
       e.preventDefault();
@@ -79,9 +84,7 @@ function AppContent() {
     };
   }, [handleOpenPath]);
 
-  // Menu IPC dispatch. notifyReady fires inside the same effect (after the
-  // listener is attached) so main can drain any actions it queued while the
-  // window was closed or the renderer was still mounting.
+  // Menu IPC dispatch.
   useEffect(() => {
     const off = window.api.onMenuAction((event: MenuActionEvent) => {
       switch (event.type) {
@@ -128,9 +131,15 @@ function AppContent() {
           break;
       }
     });
-    window.api.notifyReady();
     return off;
   }, [file, handleNewFile, handleOpenFile, handleOpenPath]);
+
+  // Signal readiness once on mount, after the menu listener effect above has
+  // attached. Effects run in declaration order, so the listener is bound by
+  // the time main drains its queue.
+  useEffect(() => {
+    window.api.notifyReady();
+  }, []);
 
   const wordCount = useMemo(() => countWords(file.content), [file.content]);
 
