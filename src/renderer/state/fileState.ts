@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -84,6 +85,19 @@ export function FileProvider({ children }: FileProviderProps) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
+  // Refs let actions (loadFile / closeTab) read the latest state after async
+  // gaps without re-creating the callback on every render — and let us avoid
+  // putting side-effect setStates inside the setTabs updater function, which
+  // React's strict-mode double-invoke can drop on the floor.
+  const tabsRef = useRef<Tab[]>([]);
+  const activeTabIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
     [tabs, activeTabId],
@@ -122,21 +136,26 @@ export function FileProvider({ children }: FileProviderProps) {
   }, []);
 
   const loadFile = useCallback((nextPath: string, nextContent: string) => {
-    setTabs((prev) => {
-      const existing = prev.find((t) => t.path === nextPath);
-      if (existing) {
-        setActiveTabId(existing.id);
-        // Refresh content from disk in case it changed externally.
-        return prev.map((t) =>
+    // IMPORTANT: don't put `setActiveTabId` inside `setTabs`'s updater — in
+    // strict-mode dev React invokes the updater twice and the side-effect
+    // setState can be dropped, leaving the new tab in the list with the OLD
+    // tab still active (the editor would stick on the previous file until
+    // the user clicked the tab manually).
+    const existing = tabsRef.current.find((t) => t.path === nextPath);
+    if (existing) {
+      setTabs((prev) =>
+        prev.map((t) =>
           t.id === existing.id
             ? { ...t, content: nextContent, savedContent: nextContent }
             : t,
-        );
-      }
-      const tab = makeTab(nextPath, nextContent);
-      setActiveTabId(tab.id);
-      return [...prev, tab];
-    });
+        ),
+      );
+      setActiveTabId(existing.id);
+      return;
+    }
+    const tab = makeTab(nextPath, nextContent);
+    setTabs((prev) => [...prev, tab]);
+    setActiveTabId(tab.id);
   }, []);
 
   const newFile = useCallback(() => {
@@ -271,7 +290,7 @@ export function FileProvider({ children }: FileProviderProps) {
 
   const closeTab = useCallback(
     async (id: string): Promise<boolean> => {
-      const tab = tabs.find((t) => t.id === id);
+      const tab = tabsRef.current.find((t) => t.id === id);
       if (!tab) return false;
       if (isTabDirty(tab)) {
         // Surface which tab the prompt is about — switch to it so the user
@@ -284,21 +303,22 @@ export function FileProvider({ children }: FileProviderProps) {
           if (!ok) return false;
         }
       }
-      setTabs((prev) => {
-        const idx = prev.findIndex((t) => t.id === id);
-        if (idx === -1) return prev;
-        const next = prev.slice();
-        next.splice(idx, 1);
-        if (id === activeTabId) {
-          // Pick neighbour: prefer the tab to the right, else the one before.
-          const newActive = next[idx] ?? next[idx - 1] ?? null;
-          setActiveTabId(newActive ? newActive.id : null);
-        }
-        return next;
-      });
+      // Re-read after the await so we work against the current state, then
+      // dispatch the tabs and active-id updates separately (no side-effects
+      // inside setTabs's updater — strict-mode-safe).
+      const fresh = tabsRef.current;
+      const idx = fresh.findIndex((t) => t.id === id);
+      if (idx === -1) return false;
+      const next = fresh.slice();
+      next.splice(idx, 1);
+      setTabs(next);
+      if (id === activeTabIdRef.current) {
+        const neighbour = next[idx] ?? next[idx - 1] ?? null;
+        setActiveTabId(neighbour ? neighbour.id : null);
+      }
       return true;
     },
-    [tabs, save, activeTabId],
+    [save],
   );
 
   const closeActiveTab = useCallback(async (): Promise<boolean> => {

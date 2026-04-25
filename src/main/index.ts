@@ -30,6 +30,14 @@ function resetFileState(): void {
 let rendererReady = false;
 const pendingMenuActions: Array<{ type: string; payload?: unknown }> = [];
 
+// Set by `before-quit` and consumed by the close handler so a dirty Cmd+Q
+// resolves the prompt and then resumes the quit (instead of silently leaving
+// the macOS app running with no windows).
+let quitting = false;
+app.on('before-quit', () => {
+  quitting = true;
+});
+
 function dispatchMenuAction(type: string, payload?: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
     mainWindow.webContents.send('menu:action', { type, payload });
@@ -196,6 +204,10 @@ function createWindow(): void {
   mainWindow.on('close', (e) => {
     if (allowClose || fileState.dirtyCount === 0) return;
     e.preventDefault();
+    // Snapshot+consume so a Cancel doesn't leave the flag tainting the next
+    // window-only close (red X / Cmd+W) into a full app quit.
+    const wasQuitting = quitting;
+    quitting = false;
     void (async () => {
       const choice = await promptCloseWithUnsavedTabs(fileState.dirtyCount);
       if (choice === 'cancel') return;
@@ -204,7 +216,13 @@ function createWindow(): void {
         if (!ok) return;
       }
       allowClose = true;
-      mainWindow?.close();
+      // If the user originally hit Cmd+Q we need to resume the quit; just
+      // closing this window would leave the macOS app running with no UI.
+      if (wasQuitting) {
+        app.quit();
+      } else {
+        mainWindow?.close();
+      }
     })();
   });
 
