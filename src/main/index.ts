@@ -16,9 +16,33 @@ const fileState = {
   isDirty: false,
 };
 
-// Sentinel used to let close() proceed once the unsaved-changes flow has
-// resolved (Save succeeded or user chose Don't Save).
-let allowClose = false;
+function resetFileState(): void {
+  fileState.path = null;
+  fileState.content = '';
+  fileState.isDirty = false;
+}
+
+// Menu actions are queued until the renderer signals it has subscribed to
+// menu:action — that lets us safely re-open a closed window from the menu
+// (e.g. macOS File→New after Cmd+W) and replay the click once React mounts.
+let rendererReady = false;
+const pendingMenuActions: Array<{ type: string; payload?: unknown }> = [];
+
+function dispatchMenuAction(type: string, payload?: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
+    mainWindow.webContents.send('menu:action', { type, payload });
+    return;
+  }
+  pendingMenuActions.push({ type, payload });
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+}
+
+function drainPendingMenuActions(): void {
+  if (!mainWindow) return;
+  while (pendingMenuActions.length > 0) {
+    mainWindow.webContents.send('menu:action', pendingMenuActions.shift()!);
+  }
+}
 
 app.setName(APP_NAME);
 app.setAboutPanelOptions({
@@ -53,6 +77,7 @@ const menuDeps: MenuDeps = {
   getWindow,
   getRecentFiles: () => recentStore.getRecent(),
   rebuildMenu: () => rebuildMenu(),
+  dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
     app.clearRecentDocuments();
@@ -100,6 +125,13 @@ async function saveCachedFile(): Promise<boolean> {
 }
 
 function createWindow(): void {
+  // Per-window flag — never leak across windows, otherwise a "Don't Save"
+  // discard on the first window would silently bypass the prompt on a
+  // future window's close.
+  let allowClose = false;
+
+  rendererReady = false;
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -119,6 +151,12 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
+  // The renderer must re-signal readiness after any reload (HMR full-page,
+  // Cmd+R, etc.) so queued dispatches don't fire into a half-mounted page.
+  mainWindow.webContents.on('did-start-loading', () => {
+    rendererReady = false;
+  });
+
   mainWindow.on('close', (e) => {
     if (allowClose || !fileState.isDirty) return;
     e.preventDefault();
@@ -136,6 +174,8 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    rendererReady = false;
+    resetFileState();
   });
 
   // Block default file:// navigation for files dropped on the window.
@@ -216,6 +256,13 @@ ipcMain.on(
   },
 );
 
+// Renderer signals it has subscribed to menu:action and is safe to dispatch
+// queued actions. Sent every time the listener is re-attached (mount, HMR).
+ipcMain.on('renderer:ready', () => {
+  rendererReady = true;
+  drainPendingMenuActions();
+});
+
 // Recent files
 ipcMain.handle('recent:get', () => recentStore.getRecent());
 ipcMain.on('recent:add', (_, filePath: string) => rememberRecent(filePath));
@@ -226,32 +273,9 @@ ipcMain.on('recent:clear', () => {
 });
 
 // macOS: files passed via "Open With", Finder, or the dock arrive here.
-// Buffer until the renderer is loaded, then dispatch through the same
-// open-path flow used by the Recent Files menu (dirty-guard included).
-const pendingOpens: string[] = [];
-
-function flushPendingOpens(win: BrowserWindow): void {
-  while (pendingOpens.length > 0) {
-    const filePath = pendingOpens.shift()!;
-    win.webContents.send('menu:action', {
-      type: 'open-path',
-      payload: { path: filePath },
-    });
-  }
-}
-
+// Funnel through the same dispatch — it queues until the renderer is ready
+// and reopens the window if needed.
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  if (mainWindow && !mainWindow.webContents.isLoading()) {
-    mainWindow.webContents.send('menu:action', {
-      type: 'open-path',
-      payload: { path: filePath },
-    });
-  } else {
-    pendingOpens.push(filePath);
-  }
-});
-
-app.on('browser-window-created', (_, win) => {
-  win.webContents.once('did-finish-load', () => flushPendingOpens(win));
+  dispatchMenuAction('open-path', { path: filePath });
 });

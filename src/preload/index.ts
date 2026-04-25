@@ -53,6 +53,9 @@ const api = {
   openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:open-folder'),
   confirmUnsavedChanges: (filename: string): Promise<'save' | 'discard' | 'cancel'> =>
     ipcRenderer.invoke('dialog:confirm-unsaved', filename),
+  notifyReady: (): void => {
+    ipcRenderer.send('renderer:ready');
+  },
   files,
   pushFileState: (state: {
     path: string | null;

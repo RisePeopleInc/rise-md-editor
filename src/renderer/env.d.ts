@@ -43,6 +43,7 @@ export interface RaiseFilesApi {
 export interface RaiseApi {
   openFolder: () => Promise<string | null>;
   confirmUnsavedChanges: (filename: string) => Promise<'save' | 'discard' | 'cancel'>;
+  notifyReady: () => void;
   files: RaiseFilesApi;
   pushFileState: (state: {
     path: string | null;

@@ -79,7 +79,9 @@ function AppContent() {
     };
   }, [handleOpenPath]);
 
-  // Menu IPC dispatch.
+  // Menu IPC dispatch. notifyReady fires inside the same effect (after the
+  // listener is attached) so main can drain any actions it queued while the
+  // window was closed or the renderer was still mounting.
   useEffect(() => {
     const off = window.api.onMenuAction((event: MenuActionEvent) => {
       switch (event.type) {
@@ -126,6 +128,7 @@ function AppContent() {
           break;
       }
     });
+    window.api.notifyReady();
     return off;
   }, [file, handleNewFile, handleOpenFile, handleOpenPath]);
 

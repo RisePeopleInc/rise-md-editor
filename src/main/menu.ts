@@ -26,15 +26,19 @@ export interface MenuDeps {
   getWindow: () => BrowserWindow | null;
   getRecentFiles: () => string[];
   rebuildMenu: () => void;
+  /**
+   * Dispatch a menu action. The implementation is responsible for queuing and
+   * (if needed) reopening the window — never short-circuits on a missing
+   * window, so File→New / File→Open work after Cmd+W on macOS.
+   */
+  dispatch: (action: MenuAction, payload?: unknown) => void;
   clearRecent: () => void;
 }
 
 const isMac = process.platform === 'darwin';
 
 function send(deps: MenuDeps, action: MenuAction, payload?: unknown): void {
-  const win = deps.getWindow();
-  if (!win) return;
-  win.webContents.send('menu:action', { type: action, payload });
+  deps.dispatch(action, payload);
 }
 
 function buildRecentSubmenu(deps: MenuDeps): MenuItemConstructorOptions[] {
