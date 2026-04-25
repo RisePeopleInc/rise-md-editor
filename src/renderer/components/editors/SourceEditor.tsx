@@ -30,6 +30,11 @@ interface SourceEditorProps {
   content: string;
   onChange: (value: string) => void;
   onCursorChange?: (position: CursorPosition) => void;
+  /**
+   * Fires whenever Monaco's vertical scroll position changes. Used by Split
+   * mode to drive proportional preview-pane scroll sync.
+   */
+  onScrollChange?: (scrollTop: number, scrollHeight: number) => void;
 }
 
 const MONO_STACK =
@@ -47,8 +52,18 @@ const EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   tabSize: 2,
 };
 
-export function SourceEditor({ ref, content, onChange, onCursorChange }: SourceEditorProps) {
+export function SourceEditor({
+  ref,
+  content,
+  onChange,
+  onCursorChange,
+  onScrollChange,
+}: SourceEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  // Hold the latest callback so the editor's scroll listener (registered
+  // once on mount) always invokes the current handler.
+  const onScrollChangeRef = useRef(onScrollChange);
+  onScrollChangeRef.current = onScrollChange;
 
   const runAction = (id: string): void => {
     const ed = editorRef.current;
@@ -97,6 +112,9 @@ export function SourceEditor({ ref, content, onChange, onCursorChange }: SourceE
     }
     instance.onDidChangeCursorPosition((e) => {
       onCursorChange?.({ line: e.position.lineNumber, column: e.position.column });
+    });
+    instance.onDidScrollChange((e) => {
+      onScrollChangeRef.current?.(e.scrollTop, e.scrollHeight);
     });
   };
 

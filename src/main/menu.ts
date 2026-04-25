@@ -19,6 +19,7 @@ export type MenuAction =
   | 'wysiwyg-mode'
   | 'source-mode'
   | 'split-mode'
+  | 'cycle-mode'
   | 'toggle-theme'
   | 'font-zoom-in'
   | 'font-zoom-out'
@@ -187,6 +188,11 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Split Mode',
           accelerator: 'CmdOrCtrl+3',
           click: () => send(deps, 'split-mode'),
+        },
+        {
+          label: 'Cycle Mode',
+          accelerator: 'CmdOrCtrl+\\',
+          click: () => send(deps, 'cycle-mode'),
         },
         { type: 'separator' },
         {

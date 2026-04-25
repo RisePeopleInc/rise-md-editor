@@ -2,16 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { StatusBar } from './components/StatusBar';
 import { TabBar } from './components/TabBar';
+import { EditorContainer } from './components/editors/EditorContainer';
 import {
-  SourceEditor,
   type CursorPosition,
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
-import {
-  WysiwygEditor,
-  type WysiwygEditorHandle,
-} from './components/editors/WysiwygEditor';
-import { FileProvider, useFileState } from './state/fileState';
+import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
+import { FileProvider, useFileState, type EditorMode } from './state/fileState';
 import type { MenuActionEvent } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
@@ -21,6 +18,20 @@ function countWords(text: string): number {
   return matches ? matches.length : 0;
 }
 
+// Cycle order for Cmd+\: WYSIWYG → Source → Split → WYSIWYG.
+const MODE_CYCLE: EditorMode[] = ['wysiwyg', 'source', 'split'];
+
+function nextMode(mode: EditorMode): EditorMode {
+  const idx = MODE_CYCLE.indexOf(mode);
+  return MODE_CYCLE[(idx + 1) % MODE_CYCLE.length] ?? 'wysiwyg';
+}
+
+function modeLabel(mode: EditorMode): 'Source' | 'WYSIWYG' | 'Split' {
+  if (mode === 'wysiwyg') return 'WYSIWYG';
+  if (mode === 'split') return 'Split';
+  return 'Source';
+}
+
 function AppContent() {
   const file = useFileState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
@@ -28,9 +39,13 @@ function AppContent() {
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
 
   const isWysiwyg = file.activeTab?.editorMode === 'wysiwyg';
+  // Source-style editor (Monaco) drives undo/redo for both Source AND Split.
+  const isMonacoActive = !isWysiwyg;
 
-  // Capture the current editor cursor/scroll into the (about-to-leave) active
-  // tab before switching, so when the user switches back we can restore it.
+  // Capture the current source-editor cursor/scroll into the (about-to-leave)
+  // active tab before switching, so a switch back can restore. Only Monaco
+  // is exposed via editorRef today; Milkdown's cursor mapping is approximate
+  // and intentionally not preserved across mode swaps (per RAISE-7 spec).
   const captureActivePosition = useCallback(() => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -101,6 +116,19 @@ function AppContent() {
     file.prevTab();
   }, [file, captureActivePosition]);
 
+  const handleModeChange = useCallback(
+    (mode: EditorMode) => {
+      file.setActiveEditorMode(mode);
+    },
+    [file],
+  );
+
+  const handleCycleMode = useCallback(() => {
+    const current = file.activeTab?.editorMode;
+    if (!current) return;
+    file.setActiveEditorMode(nextMode(current));
+  }, [file]);
+
   // Drag-and-drop: open the first matching file in the drop. Multi-file
   // selection waits for proper multi-select semantics — for now we treat a
   // drop as a single-file open routed through the recent-files flow.
@@ -166,12 +194,12 @@ function AppContent() {
           else editorRef.current?.triggerRedo();
           break;
         case 'find':
-          // Milkdown doesn't ship a built-in find UI; only the source editor
-          // has one for now. (Future: bridge a search box to ProseMirror.)
-          if (!isWysiwyg) editorRef.current?.triggerFind();
+          // Milkdown ships no built-in find UI; only the Monaco-backed modes
+          // (Source / Split) get find / replace today.
+          if (isMonacoActive) editorRef.current?.triggerFind();
           break;
         case 'replace':
-          if (!isWysiwyg) editorRef.current?.triggerReplace();
+          if (isMonacoActive) editorRef.current?.triggerReplace();
           break;
         case 'font-zoom-in':
           editorRef.current?.zoomIn();
@@ -188,8 +216,12 @@ function AppContent() {
         case 'wysiwyg-mode':
           file.setActiveEditorMode('wysiwyg');
           break;
-        // 'split-mode' lands in RAISE-7 — accept the menu click without doing
-        // anything yet so the accelerator is reserved.
+        case 'split-mode':
+          file.setActiveEditorMode('split');
+          break;
+        case 'cycle-mode':
+          handleCycleMode();
+          break;
         default:
           break;
       }
@@ -198,12 +230,14 @@ function AppContent() {
   }, [
     file,
     isWysiwyg,
+    isMonacoActive,
     handleNewFile,
     handleOpenFile,
     handleOpenPath,
     handleCloseActive,
     handleNextTab,
     handlePrevTab,
+    handleCycleMode,
   ]);
 
   // Signal readiness once on mount, after the menu listener effect above has
@@ -232,10 +266,9 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handler, true);
   }, [handleNextTab, handlePrevTab]);
 
-  // Restore the active tab's cursor / scroll AFTER its content has been
-  // pushed to Monaco. Effect deps deliberately exclude the cursor/scroll
-  // values themselves so this only fires when the active tab changes —
-  // otherwise we'd snap the cursor back on every keystroke.
+  // Restore the active tab's cursor / scroll AFTER Monaco's content has been
+  // updated. Only meaningful for Monaco-backed modes. Effect deps deliberately
+  // exclude cursor/scroll values so this only fires on tab change.
   useEffect(() => {
     if (!file.activeTabId || !editorRef.current) return;
     const target = file.tabs.find((t) => t.id === file.activeTabId);
@@ -267,24 +300,14 @@ function AppContent() {
       )}
       <main className="min-h-0 flex-1">
         {file.activeTab ? (
-          file.activeTab.editorMode === 'wysiwyg' ? (
-            // Key by tab id + load epoch so a tab switch OR a re-open of the
-            // same file (loadFile bumps loadEpoch) fully remounts Milkdown
-            // with the new content (the editor is uncontrolled-with-reset).
-            <WysiwygEditor
-              key={`${file.activeTab.id}-${file.activeTab.loadEpoch}`}
-              ref={wysiwygRef}
-              content={file.activeTab.content}
-              onChange={file.setContent}
-            />
-          ) : (
-            <SourceEditor
-              ref={editorRef}
-              content={file.activeTab.content}
-              onChange={file.setContent}
-              onCursorChange={setCursor}
-            />
-          )
+          <EditorContainer
+            tab={file.activeTab}
+            onContentChange={file.setContent}
+            onModeChange={handleModeChange}
+            onCursorChange={setCursor}
+            sourceRef={editorRef}
+            wysiwygRef={wysiwygRef}
+          />
         ) : (
           <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
@@ -294,13 +317,7 @@ function AppContent() {
           line={cursor.line}
           column={cursor.column}
           wordCount={wordCount}
-          mode={
-            file.activeTab.editorMode === 'wysiwyg'
-              ? 'WYSIWYG'
-              : file.activeTab.editorMode === 'split'
-                ? 'Split'
-                : 'Source'
-          }
+          mode={modeLabel(file.activeTab.editorMode)}
         />
       )}
     </div>

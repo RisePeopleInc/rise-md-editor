@@ -84,7 +84,10 @@ function makeTab(path: string | null, content: string): Tab {
     savedContent: content,
     cursorPosition: { line: 1, column: 1 },
     scrollPosition: 0,
-    editorMode: 'source',
+    // RAISE-7: WYSIWYG is the welcoming default — both new files and freshly
+    // opened files land in formatted mode. Users can flip to Source or Split
+    // per tab via the mode switcher (or Cmd+1/2/3, or Cmd+\ to cycle).
+    editorMode: 'wysiwyg',
     loadEpoch: 0,
   };
 }

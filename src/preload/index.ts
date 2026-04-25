@@ -18,6 +18,7 @@ export type MenuActionType =
   | 'wysiwyg-mode'
   | 'source-mode'
   | 'split-mode'
+  | 'cycle-mode'
   | 'toggle-theme'
   | 'font-zoom-in'
   | 'font-zoom-out'

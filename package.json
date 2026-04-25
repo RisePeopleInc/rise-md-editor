@@ -31,6 +31,7 @@
     "@milkdown/theme-nord": "^7.20.0",
     "@monaco-editor/react": "^4.7.0",
     "electron-store": "^8.2.0",
+    "markdown-it": "^14.1.1",
     "monaco-editor": "^0.55.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -38,6 +39,7 @@
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
