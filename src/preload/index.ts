@@ -51,6 +51,9 @@ const files = {
 };
 
 const api = {
+  // 'darwin' | 'win32' | 'linux' | etc. Lets the renderer branch on
+  // macOS without parsing navigator.userAgent.
+  platform: process.platform as NodeJS.Platform,
   openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:open-folder'),
   confirmUnsavedChanges: (filename: string): Promise<'save' | 'discard' | 'cancel'> =>
     ipcRenderer.invoke('dialog:confirm-unsaved', filename),

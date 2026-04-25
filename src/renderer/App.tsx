@@ -193,6 +193,25 @@ function AppContent() {
     window.api.notifyReady();
   }, []);
 
+  // macOS: an Electron MenuItem only takes a single accelerator, so the menu
+  // registers Cmd+Option+arrows. Ctrl+Tab / Ctrl+Shift+Tab is a familiar
+  // browser-style cross-platform alternate — bind it here in the renderer
+  // so it works alongside the menu shortcut. Capture phase + preventDefault
+  // wins over Monaco's own Tab handling.
+  useEffect(() => {
+    if (window.api.platform !== 'darwin') return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) handlePrevTab();
+        else handleNextTab();
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [handleNextTab, handlePrevTab]);
+
   // Restore the active tab's cursor / scroll AFTER its content has been
   // pushed to Monaco. Effect deps deliberately exclude the cursor/scroll
   // values themselves so this only fires when the active tab changes —

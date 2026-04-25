@@ -43,6 +43,7 @@ export interface RaiseFilesApi {
 }
 
 export interface RaiseApi {
+  platform: NodeJS.Platform;
   openFolder: () => Promise<string | null>;
   confirmUnsavedChanges: (filename: string) => Promise<'save' | 'discard' | 'cancel'>;
   showError: (title: string, message: string) => void;
