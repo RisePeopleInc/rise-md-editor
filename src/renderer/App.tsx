@@ -118,16 +118,23 @@ function AppContent() {
 
   const handleModeChange = useCallback(
     (mode: EditorMode) => {
+      // Capture before the swap. Source ↔ Split both use Monaco but at
+      // different positions in the JSX tree, so React unmounts/remounts
+      // the editor on the swap; without capturing, Monaco re-instantiates
+      // at (1,1) / scroll 0. The restore effect picks the captured cursor
+      // back up via the editorMode dep below.
+      if (isMonacoActive) captureActivePosition();
       file.setActiveEditorMode(mode);
     },
-    [file],
+    [file, isMonacoActive, captureActivePosition],
   );
 
   const handleCycleMode = useCallback(() => {
     const current = file.activeTab?.editorMode;
     if (!current) return;
+    if (isMonacoActive) captureActivePosition();
     file.setActiveEditorMode(nextMode(current));
-  }, [file]);
+  }, [file, isMonacoActive, captureActivePosition]);
 
   // Drag-and-drop: open the first matching file in the drop. Multi-file
   // selection waits for proper multi-select semantics — for now we treat a
@@ -266,9 +273,12 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handler, true);
   }, [handleNextTab, handlePrevTab]);
 
-  // Restore the active tab's cursor / scroll AFTER Monaco's content has been
-  // updated. Only meaningful for Monaco-backed modes. Effect deps deliberately
-  // exclude cursor/scroll values so this only fires on tab change.
+  // Restore the active tab's cursor / scroll AFTER Monaco's content has
+  // been updated. Re-runs on tab change AND on editor-mode change because
+  // Source ↔ Split swap remounts Monaco (different parent in the JSX tree)
+  // — without depending on editorMode the cursor would jump to (1,1) on
+  // every Source↔Split flip. cursor/scroll values are deliberately not
+  // in deps so we don't snap back on every keystroke.
   useEffect(() => {
     if (!file.activeTabId || !editorRef.current) return;
     const target = file.tabs.find((t) => t.id === file.activeTabId);
@@ -280,7 +290,7 @@ function AppContent() {
     }, 0);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file.activeTabId]);
+  }, [file.activeTabId, file.activeTab?.editorMode]);
 
   const wordCount = useMemo(
     () => countWords(file.activeTab?.content ?? ''),

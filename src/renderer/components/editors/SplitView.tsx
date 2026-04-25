@@ -51,14 +51,19 @@ export function SplitView({ sourceRef, content, onChange, onCursorChange }: Spli
   // bounces back and forth as each side reacts to the other.
   const syncing = useRef<'source' | 'preview' | null>(null);
 
+  // Cache Monaco's scrollHeight from its onDidScrollChange events so the
+  // preview→source mirror has the real source-side range to project against
+  // (rather than an over-projected magic number that clamps to the bottom).
+  // The two panes share the same clientHeight in this layout, so we read
+  // that off the preview when computing the inverse.
+  const sourceScrollHeightRef = useRef(0);
+
   const handleSourceScroll = useCallback((scrollTop: number, scrollHeight: number) => {
+    sourceScrollHeightRef.current = scrollHeight;
     if (syncing.current === 'preview') return;
     const preview = previewRef.current;
     if (!preview) return;
     syncing.current = 'source';
-    // Monaco reports scrollHeight including the overscroll area; use it as
-    // an approximation of the proportional position. Clamp the divisor so
-    // a tiny doc doesn't divide by zero.
     const sourceMax = Math.max(scrollHeight - preview.clientHeight, 1);
     const ratio = Math.max(0, Math.min(1, scrollTop / sourceMax));
     const previewMax = preview.scrollHeight - preview.clientHeight;
@@ -72,21 +77,18 @@ export function SplitView({ sourceRef, content, onChange, onCursorChange }: Spli
     (e: React.UIEvent<HTMLDivElement>) => {
       if (syncing.current === 'source') return;
       const target = e.currentTarget;
-      const ratio =
-        target.scrollTop / Math.max(target.scrollHeight - target.clientHeight, 1);
+      const ratio = Math.max(
+        0,
+        Math.min(1, target.scrollTop / Math.max(target.scrollHeight - target.clientHeight, 1)),
+      );
       syncing.current = 'preview';
-      // SourceEditor's setScrollTop accepts a pixel offset; we don't have
-      // direct access to Monaco's scrollHeight from here, so mirror by
-      // proportion against a reasonable estimate. Good enough for a casual
-      // sync — exact line-anchor sync is a follow-up.
-      // Use the Monaco editor's full content-line-height as the source max.
-      // Without that, we conservatively project against 10000 px which lets
-      // the editor settle to its actual position.
       const handle = (sourceRef as React.RefObject<SourceEditorHandle | null>)?.current;
       if (handle) {
-        // setScrollTop snaps to the closest valid scroll inside Monaco,
-        // so an over-projection is harmless.
-        handle.setScrollTop(ratio * 1_000_000);
+        // Project ratio against Monaco's actual scrollHeight (cached from
+        // its scroll listener); Monaco still clamps internally if the doc
+        // grew between events.
+        const sourceMax = Math.max(sourceScrollHeightRef.current - target.clientHeight, 1);
+        handle.setScrollTop(ratio * sourceMax);
       }
       requestAnimationFrame(() => {
         if (syncing.current === 'preview') syncing.current = null;
