@@ -8,6 +8,8 @@ export type MenuAction =
   | 'save'
   | 'save-as'
   | 'open-recent'
+  | 'undo'
+  | 'redo'
   | 'find'
   | 'replace'
   | 'toggle-sidebar'
@@ -15,6 +17,9 @@ export type MenuAction =
   | 'source-mode'
   | 'split-mode'
   | 'toggle-theme'
+  | 'font-zoom-in'
+  | 'font-zoom-out'
+  | 'font-zoom-reset'
   | 'about';
 
 export interface MenuDeps {
@@ -115,8 +120,19 @@ export function buildMenu(deps: MenuDeps): Menu {
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
+        // Undo/redo are routed through IPC so Monaco (not the focused DOM
+        // node) drives them — `role: 'undo'` would call webContents.undo()
+        // and bypass Monaco's history stack.
+        {
+          label: 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          click: () => send(deps, 'undo'),
+        },
+        {
+          label: 'Redo',
+          accelerator: isMac ? 'Shift+CmdOrCtrl+Z' : 'CmdOrCtrl+Y',
+          click: () => send(deps, 'redo'),
+        },
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
@@ -163,6 +179,22 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Toggle Theme',
           accelerator: 'CmdOrCtrl+Shift+T',
           click: () => send(deps, 'toggle-theme'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+Plus',
+          click: () => send(deps, 'font-zoom-in'),
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => send(deps, 'font-zoom-out'),
+        },
+        {
+          label: 'Reset Zoom',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => send(deps, 'font-zoom-reset'),
         },
         { type: 'separator' },
         { role: 'reload' },

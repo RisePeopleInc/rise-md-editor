@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { StatusBar } from './components/StatusBar';
-import { SourceEditor, type CursorPosition } from './components/editors/SourceEditor';
+import {
+  SourceEditor,
+  type CursorPosition,
+  type SourceEditorHandle,
+} from './components/editors/SourceEditor';
 import { TEST_MARKDOWN } from './testContent';
 import type { MenuActionEvent } from './env';
 
@@ -19,6 +23,7 @@ export default function App() {
   const [currentFile, setCurrentFile] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
+  const editorRef = useRef<SourceEditorHandle>(null);
 
   useEffect(() => {
     window.api.setTitle(currentFile ? basename(currentFile) : null);
@@ -27,12 +32,7 @@ export default function App() {
   // File I/O isn't implemented yet — when any file is "opened" we seed the
   // editor with TEST_MARKDOWN so we can verify Monaco's Markdown rendering.
   useEffect(() => {
-    if (currentFile) {
-      setContent(TEST_MARKDOWN);
-      setCursor({ line: 1, column: 1 });
-    } else {
-      setContent('');
-    }
+    setContent(currentFile ? TEST_MARKDOWN : '');
   }, [currentFile]);
 
   const handleOpenFile = useCallback(async () => {
@@ -57,6 +57,27 @@ export default function App() {
           if (event.payload?.clear) return;
           if (event.payload?.path) setCurrentFile(event.payload.path);
           break;
+        case 'undo':
+          editorRef.current?.triggerUndo();
+          break;
+        case 'redo':
+          editorRef.current?.triggerRedo();
+          break;
+        case 'find':
+          editorRef.current?.triggerFind();
+          break;
+        case 'replace':
+          editorRef.current?.triggerReplace();
+          break;
+        case 'font-zoom-in':
+          editorRef.current?.zoomIn();
+          break;
+        case 'font-zoom-out':
+          editorRef.current?.zoomOut();
+          break;
+        case 'font-zoom-reset':
+          editorRef.current?.zoomReset();
+          break;
         default:
           break;
       }
@@ -70,7 +91,12 @@ export default function App() {
     <div className="flex h-full w-full flex-col">
       <main className="min-h-0 flex-1">
         {currentFile ? (
-          <SourceEditor content={content} onChange={setContent} onCursorChange={setCursor} />
+          <SourceEditor
+            ref={editorRef}
+            content={content}
+            onChange={setContent}
+            onCursorChange={setCursor}
+          />
         ) : (
           <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}

@@ -7,6 +7,8 @@ export type MenuActionType =
   | 'save'
   | 'save-as'
   | 'open-recent'
+  | 'undo'
+  | 'redo'
   | 'find'
   | 'replace'
   | 'toggle-sidebar'
@@ -14,6 +16,9 @@ export type MenuActionType =
   | 'source-mode'
   | 'split-mode'
   | 'toggle-theme'
+  | 'font-zoom-in'
+  | 'font-zoom-out'
+  | 'font-zoom-reset'
   | 'about';
 
 export interface MenuActionEvent {
