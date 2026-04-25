@@ -5,9 +5,9 @@ export type MenuAction =
   | 'new'
   | 'open-file'
   | 'open-folder'
+  | 'open-path'
   | 'save'
   | 'save-as'
-  | 'open-recent'
   | 'undo'
   | 'redo'
   | 'find'
@@ -26,16 +26,19 @@ export interface MenuDeps {
   getWindow: () => BrowserWindow | null;
   getRecentFiles: () => string[];
   rebuildMenu: () => void;
-  openFileDialog: () => Promise<void>;
-  openFolderDialog: () => Promise<void>;
+  /**
+   * Dispatch a menu action. The implementation is responsible for queuing and
+   * (if needed) reopening the window — never short-circuits on a missing
+   * window, so File→New / File→Open work after Cmd+W on macOS.
+   */
+  dispatch: (action: MenuAction, payload?: unknown) => void;
+  clearRecent: () => void;
 }
 
 const isMac = process.platform === 'darwin';
 
 function send(deps: MenuDeps, action: MenuAction, payload?: unknown): void {
-  const win = deps.getWindow();
-  if (!win) return;
-  win.webContents.send('menu:action', { type: action, payload });
+  deps.dispatch(action, payload);
 }
 
 function buildRecentSubmenu(deps: MenuDeps): MenuItemConstructorOptions[] {
@@ -47,14 +50,12 @@ function buildRecentSubmenu(deps: MenuDeps): MenuItemConstructorOptions[] {
     ...recent.map<MenuItemConstructorOptions>((filePath) => ({
       label: path.basename(filePath),
       sublabel: filePath,
-      click: () => send(deps, 'open-recent', { path: filePath }),
+      click: () => send(deps, 'open-path', { path: filePath }),
     })),
     { type: 'separator' },
     {
       label: 'Clear Recent',
-      click: () => {
-        send(deps, 'open-recent', { clear: true });
-      },
+      click: () => deps.clearRecent(),
     },
   ];
 }
@@ -90,12 +91,12 @@ export function buildMenu(deps: MenuDeps): Menu {
         {
           label: 'Open File…',
           accelerator: 'CmdOrCtrl+O',
-          click: () => deps.openFileDialog(),
+          click: () => send(deps, 'open-file'),
         },
         {
           label: 'Open Folder…',
           accelerator: 'CmdOrCtrl+Shift+O',
-          click: () => deps.openFolderDialog(),
+          click: () => send(deps, 'open-folder'),
         },
         { type: 'separator' },
         {

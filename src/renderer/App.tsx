@@ -6,56 +6,105 @@ import {
   type CursorPosition,
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
-import { TEST_MARKDOWN } from './testContent';
+import { FileProvider, useFileState } from './state/fileState';
 import type { MenuActionEvent } from './env';
 
-function basename(filePath: string): string {
-  const parts = filePath.split(/[\\/]/);
-  return parts[parts.length - 1] || filePath;
-}
+const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
 
 function countWords(text: string): number {
   const matches = text.match(/\S+/g);
   return matches ? matches.length : 0;
 }
 
-export default function App() {
-  const [currentFile, setCurrentFile] = useState<string | null>(null);
-  const [content, setContent] = useState<string>('');
+function AppContent() {
+  const file = useFileState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
 
-  useEffect(() => {
-    window.api.setTitle(currentFile ? basename(currentFile) : null);
-  }, [currentFile]);
-
-  // File I/O isn't implemented yet — when any file is "opened" we seed the
-  // editor with TEST_MARKDOWN so we can verify Monaco's Markdown rendering.
-  useEffect(() => {
-    setContent(currentFile ? TEST_MARKDOWN : '');
-  }, [currentFile]);
-
   const handleOpenFile = useCallback(async () => {
-    const filePath = await window.api.openFile();
-    if (filePath) setCurrentFile(filePath);
-  }, []);
+    await file.withDirtyGuard(async () => {
+      const result = await window.api.files.open();
+      if (result) {
+        file.loadFile(result.path, result.content);
+        window.api.addRecent(result.path);
+      }
+    });
+  }, [file]);
+
+  const handleOpenPath = useCallback(
+    async (filePath: string) => {
+      await file.withDirtyGuard(async () => {
+        try {
+          const result = await window.api.files.openPath(filePath);
+          file.loadFile(result.path, result.content);
+          window.api.addRecent(result.path);
+        } catch (err) {
+          window.api.showError(
+            'Could not open file',
+            `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      });
+    },
+    [file],
+  );
 
   const handleOpenFolder = useCallback(async () => {
     await window.api.openFolder();
   }, []);
 
+  const handleNewFile = useCallback(async () => {
+    await file.withDirtyGuard(() => {
+      file.newFile();
+    });
+  }, [file]);
+
+  // Drag-and-drop: open the first matching file in the drop. Multi-file
+  // selection waits for the tab system (RAISE-5) — for now this is the
+  // intentional single-file fallback.
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const dropped = e.dataTransfer?.files;
+      if (!dropped || dropped.length === 0) return;
+      const target = Array.from(dropped).find((f) => ACCEPTED_EXTENSIONS.test(f.name));
+      if (!target) return;
+      const filePath = window.api.files.getPathForFile(target);
+      if (!filePath) return;
+      void handleOpenPath(filePath);
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [handleOpenPath]);
+
+  // Menu IPC dispatch.
   useEffect(() => {
     const off = window.api.onMenuAction((event: MenuActionEvent) => {
       switch (event.type) {
         case 'new':
-          setCurrentFile(null);
+          void handleNewFile();
           break;
         case 'open-file':
-          if (event.payload?.path) setCurrentFile(event.payload.path);
+          void handleOpenFile();
           break;
-        case 'open-recent':
-          if (event.payload?.clear) return;
-          if (event.payload?.path) setCurrentFile(event.payload.path);
+        case 'open-path':
+          if (event.payload?.path) void handleOpenPath(event.payload.path);
+          break;
+        case 'open-folder':
+          void window.api.openFolder();
+          break;
+        case 'save':
+          void file.save();
+          break;
+        case 'save-as':
+          void file.saveAs();
           break;
         case 'undo':
           editorRef.current?.triggerUndo();
@@ -83,25 +132,32 @@ export default function App() {
       }
     });
     return off;
+  }, [file, handleNewFile, handleOpenFile, handleOpenPath]);
+
+  // Signal readiness once on mount, after the menu listener effect above has
+  // attached. Effects run in declaration order, so the listener is bound by
+  // the time main drains its queue.
+  useEffect(() => {
+    window.api.notifyReady();
   }, []);
 
-  const wordCount = useMemo(() => countWords(content), [content]);
+  const wordCount = useMemo(() => countWords(file.content), [file.content]);
 
   return (
     <div className="flex h-full w-full flex-col">
       <main className="min-h-0 flex-1">
-        {currentFile ? (
+        {file.hasDocument ? (
           <SourceEditor
             ref={editorRef}
-            content={content}
-            onChange={setContent}
+            content={file.content}
+            onChange={file.setContent}
             onCursorChange={setCursor}
           />
         ) : (
           <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
       </main>
-      {currentFile && (
+      {file.hasDocument && (
         <StatusBar
           line={cursor.line}
           column={cursor.column}
@@ -110,5 +166,13 @@ export default function App() {
         />
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <FileProvider>
+      <AppContent />
+    </FileProvider>
   );
 }
