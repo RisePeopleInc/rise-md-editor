@@ -38,6 +38,7 @@ export interface FileContextValue {
   save: (id?: string) => Promise<boolean>;
   saveAs: (id?: string) => Promise<boolean>;
   saveAllDirty: () => Promise<boolean>;
+  reviewEachDirtyTab: () => Promise<boolean>;
 
   switchTo: (id: string) => void;
   closeTab: (id: string) => Promise<boolean>;
@@ -232,6 +233,23 @@ export function FileProvider({ children }: FileProviderProps) {
     return true;
   }, [tabs, save]);
 
+  // Walk dirty tabs one by one, prompting the user for each (Save / Don't
+  // Save / Cancel). 'Don't Save' silently skips that tab; 'Cancel' aborts
+  // the whole flow so the window stays open.
+  const reviewEachDirtyTab = useCallback(async (): Promise<boolean> => {
+    for (const tab of tabs) {
+      if (!isTabDirty(tab)) continue;
+      setActiveTabId(tab.id);
+      const choice = await window.api.confirmUnsavedChanges(basenameOf(tab.path));
+      if (choice === 'cancel') return false;
+      if (choice === 'save') {
+        const ok = await save(tab.id);
+        if (!ok) return false;
+      }
+    }
+    return true;
+  }, [tabs, save]);
+
   const withDirtyGuard = useCallback(
     async (action: () => void | Promise<void>): Promise<boolean> => {
       // Active-tab guard, used for actions that REPLACE the active document
@@ -306,15 +324,16 @@ export function FileProvider({ children }: FileProviderProps) {
     if (prev) setActiveTabId(prev.id);
   }, [tabs, activeTabId]);
 
-  // Window-close save-all flow: main asks renderer to save every dirty tab,
-  // renderer responds with the aggregate result.
+  // Window-close dirty-tab resolution. Main asks for either a Save All sweep
+  // or a tab-by-tab walkthrough; we run the chosen flow and report success.
   useEffect(() => {
-    const off = window.api.onSaveAllRequest(async () => {
-      const ok = await saveAllDirty();
-      window.api.respondSaveAll(ok);
+    const off = window.api.onResolveDirty(async (mode) => {
+      const ok =
+        mode === 'save-all' ? await saveAllDirty() : await reviewEachDirtyTab();
+      window.api.respondResolveDirty(ok);
     });
     return off;
-  }, [saveAllDirty]);
+  }, [saveAllDirty, reviewEachDirtyTab]);
 
   // If main saved a file on the renderer's behalf during close-flow (legacy
   // path — no longer the primary route), update the matching tab.
@@ -343,6 +362,7 @@ export function FileProvider({ children }: FileProviderProps) {
       save,
       saveAs,
       saveAllDirty,
+      reviewEachDirtyTab,
       switchTo,
       closeTab,
       closeActiveTab,
@@ -364,6 +384,7 @@ export function FileProvider({ children }: FileProviderProps) {
       save,
       saveAs,
       saveAllDirty,
+      reviewEachDirtyTab,
       switchTo,
       closeTab,
       closeActiveTab,

@@ -101,17 +101,21 @@ const api = {
       ipcRenderer.off('file:saved-as', handler);
     };
   },
-  // Window-close save-all flow: main asks the renderer to save every dirty
-  // tab, the renderer replies with the aggregate result.
-  onSaveAllRequest: (callback: () => void): (() => void) => {
-    const handler = (): void => callback();
-    ipcRenderer.on('window:save-all', handler);
+  // Window-close dirty-tab resolution. Main asks the renderer to either
+  // save every dirty tab in one shot ('save-all') or walk through them
+  // tab-by-tab ('review'). The renderer replies with the aggregate result.
+  onResolveDirty: (
+    callback: (mode: 'save-all' | 'review') => void,
+  ): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, mode: 'save-all' | 'review'): void =>
+      callback(mode);
+    ipcRenderer.on('window:resolve-dirty', handler);
     return () => {
-      ipcRenderer.off('window:save-all', handler);
+      ipcRenderer.off('window:resolve-dirty', handler);
     };
   },
-  respondSaveAll: (ok: boolean): void => {
-    ipcRenderer.send('window:save-all-result', ok);
+  respondResolveDirty: (ok: boolean): void => {
+    ipcRenderer.send('window:resolve-dirty:result', ok);
   },
 };
 

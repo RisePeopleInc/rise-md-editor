@@ -61,8 +61,8 @@ export interface RaiseApi {
   onFileSavedAs: (
     callback: (event: { path: string; content: string }) => void,
   ) => () => void;
-  onSaveAllRequest: (callback: () => void) => () => void;
-  respondSaveAll: (ok: boolean) => void;
+  onResolveDirty: (callback: (mode: 'save-all' | 'review') => void) => () => void;
+  respondResolveDirty: (ok: boolean) => void;
 }
 
 declare global {

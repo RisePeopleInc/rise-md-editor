@@ -211,16 +211,17 @@ export function buildMenu(deps: MenuDeps): Menu {
           click: () => send(deps, 'font-zoom-reset'),
         },
         { type: 'separator' },
-        // Ctrl+Tab on every platform — Cmd+Tab on macOS is reserved by the
-        // OS for app switching, so we follow the VS Code convention.
+        // macOS: Cmd+Option+arrows is the native tab-cycle convention used
+        // by Safari, Chrome, and VS Code. Cmd+Tab is reserved by the OS for
+        // app switching. Win/Linux keep the standard Ctrl+Tab pair.
         {
           label: 'Next Tab',
-          accelerator: 'Ctrl+Tab',
+          accelerator: isMac ? 'Cmd+Alt+Right' : 'Ctrl+Tab',
           click: () => send(deps, 'next-tab'),
         },
         {
           label: 'Previous Tab',
-          accelerator: 'Ctrl+Shift+Tab',
+          accelerator: isMac ? 'Cmd+Alt+Left' : 'Ctrl+Shift+Tab',
           click: () => send(deps, 'prev-tab'),
         },
         { type: 'separator' },

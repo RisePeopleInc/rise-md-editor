@@ -108,29 +108,55 @@ async function promptUnsavedChanges(filename = displayName()): Promise<UnsavedCh
   return 'cancel';
 }
 
-async function promptCloseWithUnsavedTabs(count: number): Promise<UnsavedChoice> {
+type CloseChoice = 'save-all' | 'review' | 'discard' | 'cancel';
+
+async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
   if (!mainWindow) return 'discard';
-  const noun = count === 1 ? 'file' : 'files';
+  // With a single dirty tab "Review Each" is identical to "Save", so we
+  // collapse to the original 3-button shape; multi-dirty surfaces both.
+  if (count === 1) {
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['Save', "Don't Save", 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      message: 'You have unsaved changes.',
+      detail: "Your changes will be lost if you don't save them.",
+    });
+    if (choice.response === 0) return 'save-all';
+    if (choice.response === 1) return 'discard';
+    return 'cancel';
+  }
   const choice = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
-    buttons: ['Save All', "Don't Save", 'Cancel'],
+    buttons: ['Save All', 'Review Each…', "Don't Save", 'Cancel'],
     defaultId: 0,
-    cancelId: 2,
-    message: `You have unsaved changes in ${count} ${noun}.`,
-    detail: "Your changes will be lost if you don't save them.",
+    cancelId: 3,
+    message: `You have unsaved changes in ${count} files.`,
+    detail:
+      'Save All writes every dirty tab. Review Each walks through them one by one so you can choose per file.',
   });
-  if (choice.response === 0) return 'save';
-  if (choice.response === 1) return 'discard';
-  return 'cancel';
+  switch (choice.response) {
+    case 0:
+      return 'save-all';
+    case 1:
+      return 'review';
+    case 2:
+      return 'discard';
+    default:
+      return 'cancel';
+  }
 }
 
-// Ask the renderer to save every dirty tab. Resolves to true when all writes
-// succeeded, false if any saveAs was canceled or a write failed.
-function requestSaveAllFromRenderer(): Promise<boolean> {
+// Ask the renderer to walk the dirty-tab resolution flow (either Save All or
+// per-tab Review). Resolves true on success, false if anything was canceled.
+function requestResolveDirtyFromRenderer(
+  mode: 'save-all' | 'review',
+): Promise<boolean> {
   if (!mainWindow) return Promise.resolve(false);
   return new Promise((resolve) => {
-    ipcMain.once('window:save-all-result', (_e, ok: boolean) => resolve(ok));
-    mainWindow!.webContents.send('window:save-all');
+    ipcMain.once('window:resolve-dirty:result', (_e, ok: boolean) => resolve(ok));
+    mainWindow!.webContents.send('window:resolve-dirty', mode);
   });
 }
 
@@ -173,8 +199,8 @@ function createWindow(): void {
     void (async () => {
       const choice = await promptCloseWithUnsavedTabs(fileState.dirtyCount);
       if (choice === 'cancel') return;
-      if (choice === 'save') {
-        const ok = await requestSaveAllFromRenderer();
+      if (choice === 'save-all' || choice === 'review') {
+        const ok = await requestResolveDirtyFromRenderer(choice);
         if (!ok) return;
       }
       allowClose = true;
