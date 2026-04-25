@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { StatusBar } from './components/StatusBar';
+import { TabBar } from './components/TabBar';
 import {
   SourceEditor,
   type CursorPosition,
@@ -21,30 +22,52 @@ function AppContent() {
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
 
+  // Capture the current editor cursor/scroll into the (about-to-leave) active
+  // tab before switching, so when the user switches back we can restore it.
+  const captureActivePosition = useCallback(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const c = ed.getCursor();
+    if (c) file.setActiveCursor(c);
+    file.setActiveScroll(ed.getScrollTop());
+  }, [file]);
+
+  const handleSwitchTab = useCallback(
+    (id: string) => {
+      if (id === file.activeTabId) return;
+      captureActivePosition();
+      file.switchTo(id);
+    },
+    [file, captureActivePosition],
+  );
+
+  const handleCloseTab = useCallback(
+    (id: string) => {
+      void file.closeTab(id);
+    },
+    [file],
+  );
+
   const handleOpenFile = useCallback(async () => {
-    await file.withDirtyGuard(async () => {
-      const result = await window.api.files.open();
-      if (result) {
-        file.loadFile(result.path, result.content);
-        window.api.addRecent(result.path);
-      }
-    });
+    const result = await window.api.files.open();
+    if (result) {
+      file.loadFile(result.path, result.content);
+      window.api.addRecent(result.path);
+    }
   }, [file]);
 
   const handleOpenPath = useCallback(
     async (filePath: string) => {
-      await file.withDirtyGuard(async () => {
-        try {
-          const result = await window.api.files.openPath(filePath);
-          file.loadFile(result.path, result.content);
-          window.api.addRecent(result.path);
-        } catch (err) {
-          window.api.showError(
-            'Could not open file',
-            `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      });
+      try {
+        const result = await window.api.files.openPath(filePath);
+        file.loadFile(result.path, result.content);
+        window.api.addRecent(result.path);
+      } catch (err) {
+        window.api.showError(
+          'Could not open file',
+          `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     },
     [file],
   );
@@ -53,15 +76,27 @@ function AppContent() {
     await window.api.openFolder();
   }, []);
 
-  const handleNewFile = useCallback(async () => {
-    await file.withDirtyGuard(() => {
-      file.newFile();
-    });
+  const handleNewFile = useCallback(() => {
+    file.newFile();
   }, [file]);
 
+  const handleCloseActive = useCallback(() => {
+    void file.closeActiveTab();
+  }, [file]);
+
+  const handleNextTab = useCallback(() => {
+    captureActivePosition();
+    file.nextTab();
+  }, [file, captureActivePosition]);
+
+  const handlePrevTab = useCallback(() => {
+    captureActivePosition();
+    file.prevTab();
+  }, [file, captureActivePosition]);
+
   // Drag-and-drop: open the first matching file in the drop. Multi-file
-  // selection waits for the tab system (RAISE-5) — for now this is the
-  // intentional single-file fallback.
+  // selection waits for proper multi-select semantics — for now we treat a
+  // drop as a single-file open routed through the recent-files flow.
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
       e.preventDefault();
@@ -89,7 +124,7 @@ function AppContent() {
     const off = window.api.onMenuAction((event: MenuActionEvent) => {
       switch (event.type) {
         case 'new':
-          void handleNewFile();
+          handleNewFile();
           break;
         case 'open-file':
           void handleOpenFile();
@@ -105,6 +140,15 @@ function AppContent() {
           break;
         case 'save-as':
           void file.saveAs();
+          break;
+        case 'close-tab':
+          handleCloseActive();
+          break;
+        case 'next-tab':
+          handleNextTab();
+          break;
+        case 'prev-tab':
+          handlePrevTab();
           break;
         case 'undo':
           editorRef.current?.triggerUndo();
@@ -132,7 +176,15 @@ function AppContent() {
       }
     });
     return off;
-  }, [file, handleNewFile, handleOpenFile, handleOpenPath]);
+  }, [
+    file,
+    handleNewFile,
+    handleOpenFile,
+    handleOpenPath,
+    handleCloseActive,
+    handleNextTab,
+    handlePrevTab,
+  ]);
 
   // Signal readiness once on mount, after the menu listener effect above has
   // attached. Effects run in declaration order, so the listener is bound by
@@ -141,15 +193,44 @@ function AppContent() {
     window.api.notifyReady();
   }, []);
 
-  const wordCount = useMemo(() => countWords(file.content), [file.content]);
+  // Restore the active tab's cursor / scroll AFTER its content has been
+  // pushed to Monaco. Effect deps deliberately exclude the cursor/scroll
+  // values themselves so this only fires when the active tab changes —
+  // otherwise we'd snap the cursor back on every keystroke.
+  useEffect(() => {
+    if (!file.activeTabId || !editorRef.current) return;
+    const target = file.tabs.find((t) => t.id === file.activeTabId);
+    if (!target) return;
+    const id = setTimeout(() => {
+      editorRef.current?.setCursor(target.cursorPosition);
+      editorRef.current?.setScrollTop(target.scrollPosition);
+      setCursor(target.cursorPosition);
+    }, 0);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file.activeTabId]);
+
+  const wordCount = useMemo(
+    () => countWords(file.activeTab?.content ?? ''),
+    [file.activeTab?.content],
+  );
 
   return (
     <div className="flex h-full w-full flex-col">
+      {file.tabs.length > 0 && (
+        <TabBar
+          tabs={file.tabs}
+          activeTabId={file.activeTabId}
+          onActivate={handleSwitchTab}
+          onClose={handleCloseTab}
+          onReorder={file.reorderTabs}
+        />
+      )}
       <main className="min-h-0 flex-1">
-        {file.hasDocument ? (
+        {file.activeTab ? (
           <SourceEditor
             ref={editorRef}
-            content={file.content}
+            content={file.activeTab.content}
             onChange={file.setContent}
             onCursorChange={setCursor}
           />
@@ -157,7 +238,7 @@ function AppContent() {
           <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
       </main>
-      {file.hasDocument && (
+      {file.activeTab && (
         <StatusBar
           line={cursor.line}
           column={cursor.column}

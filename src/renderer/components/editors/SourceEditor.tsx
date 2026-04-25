@@ -15,6 +15,14 @@ export interface SourceEditorHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   zoomReset: () => void;
+  /** Current cursor position (1-based line/column). */
+  getCursor: () => CursorPosition | null;
+  /** Move the cursor and reveal it. */
+  setCursor: (position: CursorPosition) => void;
+  /** Current scroll offset in pixels. */
+  getScrollTop: () => number;
+  /** Set the scroll offset in pixels. */
+  setScrollTop: (top: number) => void;
 }
 
 interface SourceEditorProps {
@@ -62,6 +70,21 @@ export function SourceEditor({ ref, content, onChange, onCursorChange }: SourceE
       zoomIn: () => runAction('editor.action.fontZoomIn'),
       zoomOut: () => runAction('editor.action.fontZoomOut'),
       zoomReset: () => runAction('editor.action.fontZoomReset'),
+      getCursor: () => {
+        const pos = editorRef.current?.getPosition();
+        return pos ? { line: pos.lineNumber, column: pos.column } : null;
+      },
+      setCursor: (position) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+        ed.setPosition({ lineNumber: position.line, column: position.column });
+        ed.revealPositionInCenterIfOutsideViewport({
+          lineNumber: position.line,
+          column: position.column,
+        });
+      },
+      getScrollTop: () => editorRef.current?.getScrollTop() ?? 0,
+      setScrollTop: (top) => editorRef.current?.setScrollTop(top),
     }),
     [],
   );

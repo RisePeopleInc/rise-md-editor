@@ -7,6 +7,9 @@ export type MenuActionType =
   | 'open-path'
   | 'save'
   | 'save-as'
+  | 'close-tab'
+  | 'next-tab'
+  | 'prev-tab'
   | 'undo'
   | 'redo'
   | 'find'
@@ -57,17 +60,19 @@ const api = {
   notifyReady: (): void => {
     ipcRenderer.send('renderer:ready');
   },
-  files,
-  // Synchronous push of cheap signal (path + isDirty). Drives the window
-  // title and the close-with-unsaved decision, so it must never lag behind
-  // a keystroke.
-  pushFileMeta: (meta: { path: string | null; isDirty: boolean }): void => {
-    ipcRenderer.send('file:meta', meta);
+  closeWindow: (): void => {
+    ipcRenderer.send('window:close');
   },
-  // Debounced push of the editor content; consumed by the Save-on-close
-  // path. A small lag here costs a few keystrokes, not the dirty guarantee.
-  pushFileContent: (content: string): void => {
-    ipcRenderer.send('file:content', content);
+  files,
+  // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
+  // synchronously on every change so main's title and close-with-unsaved
+  // decision can never read a stale flag immediately after a keystroke.
+  pushFileMeta: (meta: {
+    path: string | null;
+    isDirty: boolean;
+    dirtyCount: number;
+  }): void => {
+    ipcRenderer.send('file:meta', meta);
   },
   getRecent: (): Promise<string[]> => ipcRenderer.invoke('recent:get'),
   addRecent: (filePath: string): void => {
@@ -95,6 +100,18 @@ const api = {
     return () => {
       ipcRenderer.off('file:saved-as', handler);
     };
+  },
+  // Window-close save-all flow: main asks the renderer to save every dirty
+  // tab, the renderer replies with the aggregate result.
+  onSaveAllRequest: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on('window:save-all', handler);
+    return () => {
+      ipcRenderer.off('window:save-all', handler);
+    };
+  },
+  respondSaveAll: (ok: boolean): void => {
+    ipcRenderer.send('window:save-all-result', ok);
   },
 };
 

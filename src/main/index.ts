@@ -8,18 +8,20 @@ const APP_NAME = 'rAIse';
 
 let mainWindow: BrowserWindow | null = null;
 
-// The renderer is the source of truth for content and dirtiness; it pushes
-// updates here so close-with-unsaved and the live window title can react.
+// The renderer is the source of truth for tabs and content; it mirrors
+// the active tab's title-relevant signal (path + isDirty) plus the global
+// dirty-tab count so main can drive the title and the close-with-unsaved
+// decision without holding all tab content.
 const fileState = {
   path: null as string | null,
-  content: '',
   isDirty: false,
+  dirtyCount: 0,
 };
 
 function resetFileState(): void {
   fileState.path = null;
-  fileState.content = '';
   fileState.isDirty = false;
+  fileState.dirtyCount = 0;
 }
 
 // Menu actions are queued until the renderer signals it has subscribed to
@@ -106,42 +108,30 @@ async function promptUnsavedChanges(filename = displayName()): Promise<UnsavedCh
   return 'cancel';
 }
 
-async function saveCachedFile(): Promise<boolean> {
-  if (!mainWindow) return false;
-  // Snapshot the bytes we're about to write so the renderer can mark exactly
-  // those as the saved baseline (file:saved-as).
-  const bytes = fileState.content;
-  try {
-    if (fileState.path) {
-      await fileOps.saveFile(fileState.path, bytes);
-      mainWindow.webContents.send('file:saved-as', {
-        path: fileState.path,
-        content: bytes,
-      });
-      return true;
-    }
-    const result = await fileOps.saveFileAs(
-      mainWindow,
-      bytes,
-      fileOps.suggestedNameFor(fileState.path),
-    );
-    if (!result) return false;
-    fileState.path = result.path;
-    rememberRecent(result.path);
-    mainWindow.webContents.send('file:saved-as', {
-      path: result.path,
-      content: bytes,
-    });
-    return true;
-  } catch (err) {
-    dialog.showMessageBox(mainWindow, {
-      type: 'error',
-      title: 'Could not save file',
-      message: 'Save failed',
-      detail: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
+async function promptCloseWithUnsavedTabs(count: number): Promise<UnsavedChoice> {
+  if (!mainWindow) return 'discard';
+  const noun = count === 1 ? 'file' : 'files';
+  const choice = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Save All', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    message: `You have unsaved changes in ${count} ${noun}.`,
+    detail: "Your changes will be lost if you don't save them.",
+  });
+  if (choice.response === 0) return 'save';
+  if (choice.response === 1) return 'discard';
+  return 'cancel';
+}
+
+// Ask the renderer to save every dirty tab. Resolves to true when all writes
+// succeeded, false if any saveAs was canceled or a write failed.
+function requestSaveAllFromRenderer(): Promise<boolean> {
+  if (!mainWindow) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    ipcMain.once('window:save-all-result', (_e, ok: boolean) => resolve(ok));
+    mainWindow!.webContents.send('window:save-all');
+  });
 }
 
 function createWindow(): void {
@@ -178,13 +168,13 @@ function createWindow(): void {
   });
 
   mainWindow.on('close', (e) => {
-    if (allowClose || !fileState.isDirty) return;
+    if (allowClose || fileState.dirtyCount === 0) return;
     e.preventDefault();
     void (async () => {
-      const choice = await promptUnsavedChanges();
+      const choice = await promptCloseWithUnsavedTabs(fileState.dirtyCount);
       if (choice === 'cancel') return;
       if (choice === 'save') {
-        const ok = await saveCachedFile();
+        const ok = await requestSaveAllFromRenderer();
         if (!ok) return;
       }
       allowClose = true;
@@ -306,21 +296,21 @@ ipcMain.handle('dialog:open-folder', async () => {
   return result.filePaths[0]!;
 });
 
-// Renderer pushes path + isDirty synchronously (every change) so the close
-// handler can never read a stale "clean" flag immediately after a keystroke.
+// Renderer pushes the active tab's path + isDirty plus the global dirty
+// count synchronously on every change, so neither the title nor the
+// close-with-unsaved decision can read a stale flag after a keystroke.
 ipcMain.on(
   'file:meta',
-  (_, meta: { path: string | null; isDirty: boolean }) => {
+  (_, meta: { path: string | null; isDirty: boolean; dirtyCount: number }) => {
     fileState.path = meta.path;
     fileState.isDirty = meta.isDirty;
+    fileState.dirtyCount = meta.dirtyCount;
     refreshTitle();
   },
 );
 
-// Content is debounced — only consumed by the Save-on-close path, so a small
-// lag here just costs a few keystrokes, never the dirty-prompt guarantee.
-ipcMain.on('file:content', (_, content: string) => {
-  fileState.content = content;
+ipcMain.on('window:close', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
 });
 
 // Renderer signals it has subscribed to menu:action and is safe to dispatch

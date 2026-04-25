@@ -7,6 +7,9 @@ export type MenuActionType =
   | 'open-path'
   | 'save'
   | 'save-as'
+  | 'close-tab'
+  | 'next-tab'
+  | 'prev-tab'
   | 'undo'
   | 'redo'
   | 'find'
@@ -44,9 +47,13 @@ export interface RaiseApi {
   confirmUnsavedChanges: (filename: string) => Promise<'save' | 'discard' | 'cancel'>;
   showError: (title: string, message: string) => void;
   notifyReady: () => void;
+  closeWindow: () => void;
   files: RaiseFilesApi;
-  pushFileMeta: (meta: { path: string | null; isDirty: boolean }) => void;
-  pushFileContent: (content: string) => void;
+  pushFileMeta: (meta: {
+    path: string | null;
+    isDirty: boolean;
+    dirtyCount: number;
+  }) => void;
   getRecent: () => Promise<string[]>;
   addRecent: (filePath: string) => void;
   clearRecent: () => void;
@@ -54,6 +61,8 @@ export interface RaiseApi {
   onFileSavedAs: (
     callback: (event: { path: string; content: string }) => void,
   ) => () => void;
+  onSaveAllRequest: (callback: () => void) => () => void;
+  respondSaveAll: (ok: boolean) => void;
 }
 
 declare global {

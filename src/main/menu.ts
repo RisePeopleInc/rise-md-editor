@@ -8,6 +8,9 @@ export type MenuAction =
   | 'open-path'
   | 'save'
   | 'save-as'
+  | 'close-tab'
+  | 'next-tab'
+  | 'prev-tab'
   | 'undo'
   | 'redo'
   | 'find'
@@ -115,7 +118,17 @@ export function buildMenu(deps: MenuDeps): Menu {
           submenu: buildRecentSubmenu(deps),
         },
         { type: 'separator' },
-        isMac ? { role: 'close' } : { role: 'quit' },
+        // Cmd/Ctrl+W closes the active tab; only when no tabs remain does
+        // the renderer fall through to closing the window. role:'close' would
+        // bypass the dirty-prompt and tab-close logic.
+        {
+          label: 'Close Tab',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => send(deps, 'close-tab'),
+        },
+        ...(isMac
+          ? []
+          : ([{ role: 'quit' as const }] satisfies MenuItemConstructorOptions[])),
       ],
     },
     {
@@ -196,6 +209,19 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Reset Zoom',
           accelerator: 'CmdOrCtrl+0',
           click: () => send(deps, 'font-zoom-reset'),
+        },
+        { type: 'separator' },
+        // Ctrl+Tab on every platform — Cmd+Tab on macOS is reserved by the
+        // OS for app switching, so we follow the VS Code convention.
+        {
+          label: 'Next Tab',
+          accelerator: 'Ctrl+Tab',
+          click: () => send(deps, 'next-tab'),
+        },
+        {
+          label: 'Previous Tab',
+          accelerator: 'Ctrl+Shift+Tab',
+          click: () => send(deps, 'prev-tab'),
         },
         { type: 'separator' },
         { role: 'reload' },
