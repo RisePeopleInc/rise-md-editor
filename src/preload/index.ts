@@ -7,6 +7,9 @@ export type MenuActionType =
   | 'open-path'
   | 'save'
   | 'save-as'
+  | 'close-tab'
+  | 'next-tab'
+  | 'prev-tab'
   | 'undo'
   | 'redo'
   | 'find'
@@ -48,6 +51,9 @@ const files = {
 };
 
 const api = {
+  // 'darwin' | 'win32' | 'linux' | etc. Lets the renderer branch on
+  // macOS without parsing navigator.userAgent.
+  platform: process.platform as NodeJS.Platform,
   openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:open-folder'),
   confirmUnsavedChanges: (filename: string): Promise<'save' | 'discard' | 'cancel'> =>
     ipcRenderer.invoke('dialog:confirm-unsaved', filename),
@@ -57,17 +63,19 @@ const api = {
   notifyReady: (): void => {
     ipcRenderer.send('renderer:ready');
   },
-  files,
-  // Synchronous push of cheap signal (path + isDirty). Drives the window
-  // title and the close-with-unsaved decision, so it must never lag behind
-  // a keystroke.
-  pushFileMeta: (meta: { path: string | null; isDirty: boolean }): void => {
-    ipcRenderer.send('file:meta', meta);
+  closeWindow: (): void => {
+    ipcRenderer.send('window:close');
   },
-  // Debounced push of the editor content; consumed by the Save-on-close
-  // path. A small lag here costs a few keystrokes, not the dirty guarantee.
-  pushFileContent: (content: string): void => {
-    ipcRenderer.send('file:content', content);
+  files,
+  // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
+  // synchronously on every change so main's title and close-with-unsaved
+  // decision can never read a stale flag immediately after a keystroke.
+  pushFileMeta: (meta: {
+    path: string | null;
+    isDirty: boolean;
+    dirtyCount: number;
+  }): void => {
+    ipcRenderer.send('file:meta', meta);
   },
   getRecent: (): Promise<string[]> => ipcRenderer.invoke('recent:get'),
   addRecent: (filePath: string): void => {
@@ -95,6 +103,22 @@ const api = {
     return () => {
       ipcRenderer.off('file:saved-as', handler);
     };
+  },
+  // Window-close dirty-tab resolution. Main asks the renderer to either
+  // save every dirty tab in one shot ('save-all') or walk through them
+  // tab-by-tab ('review'). The renderer replies with the aggregate result.
+  onResolveDirty: (
+    callback: (mode: 'save-all' | 'review') => void,
+  ): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, mode: 'save-all' | 'review'): void =>
+      callback(mode);
+    ipcRenderer.on('window:resolve-dirty', handler);
+    return () => {
+      ipcRenderer.off('window:resolve-dirty', handler);
+    };
+  },
+  respondResolveDirty: (ok: boolean): void => {
+    ipcRenderer.send('window:resolve-dirty:result', ok);
   },
 };
 

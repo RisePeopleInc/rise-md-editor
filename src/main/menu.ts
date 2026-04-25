@@ -8,6 +8,9 @@ export type MenuAction =
   | 'open-path'
   | 'save'
   | 'save-as'
+  | 'close-tab'
+  | 'next-tab'
+  | 'prev-tab'
   | 'undo'
   | 'redo'
   | 'find'
@@ -115,7 +118,17 @@ export function buildMenu(deps: MenuDeps): Menu {
           submenu: buildRecentSubmenu(deps),
         },
         { type: 'separator' },
-        isMac ? { role: 'close' } : { role: 'quit' },
+        // Cmd/Ctrl+W closes the active tab; only when no tabs remain does
+        // the renderer fall through to closing the window. role:'close' would
+        // bypass the dirty-prompt and tab-close logic.
+        {
+          label: 'Close Tab',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => send(deps, 'close-tab'),
+        },
+        ...(isMac
+          ? []
+          : ([{ role: 'quit' as const }] satisfies MenuItemConstructorOptions[])),
       ],
     },
     {
@@ -196,6 +209,20 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Reset Zoom',
           accelerator: 'CmdOrCtrl+0',
           click: () => send(deps, 'font-zoom-reset'),
+        },
+        { type: 'separator' },
+        // macOS: Cmd+Option+arrows is the native tab-cycle convention used
+        // by Safari, Chrome, and VS Code. Cmd+Tab is reserved by the OS for
+        // app switching. Win/Linux keep the standard Ctrl+Tab pair.
+        {
+          label: 'Next Tab',
+          accelerator: isMac ? 'Cmd+Alt+Right' : 'Ctrl+Tab',
+          click: () => send(deps, 'next-tab'),
+        },
+        {
+          label: 'Previous Tab',
+          accelerator: isMac ? 'Cmd+Alt+Left' : 'Ctrl+Shift+Tab',
+          click: () => send(deps, 'prev-tab'),
         },
         { type: 'separator' },
         { role: 'reload' },

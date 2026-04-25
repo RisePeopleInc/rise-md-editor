@@ -9,6 +9,25 @@ files:
   - '!**/*.{md,map}'
 asar: true
 
+# We're not wired up to an autoupdate channel yet. Without this, recent
+# electron-builder versions throw `Cannot read properties of null (reading
+# 'channel')` while trying to write update metadata after the build.
+publish: null
+
+# Tell the OS that rAIse owns these extensions: enables drag-onto-dock,
+# Finder "Open With", and double-click-to-launch. Files arrive via
+# app.on('open-file') on macOS and process.argv on Windows / Linux.
+fileAssociations:
+  - ext: md
+    name: Markdown Document
+    role: Editor
+  - ext: markdown
+    name: Markdown Document
+    role: Editor
+  - ext: txt
+    name: Text Document
+    role: Editor
+
 # Icons live in build/. Replace build/icon.png (and add build/icon.icns,
 # build/icon.ico if you want platform-specific masters) when the real
 # artwork arrives — the paths below are the only thing pointing at them.

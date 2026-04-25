@@ -10,29 +10,49 @@ import {
 } from 'react';
 import { createElement } from 'react';
 
-export interface FileState {
-  hasDocument: boolean;
+export interface CursorPos {
+  line: number;
+  column: number;
+}
+
+export type EditorMode = 'source' | 'wysiwyg' | 'split';
+
+export interface Tab {
+  id: string;
   path: string | null;
   content: string;
   savedContent: string;
-  isDirty: boolean;
+  cursorPosition: CursorPos;
+  scrollPosition: number;
+  editorMode: EditorMode;
 }
 
-export interface FileActions {
-  setContent: (next: string) => void;
+export interface FileContextValue {
+  tabs: Tab[];
+  activeTabId: string | null;
+  activeTab: Tab | null;
+  isDirty: boolean;
+
+  setContent: (content: string) => void;
   loadFile: (path: string, content: string) => void;
   newFile: () => void;
-  save: () => Promise<boolean>;
-  saveAs: () => Promise<boolean>;
-  /**
-   * Run an action that replaces the current document. If the current document
-   * has unsaved changes, prompts the user (Save / Don't Save / Cancel).
-   * Returns true if the action ran, false if the user canceled or save failed.
-   */
+  save: (id?: string) => Promise<boolean>;
+  saveAs: (id?: string) => Promise<boolean>;
+  saveAllDirty: () => Promise<boolean>;
+  reviewEachDirtyTab: () => Promise<boolean>;
+
+  switchTo: (id: string) => void;
+  closeTab: (id: string) => Promise<boolean>;
+  closeActiveTab: () => Promise<boolean>;
+  nextTab: () => void;
+  prevTab: () => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+
+  setActiveCursor: (cursor: CursorPos) => void;
+  setActiveScroll: (top: number) => void;
+
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
 }
-
-export type FileContextValue = FileState & FileActions;
 
 const FileContext = createContext<FileContextValue | null>(null);
 
@@ -40,146 +60,378 @@ interface FileProviderProps {
   children: ReactNode;
 }
 
-function basename(p: string | null): string {
+function basenameOf(p: string | null): string {
   if (!p) return 'Untitled';
   return p.split(/[\\/]/).pop() || p;
 }
 
+function isTabDirty(t: Tab): boolean {
+  return t.content !== t.savedContent;
+}
+
+function makeTab(path: string | null, content: string): Tab {
+  return {
+    id: crypto.randomUUID(),
+    path,
+    content,
+    savedContent: content,
+    cursorPosition: { line: 1, column: 1 },
+    scrollPosition: 0,
+    editorMode: 'source',
+  };
+}
+
 export function FileProvider({ children }: FileProviderProps) {
-  const [hasDocument, setHasDocument] = useState(false);
-  const [path, setPath] = useState<string | null>(null);
-  const [content, setContentState] = useState<string>('');
-  const [savedContent, setSavedContent] = useState<string>('');
+  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
-  const isDirty = hasDocument && content !== savedContent;
+  // Authoritative refs: every state mutation goes through `writeTabs` /
+  // `writeActiveTabId`, which update the ref *synchronously* and then queue
+  // the React state update. Subsequent calls in the same tick (e.g. a rapid
+  // double-open) see the latest state without waiting for the next commit —
+  // that's what prevents duplicate tabs when two `loadFile` calls land back
+  // to back before React has had a chance to flush.
+  const tabsRef = useRef<Tab[]>([]);
+  const activeTabIdRef = useRef<string | null>(null);
 
-  // Push the cheap signal (path + isDirty) synchronously on every change so
-  // main's close-with-unsaved decision can never read a stale "clean" flag
-  // immediately after a keystroke. The window-title update rides on the
-  // same channel — also wants to stay in sync with isDirty.
-  useEffect(() => {
-    if (!hasDocument) return;
-    window.api.pushFileMeta({ path, isDirty });
-  }, [hasDocument, path, isDirty]);
-
-  // Content can be debounced — it's only consumed by the Save-on-close path
-  // and a small lag there costs at most a few keystrokes, not the whole
-  // dirty-state guarantee.
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!hasDocument) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      window.api.pushFileContent(content);
-    }, 150);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [hasDocument, content]);
-
-  const loadFile = useCallback((nextPath: string, nextContent: string) => {
-    setHasDocument(true);
-    setPath(nextPath);
-    setContentState(nextContent);
-    setSavedContent(nextContent);
+  const writeTabs = useCallback((next: Tab[]) => {
+    tabsRef.current = next;
+    setTabs(next);
   }, []);
+
+  const writeActiveTabId = useCallback((next: string | null) => {
+    activeTabIdRef.current = next;
+    setActiveTabId(next);
+  }, []);
+
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeTabId) ?? null,
+    [tabs, activeTabId],
+  );
+  const isDirty = activeTab ? isTabDirty(activeTab) : false;
+  const dirtyCount = useMemo(() => tabs.filter(isTabDirty).length, [tabs]);
+
+  // Push the active tab's title-relevant signal + the global dirty count
+  // synchronously on every change. Title needs path + isDirty (active);
+  // window close needs dirtyCount (any tab dirty).
+  useEffect(() => {
+    window.api.pushFileMeta({
+      path: activeTab?.path ?? null,
+      isDirty: activeTab ? isTabDirty(activeTab) : false,
+      dirtyCount,
+    });
+  }, [activeTab, dirtyCount]);
+
+  const updateTab = useCallback(
+    (id: string, patch: Partial<Tab>) => {
+      writeTabs(
+        tabsRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      );
+    },
+    [writeTabs],
+  );
+
+  const setContent = useCallback(
+    (content: string) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { content });
+    },
+    [updateTab],
+  );
+
+  const switchTo = useCallback(
+    (id: string) => {
+      writeActiveTabId(id);
+    },
+    [writeActiveTabId],
+  );
+
+  const loadFile = useCallback(
+    (nextPath: string, nextContent: string) => {
+      // Read + write against the synchronous ref so two `loadFile` calls in
+      // the same tick can't both miss an existing tab and create duplicates.
+      const existing = tabsRef.current.find((t) => t.path === nextPath);
+      if (existing) {
+        writeTabs(
+          tabsRef.current.map((t) =>
+            t.id === existing.id
+              ? { ...t, content: nextContent, savedContent: nextContent }
+              : t,
+          ),
+        );
+        writeActiveTabId(existing.id);
+        return;
+      }
+      const tab = makeTab(nextPath, nextContent);
+      writeTabs([...tabsRef.current, tab]);
+      writeActiveTabId(tab.id);
+    },
+    [writeTabs, writeActiveTabId],
+  );
 
   const newFile = useCallback(() => {
-    setHasDocument(true);
-    setPath(null);
-    setContentState('');
-    setSavedContent('');
-  }, []);
+    const tab = makeTab(null, '');
+    writeTabs([...tabsRef.current, tab]);
+    writeActiveTabId(tab.id);
+  }, [writeTabs, writeActiveTabId]);
 
-  const setContent = useCallback((next: string) => {
-    setContentState(next);
-  }, []);
+  const reorderTabs = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const prev = tabsRef.current;
+      if (
+        fromIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex < 0 ||
+        toIndex >= prev.length ||
+        fromIndex === toIndex
+      ) {
+        return;
+      }
+      const next = prev.slice();
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved!);
+      writeTabs(next);
+    },
+    [writeTabs],
+  );
 
-  const saveAs = useCallback(async (): Promise<boolean> => {
-    try {
-      const result = await window.api.files.saveAs(content, basename(path));
-      if (!result) return false;
-      setPath(result.path);
-      setSavedContent(content);
-      window.api.addRecent(result.path);
-      return true;
-    } catch (err) {
-      window.api.showError(
-        'Could not save file',
-        err instanceof Error ? err.message : String(err),
-      );
-      return false;
+  const setActiveCursor = useCallback(
+    (cursor: CursorPos) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { cursorPosition: cursor });
+    },
+    [updateTab],
+  );
+
+  const setActiveScroll = useCallback(
+    (top: number) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { scrollPosition: top });
+    },
+    [updateTab],
+  );
+
+  const saveAs = useCallback(
+    async (id?: string): Promise<boolean> => {
+      const targetId = id ?? activeTabIdRef.current;
+      const tab = tabsRef.current.find((t) => t.id === targetId);
+      if (!tab) return false;
+      try {
+        const result = await window.api.files.saveAs(tab.content, basenameOf(tab.path));
+        if (!result) return false;
+        updateTab(tab.id, { path: result.path, savedContent: tab.content });
+        window.api.addRecent(result.path);
+        return true;
+      } catch (err) {
+        window.api.showError(
+          'Could not save file',
+          err instanceof Error ? err.message : String(err),
+        );
+        return false;
+      }
+    },
+    [updateTab],
+  );
+
+  const save = useCallback(
+    async (id?: string): Promise<boolean> => {
+      const targetId = id ?? activeTabIdRef.current;
+      const tab = tabsRef.current.find((t) => t.id === targetId);
+      if (!tab) return false;
+      if (!tab.path) return saveAs(tab.id);
+      try {
+        await window.api.files.save(tab.path, tab.content);
+        updateTab(tab.id, { savedContent: tab.content });
+        return true;
+      } catch (err) {
+        window.api.showError(
+          'Could not save file',
+          err instanceof Error ? err.message : String(err),
+        );
+        return false;
+      }
+    },
+    [updateTab, saveAs],
+  );
+
+  const saveAllDirty = useCallback(async (): Promise<boolean> => {
+    // Iterate from the live ref so an updated savedContent (after each save)
+    // doesn't re-trigger an already-saved tab.
+    for (const tab of tabsRef.current) {
+      const live = tabsRef.current.find((t) => t.id === tab.id);
+      if (!live || !isTabDirty(live)) continue;
+      // Switch first so any saveAs dialog has obvious context.
+      writeActiveTabId(live.id);
+      const ok = await save(live.id);
+      if (!ok) return false;
     }
-  }, [content, path]);
+    return true;
+  }, [save, writeActiveTabId]);
 
-  const save = useCallback(async (): Promise<boolean> => {
-    if (!path) return saveAs();
-    try {
-      await window.api.files.save(path, content);
-      setSavedContent(content);
-      return true;
-    } catch (err) {
-      window.api.showError(
-        'Could not save file',
-        err instanceof Error ? err.message : String(err),
-      );
-      return false;
+  // Walk dirty tabs one by one, prompting the user for each (Save / Don't
+  // Save / Cancel). 'Don't Save' silently skips that tab; 'Cancel' aborts
+  // the whole flow so the window stays open.
+  const reviewEachDirtyTab = useCallback(async (): Promise<boolean> => {
+    for (const tab of tabsRef.current) {
+      const live = tabsRef.current.find((t) => t.id === tab.id);
+      if (!live || !isTabDirty(live)) continue;
+      writeActiveTabId(live.id);
+      const choice = await window.api.confirmUnsavedChanges(basenameOf(live.path));
+      if (choice === 'cancel') return false;
+      if (choice === 'save') {
+        const ok = await save(live.id);
+        if (!ok) return false;
+      }
     }
-  }, [content, path, saveAs]);
+    return true;
+  }, [save, writeActiveTabId]);
 
   const withDirtyGuard = useCallback(
     async (action: () => void | Promise<void>): Promise<boolean> => {
-      if (isDirty) {
-        const choice = await window.api.confirmUnsavedChanges(basename(path));
+      const current = tabsRef.current.find((t) => t.id === activeTabIdRef.current);
+      if (current && isTabDirty(current)) {
+        const choice = await window.api.confirmUnsavedChanges(basenameOf(current.path));
         if (choice === 'cancel') return false;
         if (choice === 'save') {
-          const ok = await save();
+          const ok = await save(current.id);
           if (!ok) return false;
         }
       }
       await action();
       return true;
     },
-    [isDirty, path, save],
+    [save],
   );
 
-  // If main saves on our behalf during the close-with-unsaved flow, it will
-  // tell us the new path and exact bytes written so the renderer can update
-  // its baseline. Currently the window is closing when this fires, but
-  // future "save without close" flows will need the correct savedContent.
+  const closeTab = useCallback(
+    async (id: string): Promise<boolean> => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return false;
+      if (isTabDirty(tab)) {
+        // Surface which tab the prompt is about — switch to it so the user
+        // sees its content before deciding.
+        writeActiveTabId(id);
+        const choice = await window.api.confirmUnsavedChanges(basenameOf(tab.path));
+        if (choice === 'cancel') return false;
+        if (choice === 'save') {
+          const ok = await save(id);
+          if (!ok) return false;
+        }
+      }
+      // Re-read against the live ref after the await; another close in flight
+      // could have shifted the array.
+      const fresh = tabsRef.current;
+      const idx = fresh.findIndex((t) => t.id === id);
+      if (idx === -1) return false;
+      const next = fresh.slice();
+      next.splice(idx, 1);
+      writeTabs(next);
+      if (id === activeTabIdRef.current) {
+        const neighbour = next[idx] ?? next[idx - 1] ?? null;
+        writeActiveTabId(neighbour ? neighbour.id : null);
+      }
+      return true;
+    },
+    [save, writeTabs, writeActiveTabId],
+  );
+
+  const closeActiveTab = useCallback(async (): Promise<boolean> => {
+    const id = activeTabIdRef.current;
+    if (!id) {
+      // No tabs — close the window (matches macOS Cmd+W on the welcome screen).
+      window.api.closeWindow();
+      return true;
+    }
+    return closeTab(id);
+  }, [closeTab]);
+
+  const nextTab = useCallback(() => {
+    const list = tabsRef.current;
+    if (list.length === 0) return;
+    const idx = list.findIndex((t) => t.id === activeTabIdRef.current);
+    const next = list[(idx + 1) % list.length];
+    if (next) writeActiveTabId(next.id);
+  }, [writeActiveTabId]);
+
+  const prevTab = useCallback(() => {
+    const list = tabsRef.current;
+    if (list.length === 0) return;
+    const idx = list.findIndex((t) => t.id === activeTabIdRef.current);
+    const prev = list[(idx - 1 + list.length) % list.length];
+    if (prev) writeActiveTabId(prev.id);
+  }, [writeActiveTabId]);
+
+  // Window-close dirty-tab resolution. Main asks for either a Save All sweep
+  // or a tab-by-tab walkthrough; we run the chosen flow and report success.
   useEffect(() => {
-    const off = window.api.onFileSavedAs(({ path: savedPath, content: savedBytes }) => {
-      setPath(savedPath);
-      setSavedContent(savedBytes);
+    const off = window.api.onResolveDirty(async (mode) => {
+      const ok =
+        mode === 'save-all' ? await saveAllDirty() : await reviewEachDirtyTab();
+      window.api.respondResolveDirty(ok);
     });
     return off;
-  }, []);
+  }, [saveAllDirty, reviewEachDirtyTab]);
+
+  // If main saved a file on the renderer's behalf during close-flow (legacy
+  // path — no longer the primary route), update the matching tab.
+  useEffect(() => {
+    const off = window.api.onFileSavedAs(({ path: savedPath, content: savedBytes }) => {
+      const next = tabsRef.current.map((t) =>
+        t.path === savedPath || (t.id === activeTabIdRef.current && !t.path)
+          ? { ...t, path: savedPath, savedContent: savedBytes }
+          : t,
+      );
+      writeTabs(next);
+    });
+    return off;
+  }, [writeTabs]);
 
   const value = useMemo<FileContextValue>(
     () => ({
-      hasDocument,
-      path,
-      content,
-      savedContent,
+      tabs,
+      activeTabId,
+      activeTab,
       isDirty,
       setContent,
       loadFile,
       newFile,
       save,
       saveAs,
+      saveAllDirty,
+      reviewEachDirtyTab,
+      switchTo,
+      closeTab,
+      closeActiveTab,
+      nextTab,
+      prevTab,
+      reorderTabs,
+      setActiveCursor,
+      setActiveScroll,
       withDirtyGuard,
     }),
     [
-      hasDocument,
-      path,
-      content,
-      savedContent,
+      tabs,
+      activeTabId,
+      activeTab,
       isDirty,
       setContent,
       loadFile,
       newFile,
       save,
       saveAs,
+      saveAllDirty,
+      reviewEachDirtyTab,
+      switchTo,
+      closeTab,
+      closeActiveTab,
+      nextTab,
+      prevTab,
+      reorderTabs,
+      setActiveCursor,
+      setActiveScroll,
       withDirtyGuard,
     ],
   );
