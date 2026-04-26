@@ -6,6 +6,8 @@ const MAX_WIDTH = 400;
 interface SidebarProps {
   width: number;
   onWidthChange: (width: number) => void;
+  /** Persist the final width once the resize gesture ends. */
+  onWidthCommit: (width: number) => void;
   rootName: string | null;
   onCollapseAll: () => void;
   onOpenFolder: () => void;
@@ -15,6 +17,7 @@ interface SidebarProps {
 export function Sidebar({
   width,
   onWidthChange,
+  onWidthCommit,
   rootName,
   onCollapseAll,
   onOpenFolder,
@@ -23,11 +26,15 @@ export function Sidebar({
   // Mouse-driven horizontal resize on the right edge. Document-level
   // listeners so dragging past the edge doesn't lose tracking; cleaned up
   // on mouseup or by AbortController if the component unmounts mid-drag.
+  // Only the final width is persisted (onWidthCommit) — onWidthChange
+  // fires every mousemove for visual feedback, so committing on each
+  // would mean ~60 disk writes/sec via electron-store.
   const handleResizeStart = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       const startX = e.clientX;
       const startWidth = width;
+      let lastWidth = startWidth;
       const ac = new AbortController();
       document.addEventListener(
         'mousemove',
@@ -36,6 +43,7 @@ export function Sidebar({
             MIN_WIDTH,
             Math.min(MAX_WIDTH, startWidth + (ev.clientX - startX)),
           );
+          lastWidth = next;
           onWidthChange(next);
         },
         { signal: ac.signal },
@@ -46,13 +54,16 @@ export function Sidebar({
           ac.abort();
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
+          // Persist the final width — only one electron-store write per
+          // gesture, regardless of how many pixels the user dragged.
+          if (lastWidth !== startWidth) onWidthCommit(lastWidth);
         },
         { signal: ac.signal },
       );
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
     },
-    [width, onWidthChange],
+    [width, onWidthChange, onWidthCommit],
   );
 
   return (

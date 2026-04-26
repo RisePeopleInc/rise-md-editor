@@ -195,7 +195,13 @@ function NameInput({
         ref={inputRef}
         type="text"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          // Editing again after a failed submit re-arms the blur handler —
+          // otherwise the input would stay mounted but blur would no
+          // longer commit the user's correction.
+          settledRef.current = false;
+          setValue(e.target.value);
+        }}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
         // Don't propagate clicks: clicking the input shouldn't open the

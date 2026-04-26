@@ -91,22 +91,45 @@ export async function pickFolder(window: BrowserWindow): Promise<string | null> 
  * EEXIST (via the `wx` flag) if a file with that name already exists, so
  * the renderer can surface a proper error instead of silently overwriting.
  */
+/**
+ * Reject names that would let a caller escape the parent directory or
+ * cause confusing/duplicate behaviour. The renderer already filters most
+ * of these, but keeping the check in main is defence-in-depth: any future
+ * IPC caller is guaranteed to get a same-folder, single-segment name.
+ */
+function assertValidLeafName(name: string): void {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Name cannot be empty');
+  if (trimmed === '.' || trimmed === '..') {
+    throw new Error('Name cannot be "." or ".."');
+  }
+  if (trimmed.includes('/') || trimmed.includes('\\')) {
+    throw new Error('Name cannot contain "/" or "\\"');
+  }
+  if (trimmed.includes('\0')) {
+    throw new Error('Name cannot contain a null byte');
+  }
+}
+
 export async function createFileNamed(
   parentPath: string,
   name: string,
 ): Promise<string> {
+  assertValidLeafName(name);
   const target = path.join(parentPath, name);
   await fs.writeFile(target, '', { encoding: 'utf-8', flag: 'wx' });
   return target;
 }
 
 export async function createNewFolder(dirPath: string, name: string): Promise<string> {
+  assertValidLeafName(name);
   const target = path.join(dirPath, name);
   await fs.mkdir(target, { recursive: false });
   return target;
 }
 
 export async function renamePath(oldPath: string, newName: string): Promise<string> {
+  assertValidLeafName(newName);
   const dir = path.dirname(oldPath);
   const target = path.join(dir, newName);
   await fs.rename(oldPath, target);

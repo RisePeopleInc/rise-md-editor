@@ -161,18 +161,23 @@ function AppContent() {
     [handleOpenPath, sidebar, file],
   );
 
+  // Both submit handlers follow the same shape: validate (and bail with
+  // the input still open if invalid), try the IPC, only call cancelEdit
+  // on success. On error the inline input stays mounted with the user's
+  // typed value preserved — they can fix the conflict and re-press Enter
+  // without retyping from scratch.
   const handleRenameSubmit = useCallback(
     async (oldPath: string, newName: string) => {
-      sidebar.cancelEdit();
-      if (newName === '') return;
-      // Disallow path separators to prevent accidental moves — rename is
-      // strictly a name change in this UI.
+      if (newName === '') {
+        sidebar.cancelEdit();
+        return;
+      }
       if (newName.includes('/') || newName.includes('\\')) {
         window.api.showError(
           'Invalid name',
           'Names cannot contain "/" or "\\".',
         );
-        return;
+        return; // Keep the input open so the user can correct.
       }
       try {
         const newPath = await window.api.folder.rename(oldPath, newName);
@@ -180,11 +185,17 @@ function AppContent() {
         // still points at the old path and a Cmd+S would write a ghost
         // file at the original location.
         file.relocateTabs(oldPath, newPath);
+        sidebar.cancelEdit();
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         window.api.showError(
           'Could not rename',
-          err instanceof Error ? err.message : String(err),
+          /EEXIST/i.test(message)
+            ? `An item named "${newName}" already exists in that folder.`
+            : message,
         );
+        // Don't cancelEdit — leave the input visible so the user can
+        // pick a different name.
       }
     },
     [sidebar, file],
@@ -192,8 +203,10 @@ function AppContent() {
 
   const handleCreateSubmit = useCallback(
     async (parentPath: string, kind: 'file' | 'folder', name: string) => {
-      sidebar.cancelEdit();
-      if (name === '') return;
+      if (name === '') {
+        sidebar.cancelEdit();
+        return;
+      }
       if (name.includes('/') || name.includes('\\')) {
         window.api.showError(
           'Invalid name',
@@ -204,19 +217,22 @@ function AppContent() {
       try {
         if (kind === 'file') {
           const newPath = await window.api.folder.createFile(parentPath, name);
+          sidebar.cancelEdit();
           void handleOpenPath(newPath);
         } else {
           await window.api.folder.createFolder(parentPath, name);
+          sidebar.cancelEdit();
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         window.api.showError(
           kind === 'file' ? 'Could not create file' : 'Could not create folder',
-          // EEXIST is the most common failure — surface it readably.
           /EEXIST/i.test(message)
             ? `An item named "${name}" already exists in that folder.`
             : message,
         );
+        // Don't cancelEdit — keep the input mounted so the user's typing
+        // is preserved and they can pick a different name.
       }
     },
     [handleOpenPath, sidebar],
@@ -470,10 +486,15 @@ function AppContent() {
 
   return (
     <div className="flex h-full w-full">
-      {sidebar.visible && (
+      {/* Gate on prefsReady so the persisted visibility wins on first
+          paint — otherwise the default `false` would flash for users who
+          had the sidebar shown last time, and the default `true` (used
+          previously) flashed it open for users who had it hidden. */}
+      {sidebar.prefsReady && sidebar.visible && (
         <Sidebar
           width={sidebar.width}
           onWidthChange={sidebar.setWidth}
+          onWidthCommit={sidebar.commitWidth}
           rootName={sidebar.rootPath ? basenameOfPath(sidebar.rootPath) : null}
           onCollapseAll={sidebar.collapseAll}
           onOpenFolder={handleOpenFolder}

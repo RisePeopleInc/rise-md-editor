@@ -22,12 +22,22 @@ export interface SidebarState {
   rootPath: string | null;
   rootTree: TreeNode | null;
 
+  /**
+   * `true` once the persisted sidebar prefs have been read from
+   * electron-store. App.tsx gates the sidebar render on this so the
+   * default `visible: true` state doesn't flash on launch for users who
+   * had the sidebar hidden last time.
+   */
+  prefsReady: boolean;
+
   /** Visibility / sizing — both persisted via main's electron-store. */
   visible: boolean;
   width: number;
+  /** Update the displayed width without persisting (called on every mousemove). */
   setWidth: (width: number) => void;
+  /** Persist the width — call once when the resize gesture ends. */
+  commitWidth: (width: number) => void;
   toggleVisible: () => void;
-  setVisible: (visible: boolean) => void;
 
   /** Set of directory paths the user has expanded. */
   expanded: Set<string>;
@@ -62,8 +72,13 @@ const SIDEBAR_DEFAULT_WIDTH = 250;
 export function useSidebarState(): SidebarState {
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [rootTree, setRootTree] = useState<TreeNode | null>(null);
-  const [visible, setVisibleState] = useState<boolean>(true);
+  // Default to `false` so the sidebar doesn't flash open before the
+  // persisted preference (read async via IPC on mount) lands. The App gates
+  // rendering on `prefsReady` to avoid the inverse — sidebar appearing late
+  // for users who had it shown.
+  const [visible, setVisibleState] = useState<boolean>(false);
   const [width, setWidthState] = useState<number>(SIDEBAR_DEFAULT_WIDTH);
+  const [prefsReady, setPrefsReady] = useState<boolean>(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [creating, setCreating] = useState<CreatingState | null>(null);
@@ -78,6 +93,7 @@ export function useSidebarState(): SidebarState {
       const pref = await window.api.folder.getSidebarPref();
       setVisibleState(pref.visible);
       setWidthState(pref.width);
+      setPrefsReady(true);
       const last = await window.api.folder.getLast();
       if (last) {
         setRootPath(last.path);
@@ -88,14 +104,15 @@ export function useSidebarState(): SidebarState {
     })();
   }, []);
 
+  // Mousemove during a resize gesture only updates state — every mousemove
+  // would otherwise trip an IPC send + electron-store write (~60/sec on a
+  // smooth drag). `commitWidth` persists once the gesture ends.
   const setWidth = useCallback((next: number) => {
     setWidthState(next);
-    window.api.folder.setSidebarWidth(next);
   }, []);
 
-  const setVisible = useCallback((next: boolean) => {
-    setVisibleState(next);
-    window.api.folder.setSidebarVisible(next);
+  const commitWidth = useCallback((next: number) => {
+    window.api.folder.setSidebarWidth(next);
   }, []);
 
   const toggleVisible = useCallback(() => {
@@ -224,11 +241,12 @@ export function useSidebarState(): SidebarState {
   return {
     rootPath,
     rootTree,
+    prefsReady,
     visible,
     width,
     setWidth,
+    commitWidth,
     toggleVisible,
-    setVisible,
     expanded,
     toggleExpanded,
     expandPath,
