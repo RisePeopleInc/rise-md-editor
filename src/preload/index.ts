@@ -29,6 +29,7 @@ export type MenuActionType =
   | 'editor-theme-system'
   | 'editor-theme-light'
   | 'editor-theme-dark'
+  | 'cycle-editor-theme'
   | 'editor-contrast-hard'
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'

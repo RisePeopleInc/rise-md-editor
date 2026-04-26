@@ -30,6 +30,7 @@ export type MenuAction =
   | 'editor-theme-system'
   | 'editor-theme-light'
   | 'editor-theme-dark'
+  | 'cycle-editor-theme'
   | 'editor-contrast-hard'
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'
@@ -306,6 +307,13 @@ export function buildMenu(deps: MenuDeps): Menu {
               type: 'checkbox',
               checked: deps.getEditorThemePreference() === 'dark',
               click: () => send(deps, 'editor-theme-dark'),
+            },
+            {
+              // Mirrors the app's Cmd+Shift+T cycle, with Alt added to
+              // disambiguate. system → light → dark → system.
+              label: 'Cycle Editor Theme',
+              accelerator: 'CmdOrCtrl+Alt+Shift+T',
+              click: () => send(deps, 'cycle-editor-theme'),
             },
             { type: 'separator' },
             {

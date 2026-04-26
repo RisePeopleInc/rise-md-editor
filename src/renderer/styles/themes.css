@@ -49,6 +49,16 @@
 
   /* Translucent helpers (used for hover layers, focus rings, etc.) */
   --rise-interaction-translucent: rgb(85 93 242 / 0.12);
+
+  /* Card / popover styling per the RDS spec. The Depth 1 shadow is a
+   * three-stop drop shadow tinted with the brand blue at low alphas —
+   * gives floating elements (slash menu, tooltips, dialogs) a soft,
+   * branded lift instead of the default Chrome hard black shadow. */
+  --rise-radius-card: 12px;
+  --rise-shadow-depth-1:
+    0 4px 16px -8px rgb(9 36 124 / 0.10),
+    0 1px 3px -1px rgb(9 36 124 / 0.20),
+    0 1px 1px 0 rgb(9 36 124 / 0.10);
 }
 
 /* -------------------------------------------------------------------------
@@ -82,6 +92,14 @@
   --rise-warning: #ffcc33;
 
   --rise-interaction-translucent: rgb(85 93 242 / 0.18);
+
+  /* Dark mode shadows — pure black at higher alphas, since the brand
+   * blue would disappear into the dark surface. Same shape as Depth 1
+   * (three stops, soft+sharp+contact). */
+  --rise-shadow-depth-1:
+    0 4px 16px -8px rgb(0 0 0 / 0.50),
+    0 1px 3px -1px rgb(0 0 0 / 0.60),
+    0 1px 1px 0 rgb(0 0 0 / 0.40);
 }
 
 /* -------------------------------------------------------------------------
@@ -157,11 +175,21 @@ body,
 }
 
 /* -------------------------------------------------------------------------
- * Custom scrollbars — Rise neutrals on both themes. Default Chrome
- * scrollbars are far too high-contrast for a dark UI and clash with
- * the muted Rise palette in light mode.
+ * Custom scrollbars — Rise neutrals on both themes.
+ *
+ * Two motivations beyond "make them look on-brand":
+ *
+ *  1. macOS overlay scrollbars (the default when `Show scroll bars` is
+ *     `When scrolling`) auto-hide and feel inconsistent with Monaco's
+ *     always-visible canvas scrollbars. Setting `::-webkit-scrollbar`
+ *     widths overrides the overlay style and produces a classic, always-
+ *     reserved scrollbar.
+ *  2. The previous `bg-tertiary` thumb color was nearly invisible
+ *     against the primary surface in light mode (#E1E6EF on #FFFFFF) —
+ *     bumped to `text-disabled` (N400 #AAADB0) for legibility.
  * ------------------------------------------------------------------------- */
 * {
+  /* Firefox-side fallback — the WebKit rules below win on Chromium. */
   scrollbar-color: var(--rise-text-disabled) transparent;
   scrollbar-width: thin;
 }
@@ -176,11 +204,16 @@ body,
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--rise-bg-tertiary);
+  background: var(--rise-text-disabled);
   border-radius: 8px;
-  border: 2px solid var(--rise-bg-primary);
+  /* The 2px transparent border shrinks the visible thumb without
+   * shrinking the hit-target — gives the scrollbar a subtle padded
+   * look while keeping it easy to grab. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--rise-text-disabled);
+  background: var(--rise-text-muted);
+  background-clip: padding-box;
 }

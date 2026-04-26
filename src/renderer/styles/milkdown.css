@@ -210,14 +210,16 @@
   border-top: 1px solid var(--rise-text-muted);
 }
 
-/* Slash command menu (from plugin-slash) */
+/* Slash command menu (from plugin-slash). Card-class element per the
+ * RDS spec: 12px radius, three-stop Depth 1 shadow tinted with brand
+ * blue. Same treatment for dialogs/popovers added later. */
 .milkdown-slash-menu,
 [data-milkdown-slash] {
   background: var(--rise-bg-primary);
   border: 1px solid var(--rise-border);
-  border-radius: 6px;
+  border-radius: var(--rise-radius-card);
   padding: 0.25rem;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.15);
+  box-shadow: var(--rise-shadow-depth-1);
 }
 
 /* Tooltip (from plugin-tooltip) */
@@ -226,8 +228,8 @@
   background: var(--rise-bg-tertiary);
   border: 1px solid var(--rise-border);
   color: var(--rise-text-primary);
-  border-radius: 6px;
+  border-radius: var(--rise-radius-card);
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.15);
+  box-shadow: var(--rise-shadow-depth-1);
 }

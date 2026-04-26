@@ -33,7 +33,11 @@
     <script>
       (function () {
         try {
-          var stored = localStorage.getItem('rise-theme'); // 'system' | 'light' | 'dark'
+          // The 'rise-theme' key MUST stay in sync with
+          // `BOOT_STORAGE_KEY` in src/renderer/state/themeState.ts —
+          // the hook writes it on every theme change so this script
+          // can read the last resolved value on next launch.
+          var stored = localStorage.getItem('rise-theme'); // 'light' | 'dark'
           var resolved;
           if (stored === 'light' || stored === 'dark') {
             resolved = stored;

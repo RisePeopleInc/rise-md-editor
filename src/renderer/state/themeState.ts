@@ -19,6 +19,11 @@ import {
  * Stores the *resolved app* value (light/dark) only — the editor zone
  * is independent and lives entirely inside Monaco, so it doesn't need
  * a pre-paint sync.
+ *
+ * MUST stay in sync with the literal string in `src/renderer/index.html`'s
+ * inline bootstrap script. Renaming one without the other silently
+ * breaks the no-flash launch (next boot reads the old key, gets null,
+ * falls back to matchMedia).
  */
 const BOOT_STORAGE_KEY = 'rise-theme';
 
@@ -41,6 +46,8 @@ interface UseThemeStateResult {
 
   /** Set the editor-zone preference (system / light / dark). */
   setEditorPreference: (pref: ThemePreference) => Promise<void>;
+  /** Cycle editor preference: system → light → dark → system. */
+  cycleEditorPreference: () => Promise<void>;
   /** Set the editor contrast (hard / medium / soft). */
   setEditorContrast: (contrast: EditorContrast) => Promise<void>;
 }
@@ -136,6 +143,13 @@ export function useThemeState(): UseThemeStateResult {
     [apply],
   );
 
+  const cycleEditorPreference = useCallback(async () => {
+    const order: ThemePreference[] = ['system', 'light', 'dark'];
+    const idx = order.indexOf(state.editor.preference);
+    const next = order[(idx + 1) % order.length] ?? 'system';
+    await setEditorPreference(next);
+  }, [state.editor.preference, setEditorPreference]);
+
   const setEditorContrast = useCallback(
     async (contrast: EditorContrast) => {
       const next = await window.api.theme.setEditor({ contrast });
@@ -156,6 +170,7 @@ export function useThemeState(): UseThemeStateResult {
     setAppPreference,
     cycleAppPreference,
     setEditorPreference,
+    cycleEditorPreference,
     setEditorContrast,
   };
 }

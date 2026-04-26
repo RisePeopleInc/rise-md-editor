@@ -545,6 +545,9 @@ function AppContent() {
         case 'editor-theme-dark':
           void theme.setEditorPreference('dark');
           break;
+        case 'cycle-editor-theme':
+          void theme.cycleEditorPreference();
+          break;
         case 'editor-contrast-hard':
           void theme.setEditorContrast('hard');
           break;

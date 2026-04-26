@@ -805,6 +805,11 @@ ipcMain.handle(
       contrast?: themeStore.EditorContrast;
     },
   ) => {
+    // No-op short-circuit when the caller passed nothing — avoids a
+    // pointless menu rebuild + broadcast.
+    if (payload.preference === undefined && payload.contrast === undefined) {
+      return snapshotThemeState();
+    }
     if (payload.preference !== undefined) {
       themeStore.setEditorThemePreference(payload.preference);
     }
