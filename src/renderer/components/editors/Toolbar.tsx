@@ -40,10 +40,10 @@ function ToolbarButton({ onClick, active, title, disabled, children }: ToolbarBu
       title={title}
       disabled={disabled}
       className={[
-        'flex h-7 min-w-[28px] items-center justify-center rounded px-2 text-xs font-medium transition',
+        'flex h-7 min-w-[28px] items-center justify-center rounded px-2 text-xs font-semibold transition',
         active
-          ? 'bg-slate-700 text-slate-50'
-          : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100',
+          ? 'bg-interaction text-white'
+          : 'text-body hover:bg-elevated hover:text-strong',
         disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer',
       ].join(' ')}
     >
@@ -53,7 +53,7 @@ function ToolbarButton({ onClick, active, title, disabled, children }: ToolbarBu
 }
 
 function Divider() {
-  return <span aria-hidden className="mx-1 h-4 w-px bg-slate-700" />;
+  return <span aria-hidden className="mx-1 h-4 w-px bg-stroke" />;
 }
 
 export function Toolbar() {
@@ -183,7 +183,7 @@ export function Toolbar() {
     <div
       role="toolbar"
       aria-label="Formatting"
-      className="flex h-9 shrink-0 items-center gap-0.5 border-b border-slate-800 bg-slate-900 px-2"
+      className="flex h-9 shrink-0 items-center gap-0.5 border-b border-stroke bg-surface px-2"
     >
       <ToolbarButton
         title="Heading 1"

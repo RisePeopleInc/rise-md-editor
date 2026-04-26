@@ -9,13 +9,19 @@
  * contexts. Tailwind's preflight resets headings/paragraph margins, so
  * without explicit rules here the preview would render h1 / strong / etc.
  * as undifferentiated body text.
+ *
+ * RAISE-10: typography + colors are sourced from the Rise design system.
+ * Headings (H1/H2) use Source Serif Pro Bold in the Rise brand color;
+ * everything else uses Open Sans on the Rise text scale. Light and dark
+ * variants share these rules — colors come from CSS variables that
+ * swap with [data-theme].
  */
 
 .raise-prose {
-  color: rgb(226 232 240);              /* slate-200 */
+  color: var(--rise-text-body);
   font-size: 16px;
   line-height: 1.6;
-  font-family: inherit;
+  font-family: var(--font-sans);
 }
 
 /* The Milkdown editable surface */
@@ -35,23 +41,34 @@
   margin-top: 0.85em;
 }
 
-/* Headings */
+/* Headings.
+ * H1 + H2 carry the Rise serif and the brand blue — they're the
+ * visual signature of the prose surface. H3-H6 use Open Sans Semibold
+ * in the strong-text color so they read as section labels rather than
+ * branded chrome.
+ */
 .raise-prose h1,
-.raise-prose h2,
+.raise-prose h2 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--rise-brand);
+}
 .raise-prose h3,
 .raise-prose h4,
 .raise-prose h5,
 .raise-prose h6 {
+  font-family: var(--font-sans);
   font-weight: 600;
   line-height: 1.3;
-  color: rgb(248 250 252);              /* slate-50 */
+  color: var(--rise-text-primary);
 }
-.raise-prose h1 { font-size: 1.875rem; margin-top: 1.5em; }
-.raise-prose h2 { font-size: 1.5rem;   margin-top: 1.4em; }
-.raise-prose h3 { font-size: 1.25rem;  margin-top: 1.3em; }
-.raise-prose h4 { font-size: 1.125rem; }
-.raise-prose h5,
-.raise-prose h6 { font-size: 1rem; }
+.raise-prose h1 { font-size: 32px; margin-top: 1.5em; }
+.raise-prose h2 { font-size: 24px; margin-top: 1.4em; }
+.raise-prose h3 { font-size: 20px; margin-top: 1.3em; }
+.raise-prose h4 { font-size: 18px; }
+.raise-prose h5 { font-size: 16px; }
+.raise-prose h6 { font-size: 14px; }
 
 /* First block at the top of the document shouldn't get extra margin-top
  * — looks weird right against the padded container. */
@@ -66,26 +83,36 @@
 }
 
 /* Inline marks */
-.raise-prose strong { color: rgb(248 250 252); font-weight: 700; }
-.raise-prose em     { font-style: italic; }
+.raise-prose strong {
+  color: var(--rise-text-primary);
+  font-weight: 700;
+}
+.raise-prose em { font-style: italic; }
 .raise-prose s,
-.raise-prose del    { text-decoration: line-through; opacity: 0.75; }
+.raise-prose del {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
 
+/* Inline code */
 .raise-prose code {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.875em;
-  background: rgb(30 41 59);            /* slate-800 */
-  color: rgb(248 250 252);
+  background: var(--rise-bg-secondary);
+  color: var(--rise-text-primary);
   padding: 0.15em 0.35em;
   border-radius: 4px;
-  border: 1px solid rgb(51 65 85);      /* slate-700 */
+  border: 1px solid var(--rise-border);
 }
 
-/* Code blocks */
+/* Code blocks: monospace on the secondary surface, with a brand
+ * accent stripe on the leading edge so they're visually grouped
+ * apart from prose. */
 .raise-prose pre {
-  background: rgb(15 23 42);            /* slate-900 */
-  color: rgb(241 245 249);              /* slate-100 */
-  border: 1px solid rgb(51 65 85);
+  background: var(--rise-bg-secondary);
+  color: var(--rise-text-primary);
+  border: 1px solid var(--rise-border);
+  border-left: 3px solid var(--rise-interaction);
   border-radius: 6px;
   padding: 0.85rem 1rem;
   overflow-x: auto;
@@ -104,14 +131,14 @@
 .raise-prose [data-language] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
-  color: rgb(148 163 184);              /* slate-400 */
+  color: var(--rise-text-muted);
 }
 
 /* Blockquote */
 .raise-prose blockquote {
-  border-left: 3px solid rgb(51 65 85);
+  border-left: 3px solid var(--rise-border);
   padding-left: 1rem;
-  color: rgb(203 213 225);              /* slate-300 */
+  color: var(--rise-text-muted);
   font-style: italic;
 }
 .raise-prose blockquote > :first-child { margin-top: 0; }
@@ -132,15 +159,18 @@
 .raise-prose hr {
   border: 0;
   height: 1px;
-  background: rgb(51 65 85);
+  background: var(--rise-border);
   margin: 1.5em 0;
 }
 
 /* Links */
 .raise-prose a {
-  color: rgb(45 212 191);               /* teal-400 */
-  text-decoration: underline;
+  color: var(--rise-interaction);
+  text-decoration: none;
   text-underline-offset: 2px;
+}
+.raise-prose a:hover {
+  text-decoration: underline;
 }
 
 /* Images */
@@ -158,45 +188,48 @@
 }
 .raise-prose th,
 .raise-prose td {
-  border: 1px solid rgb(51 65 85);
+  border: 1px solid var(--rise-border);
   padding: 0.45rem 0.7rem;
   text-align: left;
 }
 .raise-prose th {
-  background: rgb(30 41 59);
+  background: var(--rise-bg-secondary);
+  color: var(--rise-text-primary);
   font-weight: 600;
 }
 .raise-prose .selectedCell {
-  background: rgba(20 184 166 / 0.15);  /* brand-500 glow */
+  background: var(--rise-interaction-translucent);
 }
 
 /* ProseMirror selection / cursor decorations */
 .raise-prose .ProseMirror .ProseMirror-selectednode {
-  outline: 2px solid rgb(20 184 166);
+  outline: 2px solid var(--rise-interaction);
   outline-offset: 2px;
 }
 .raise-prose .ProseMirror .ProseMirror-gapcursor:after {
-  border-top: 1px solid rgb(148 163 184);
+  border-top: 1px solid var(--rise-text-muted);
 }
 
-/* Slash command menu (from plugin-slash) */
+/* Slash command menu (from plugin-slash). Card-class element per the
+ * RDS spec: 12px radius, three-stop Depth 1 shadow tinted with brand
+ * blue. Same treatment for dialogs/popovers added later. */
 .milkdown-slash-menu,
 [data-milkdown-slash] {
-  background: rgb(15 23 42);
-  border: 1px solid rgb(51 65 85);
-  border-radius: 6px;
+  background: var(--rise-bg-primary);
+  border: 1px solid var(--rise-border);
+  border-radius: var(--rise-radius-card);
   padding: 0.25rem;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--rise-shadow-depth-1);
 }
 
 /* Tooltip (from plugin-tooltip) */
 .milkdown-tooltip,
 [data-milkdown-tooltip] {
-  background: rgb(15 23 42);
-  border: 1px solid rgb(51 65 85);
-  color: rgb(226 232 240);
-  border-radius: 6px;
+  background: var(--rise-bg-tertiary);
+  border: 1px solid var(--rise-border);
+  color: var(--rise-text-primary);
+  border-radius: var(--rise-radius-card);
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--rise-shadow-depth-1);
 }

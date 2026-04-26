@@ -50,7 +50,7 @@ function MarkdownIcon() {
       height="14"
       viewBox="0 0 16 16"
       aria-hidden
-      className="shrink-0 text-brand-500"
+      className="shrink-0 text-interaction"
     >
       <rect x="1.5" y="2" width="13" height="12" rx="1.5" fill="currentColor" opacity="0.18" />
       <text
@@ -75,7 +75,7 @@ function GenericFileIcon() {
       height="14"
       viewBox="0 0 16 16"
       aria-hidden
-      className="shrink-0 text-slate-500"
+      className="shrink-0 text-disabled"
     >
       <path
         fill="currentColor"
@@ -93,7 +93,7 @@ function Caret({ open }: { open: boolean }) {
       height="10"
       viewBox="0 0 10 10"
       aria-hidden
-      className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''} text-slate-400`}
+      className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''} text-muted`}
     >
       <path d="M3 2 L7 5 L3 8 Z" fill="currentColor" />
     </svg>
@@ -210,8 +210,8 @@ function NameInput({
         onContextMenu={(e) => e.stopPropagation()}
         className={[
           'min-w-0 flex-1 rounded border px-1 py-px text-sm leading-tight',
-          'border-brand-500 bg-slate-900 text-slate-100',
-          'outline-none ring-1 ring-brand-500/40',
+          'border-interaction bg-app text-strong',
+          'outline-none ring-1 ring-interaction/40',
         ].join(' ')}
         spellCheck={false}
         autoCapitalize="off"
@@ -300,10 +300,10 @@ function Row(props: RowProps) {
             'flex w-full cursor-pointer select-none items-center gap-1.5 rounded pr-2 text-sm',
             ROW_HEIGHT,
             node.isDirectory
-              ? 'text-slate-200 hover:bg-slate-800'
+              ? 'text-strong hover:bg-elevated'
               : openable
-                ? 'text-slate-300 hover:bg-slate-800'
-                : 'text-slate-500 cursor-default hover:bg-slate-900',
+                ? 'text-body hover:bg-elevated'
+                : 'text-disabled cursor-default hover:bg-elevated/40',
           ].join(' ')}
           style={{ paddingLeft: indent + 6 }}
           title={node.path}

@@ -16,7 +16,7 @@ export function StatusBar({
   mode = 'Source',
 }: StatusBarProps) {
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900 px-3 text-xs text-slate-400 select-none">
+    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-stroke bg-surface px-3 text-xs text-muted select-none">
       <div className="flex-1 text-left tabular-nums">
         Ln {line}, Col {column}
       </div>

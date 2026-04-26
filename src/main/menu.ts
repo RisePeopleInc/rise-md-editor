@@ -23,7 +23,17 @@ export type MenuAction =
   | 'source-mode'
   | 'split-mode'
   | 'cycle-mode'
-  | 'toggle-theme'
+  | 'theme-system'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'cycle-theme'
+  | 'editor-theme-system'
+  | 'editor-theme-light'
+  | 'editor-theme-dark'
+  | 'cycle-editor-theme'
+  | 'editor-contrast-hard'
+  | 'editor-contrast-medium'
+  | 'editor-contrast-soft'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -41,6 +51,18 @@ export interface MenuDeps {
    * the renderer routes correctly via `templates:create`.
    */
   claudeMdPresent: () => boolean;
+  /**
+   * Current app theme preference — one of 'system' | 'light' | 'dark'.
+   * Drives the radio-style checkmarks under View → Theme.
+   */
+  getThemePreference: () => 'system' | 'light' | 'dark';
+  /**
+   * Current editor theme preference. Independent of the app preference;
+   * drives checkmarks under View → Editor Theme.
+   */
+  getEditorThemePreference: () => 'system' | 'light' | 'dark';
+  /** Current editor contrast — drives the contrast checkmarks. */
+  getEditorContrast: () => 'hard' | 'medium' | 'soft';
   /**
    * Dispatch a menu action. The implementation is responsible for queuing and
    * (if needed) reopening the window — never short-circuits on a missing
@@ -229,9 +251,90 @@ export function buildMenu(deps: MenuDeps): Menu {
         },
         { type: 'separator' },
         {
-          label: 'Toggle Theme',
-          accelerator: 'CmdOrCtrl+Shift+T',
-          click: () => send(deps, 'toggle-theme'),
+          // App-zone theme — controls WYSIWYG / preview / chrome /
+          // welcome screen. Independent of the editor (Monaco) theme
+          // below, so users can pin Gruvbox dark for code while the
+          // rest of the app follows the OS, or any other combination.
+          label: 'Theme',
+          submenu: [
+            {
+              label: 'Follow System',
+              type: 'checkbox',
+              checked: deps.getThemePreference() === 'system',
+              click: () => send(deps, 'theme-system'),
+            },
+            {
+              label: 'Light',
+              type: 'checkbox',
+              checked: deps.getThemePreference() === 'light',
+              click: () => send(deps, 'theme-light'),
+            },
+            {
+              label: 'Dark',
+              type: 'checkbox',
+              checked: deps.getThemePreference() === 'dark',
+              click: () => send(deps, 'theme-dark'),
+            },
+            { type: 'separator' },
+            {
+              // Cycle: system → light → dark → system. Preserves the
+              // shortcut users already learned for the previous toggle.
+              label: 'Cycle Theme',
+              accelerator: 'CmdOrCtrl+Shift+T',
+              click: () => send(deps, 'cycle-theme'),
+            },
+          ],
+        },
+        {
+          // Editor (Monaco) theme — Gruvbox, with three contrast levels
+          // and an independent light/dark/system toggle.
+          label: 'Editor Theme',
+          submenu: [
+            {
+              label: 'Follow System',
+              type: 'checkbox',
+              checked: deps.getEditorThemePreference() === 'system',
+              click: () => send(deps, 'editor-theme-system'),
+            },
+            {
+              label: 'Light',
+              type: 'checkbox',
+              checked: deps.getEditorThemePreference() === 'light',
+              click: () => send(deps, 'editor-theme-light'),
+            },
+            {
+              label: 'Dark',
+              type: 'checkbox',
+              checked: deps.getEditorThemePreference() === 'dark',
+              click: () => send(deps, 'editor-theme-dark'),
+            },
+            {
+              // Mirrors the app's Cmd+Shift+T cycle, with Alt added to
+              // disambiguate. system → light → dark → system.
+              label: 'Cycle Editor Theme',
+              accelerator: 'CmdOrCtrl+Alt+Shift+T',
+              click: () => send(deps, 'cycle-editor-theme'),
+            },
+            { type: 'separator' },
+            {
+              label: 'Hard contrast',
+              type: 'checkbox',
+              checked: deps.getEditorContrast() === 'hard',
+              click: () => send(deps, 'editor-contrast-hard'),
+            },
+            {
+              label: 'Medium contrast',
+              type: 'checkbox',
+              checked: deps.getEditorContrast() === 'medium',
+              click: () => send(deps, 'editor-contrast-medium'),
+            },
+            {
+              label: 'Soft contrast',
+              type: 'checkbox',
+              checked: deps.getEditorContrast() === 'soft',
+              click: () => send(deps, 'editor-contrast-soft'),
+            },
+          ],
         },
         { type: 'separator' },
         {

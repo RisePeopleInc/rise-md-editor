@@ -14,6 +14,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
 import { useSidebarState, isOpenable } from './state/sidebarState';
+import { useThemeState } from './state/themeState';
 import type { MenuActionEvent, TemplateKind, TreeNode } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
@@ -44,6 +45,7 @@ function basenameOfPath(p: string): string {
 function AppContent() {
   const file = useFileState();
   const sidebar = useSidebarState();
+  const theme = useThemeState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
@@ -522,6 +524,39 @@ function AppContent() {
         case 'toggle-sidebar':
           sidebar.toggleVisible();
           break;
+        case 'theme-system':
+          void theme.setAppPreference('system');
+          break;
+        case 'theme-light':
+          void theme.setAppPreference('light');
+          break;
+        case 'theme-dark':
+          void theme.setAppPreference('dark');
+          break;
+        case 'cycle-theme':
+          void theme.cycleAppPreference();
+          break;
+        case 'editor-theme-system':
+          void theme.setEditorPreference('system');
+          break;
+        case 'editor-theme-light':
+          void theme.setEditorPreference('light');
+          break;
+        case 'editor-theme-dark':
+          void theme.setEditorPreference('dark');
+          break;
+        case 'cycle-editor-theme':
+          void theme.cycleEditorPreference();
+          break;
+        case 'editor-contrast-hard':
+          void theme.setEditorContrast('hard');
+          break;
+        case 'editor-contrast-medium':
+          void theme.setEditorContrast('medium');
+          break;
+        case 'editor-contrast-soft':
+          void theme.setEditorContrast('soft');
+          break;
         default:
           break;
       }
@@ -532,6 +567,7 @@ function AppContent() {
     isWysiwyg,
     isMonacoActive,
     sidebar,
+    theme,
     handleNewFile,
     handleCreateFromTemplate,
     handleOpenFile,
@@ -627,8 +663,11 @@ function AppContent() {
       {/* Gate on prefsReady so the persisted visibility wins on first
           paint — otherwise the default `false` would flash for users who
           had the sidebar shown last time, and the default `true` (used
-          previously) flashed it open for users who had it hidden. */}
-      {sidebar.prefsReady && sidebar.visible && (
+          previously) flashed it open for users who had it hidden. Also
+          require a `rootPath` — without an open folder the sidebar would
+          be an empty stub redundant with the welcome screen's Open Folder
+          button. */}
+      {sidebar.prefsReady && sidebar.visible && sidebar.rootPath && (
         <Sidebar
           width={sidebar.width}
           onWidthChange={sidebar.setWidth}
@@ -690,6 +729,7 @@ function AppContent() {
               onCursorChange={setCursor}
               sourceRef={editorRef}
               wysiwygRef={wysiwygRef}
+              monacoThemeId={theme.monacoThemeId}
             />
           ) : (
             <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />

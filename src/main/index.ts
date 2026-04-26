@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, type MenuItemConstructorOptions } from 'electron';
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
@@ -8,6 +8,7 @@ import * as folderWatcher from './folderWatcher';
 import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
 import * as templates from './templates';
+import * as themeStore from './themeStore';
 
 const APP_NAME = 'rAIse';
 
@@ -107,6 +108,9 @@ const menuDeps: MenuDeps = {
   getRecentFiles: () => recentStore.getRecent(),
   rebuildMenu: () => rebuildMenu(),
   claudeMdPresent,
+  getThemePreference: () => themeStore.getThemePreference(),
+  getEditorThemePreference: () => themeStore.getEditorThemePreference(),
+  getEditorContrast: () => themeStore.getEditorContrast(),
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -317,6 +321,10 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    // Apply the persisted theme preference to nativeTheme before any
+    // window opens, so window-chrome (titlebar tint on macOS, scrollbars,
+    // form-control defaults) match from the first frame.
+    themeStore.bootstrapNativeTheme();
     rebuildMenu();
     createWindow();
 
@@ -749,4 +757,74 @@ ipcMain.handle(
 
 ipcMain.on('templates:dismiss-claude-banner', (_, rootPath: string) => {
   lastFolderStore.dismissClaudeBanner(rootPath);
+});
+
+// ---------------------------------------------------------------------------
+// Theme: hybrid light / dark with optional follow-system
+// ---------------------------------------------------------------------------
+
+function snapshotThemeState() {
+  return {
+    app: {
+      preference: themeStore.getThemePreference(),
+      resolved: themeStore.getResolvedTheme(),
+    },
+    editor: {
+      preference: themeStore.getEditorThemePreference(),
+      contrast: themeStore.getEditorContrast(),
+      resolved: themeStore.getResolvedEditorTheme(),
+    },
+  };
+}
+
+function broadcastThemeUpdate(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('theme:updated', snapshotThemeState());
+  // Menu has Light / Dark / Follow System checkmarks (both for the app
+  // and the editor submenus) that need to match the new state.
+  rebuildMenu();
+}
+
+ipcMain.handle('theme:get', async () => snapshotThemeState());
+
+ipcMain.handle(
+  'theme:set-app',
+  async (_, pref: themeStore.ThemePreference) => {
+    themeStore.setThemePreference(pref);
+    broadcastThemeUpdate();
+    return snapshotThemeState();
+  },
+);
+
+ipcMain.handle(
+  'theme:set-editor',
+  async (
+    _,
+    payload: {
+      preference?: themeStore.ThemePreference;
+      contrast?: themeStore.EditorContrast;
+    },
+  ) => {
+    // No-op short-circuit when the caller passed nothing — avoids a
+    // pointless menu rebuild + broadcast.
+    if (payload.preference === undefined && payload.contrast === undefined) {
+      return snapshotThemeState();
+    }
+    if (payload.preference !== undefined) {
+      themeStore.setEditorThemePreference(payload.preference);
+    }
+    if (payload.contrast !== undefined) {
+      themeStore.setEditorContrast(payload.contrast);
+    }
+    broadcastThemeUpdate();
+    return snapshotThemeState();
+  },
+);
+
+// macOS / Windows fire `nativeTheme.updated` when the OS appearance
+// changes. Both the app and editor zones may follow it (when their
+// preference is 'system'), so refreshing both resolved values is the
+// right move regardless of which zone(s) are pinned.
+nativeTheme.on('updated', () => {
+  broadcastThemeUpdate();
 });

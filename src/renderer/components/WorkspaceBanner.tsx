@@ -22,21 +22,21 @@ export function WorkspaceBanner({
   return (
     <div
       role="status"
-      className="flex items-center justify-between gap-3 border-b border-sky-900/60 bg-sky-950/70 px-4 py-1.5 text-xs text-sky-100"
+      className="flex items-center justify-between gap-3 border-b border-stroke bg-interaction-tint px-4 py-1.5 text-xs text-strong"
     >
       <span className="min-w-0 truncate">{message}</span>
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={onPrimary}
-          className="rounded bg-sky-500 px-2 py-0.5 text-[11px] font-medium text-sky-50 hover:bg-sky-400"
+          className="rounded bg-interaction px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-interaction-hover active:bg-interaction-active"
         >
           {primaryLabel}
         </button>
         <button
           type="button"
           onClick={onDismiss}
-          className="rounded px-2 py-0.5 text-[11px] text-sky-200 hover:bg-sky-900/60 hover:text-sky-50"
+          className="rounded px-2 py-0.5 text-[11px] text-secondary hover:bg-elevated hover:text-strong"
         >
           Dismiss
         </button>

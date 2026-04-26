@@ -247,7 +247,7 @@ export function WysiwygEditor({
 
   return (
     <MilkdownProvider>
-      <div className="flex h-full w-full flex-col bg-slate-950">
+      <div className="flex h-full w-full flex-col bg-app">
         <Toolbar />
         <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <div className="mx-auto max-w-[720px] px-6 py-8">
@@ -257,7 +257,7 @@ export function WysiwygEditor({
                 onChange={(e) => handleFrontmatterChange(e.target.value)}
                 spellCheck={false}
                 aria-label="YAML frontmatter"
-                className="raise-frontmatter mb-6 block w-full resize-y rounded border border-slate-700 bg-slate-900/60 p-3 font-mono text-xs leading-relaxed text-slate-200 focus:border-brand-500 focus:outline-none"
+                className="raise-frontmatter mb-6 block w-full resize-y rounded border border-stroke bg-surface p-3 font-mono text-xs leading-relaxed text-secondary focus:border-interaction focus:outline-none"
                 rows={Math.max(3, frontmatter.split('\n').length + 1)}
               />
             )}

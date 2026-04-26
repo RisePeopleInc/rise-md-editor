@@ -43,6 +43,12 @@ interface SourceEditorProps {
   initialCursor?: CursorPosition;
   /** Scroll offset to apply once Monaco has finished mounting. */
   initialScrollTop?: number;
+  /**
+   * Monaco theme id (one of `gruvbox-{contrast}-{mode}`). Reactive — when
+   * the user changes editor contrast or theme, this prop updates and
+   * Monaco swaps to the matching variant.
+   */
+  monacoThemeId: string;
 }
 
 const MONO_STACK =
@@ -68,6 +74,7 @@ export function SourceEditor({
   onScrollChange,
   initialCursor,
   initialScrollTop,
+  monacoThemeId,
 }: SourceEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   // Hold the latest callback so the editor's scroll listener (registered
@@ -158,7 +165,11 @@ export function SourceEditor({
     <Editor
       height="100%"
       language="markdown"
-      theme="vs-dark"
+      // All 6 Gruvbox variants are registered in monaco-setup.ts. The
+      // active variant id flows from useThemeState in App down through
+      // EditorContainer; @monaco-editor/react re-applies on prop change
+      // so contrast/mode swaps happen reactively.
+      theme={monacoThemeId}
       value={content}
       onChange={(value) => onChange(value ?? '')}
       onMount={handleMount}

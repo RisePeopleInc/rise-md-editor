@@ -21,6 +21,8 @@ interface SplitViewProps {
   onCursorChange?: (position: CursorPosition) => void;
   initialCursor?: CursorPosition;
   initialScrollTop?: number;
+  /** Monaco theme id passed through to the source pane. */
+  monacoThemeId: string;
 }
 
 const MIN_PERCENT = 20;
@@ -34,6 +36,7 @@ export function SplitView({
   onCursorChange,
   initialCursor,
   initialScrollTop,
+  monacoThemeId,
 }: SplitViewProps) {
   const [splitPercent, setSplitPercent] = useState(DEFAULT_PERCENT);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -136,7 +139,7 @@ export function SplitView({
   }, [html]);
 
   return (
-    <div ref={containerRef} className="flex h-full w-full bg-slate-950">
+    <div ref={containerRef} className="flex h-full w-full bg-app">
       <div className="min-h-0" style={{ width: `${splitPercent}%` }}>
         <SourceEditor
           ref={sourceRef}
@@ -146,6 +149,7 @@ export function SplitView({
           onScrollChange={handleSourceScroll}
           initialCursor={initialCursor}
           initialScrollTop={initialScrollTop}
+          monacoThemeId={monacoThemeId}
         />
       </div>
       <div
@@ -153,7 +157,7 @@ export function SplitView({
         aria-orientation="vertical"
         aria-label="Resize panes"
         onMouseDown={handleDragStart}
-        className="w-1 shrink-0 cursor-col-resize bg-slate-800 hover:bg-slate-600 active:bg-brand-500"
+        className="w-1 shrink-0 cursor-col-resize bg-stroke hover:bg-elevated active:bg-interaction"
       />
       <div
         ref={previewRef}

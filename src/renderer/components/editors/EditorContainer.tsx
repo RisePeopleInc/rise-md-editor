@@ -12,6 +12,8 @@ interface EditorContainerProps {
   onCursorChange: (position: CursorPosition) => void;
   sourceRef: Ref<SourceEditorHandle>;
   wysiwygRef: Ref<WysiwygEditorHandle>;
+  /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
+  monacoThemeId: string;
 }
 
 /**
@@ -26,12 +28,13 @@ export function EditorContainer({
   onCursorChange,
   sourceRef,
   wysiwygRef,
+  monacoThemeId,
 }: EditorContainerProps) {
   const mode = tab.editorMode;
 
   return (
-    <div className="flex h-full w-full flex-col bg-slate-950">
-      <div className="flex h-9 shrink-0 items-center justify-end border-b border-slate-800 bg-slate-950 px-2">
+    <div className="flex h-full w-full flex-col bg-app">
+      <div className="flex h-9 shrink-0 items-center justify-end border-b border-stroke bg-app px-2">
         <ModeSwitcher mode={mode} onChange={onModeChange} />
       </div>
       <div className="min-h-0 flex-1">
@@ -55,6 +58,7 @@ export function EditorContainer({
             onCursorChange={onCursorChange}
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
+            monacoThemeId={monacoThemeId}
           />
         ) : (
           <SourceEditor
@@ -64,6 +68,7 @@ export function EditorContainer({
             onCursorChange={onCursorChange}
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
+            monacoThemeId={monacoThemeId}
           />
         )}
       </div>

@@ -22,7 +22,17 @@ export type MenuActionType =
   | 'source-mode'
   | 'split-mode'
   | 'cycle-mode'
-  | 'toggle-theme'
+  | 'theme-system'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'cycle-theme'
+  | 'editor-theme-system'
+  | 'editor-theme-light'
+  | 'editor-theme-dark'
+  | 'cycle-editor-theme'
+  | 'editor-contrast-hard'
+  | 'editor-contrast-medium'
+  | 'editor-contrast-soft'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -75,6 +85,34 @@ export interface RaiseTemplatesApi {
   dismissClaudeBanner: (rootPath: string) => void;
 }
 
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type ResolvedTheme = 'light' | 'dark';
+export type EditorContrast = 'hard' | 'medium' | 'soft';
+
+export interface AppThemeState {
+  preference: ThemePreference;
+  resolved: ResolvedTheme;
+}
+export interface EditorThemeState {
+  preference: ThemePreference;
+  contrast: EditorContrast;
+  resolved: ResolvedTheme;
+}
+export interface ThemeState {
+  app: AppThemeState;
+  editor: EditorThemeState;
+}
+
+export interface RaiseThemeApi {
+  get: () => Promise<ThemeState>;
+  setApp: (pref: ThemePreference) => Promise<ThemeState>;
+  setEditor: (payload: {
+    preference?: ThemePreference;
+    contrast?: EditorContrast;
+  }) => Promise<ThemeState>;
+  onChange: (callback: (state: ThemeState) => void) => () => void;
+}
+
 export interface RaiseFolderApi {
   open: () => Promise<{ path: string; tree: TreeNode } | null>;
   openPath: (folderPath: string) => Promise<{ path: string; tree: TreeNode }>;
@@ -113,6 +151,7 @@ export interface RaiseApi {
   files: RaiseFilesApi;
   folder: RaiseFolderApi;
   templates: RaiseTemplatesApi;
+  theme: RaiseThemeApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;
