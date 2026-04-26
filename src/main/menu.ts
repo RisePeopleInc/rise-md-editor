@@ -8,6 +8,7 @@ export type MenuAction =
   | 'open-file'
   | 'open-folder'
   | 'open-path'
+  | 'close-folder'
   | 'save'
   | 'save-as'
   | 'close-tab'
@@ -114,6 +115,12 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Open Folder…',
           accelerator: 'CmdOrCtrl+Shift+O',
           click: () => send(deps, 'open-folder'),
+        },
+        {
+          label: 'Close Folder',
+          // No accelerator — infrequent action, and Cmd+Shift+W is
+          // claimed by macOS for "Close All Windows".
+          click: () => send(deps, 'close-folder'),
         },
         { type: 'separator' },
         {

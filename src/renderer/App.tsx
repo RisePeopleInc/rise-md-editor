@@ -459,6 +459,9 @@ function AppContent() {
         case 'open-folder':
           void window.api.openFolder();
           break;
+        case 'close-folder':
+          void sidebar.closeFolder();
+          break;
         case 'save':
           void file.save();
           break;
@@ -626,6 +629,7 @@ function AppContent() {
           onWidthCommit={sidebar.commitWidth}
           rootName={sidebar.rootPath ? basenameOfPath(sidebar.rootPath) : null}
           onCollapseAll={sidebar.collapseAll}
+          onCloseFolder={() => void sidebar.closeFolder()}
           onOpenFolder={handleOpenFolder}
         >
           {sidebar.rootTree && (

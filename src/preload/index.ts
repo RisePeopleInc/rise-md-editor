@@ -7,6 +7,7 @@ export type MenuActionType =
   | 'open-file'
   | 'open-folder'
   | 'open-path'
+  | 'close-folder'
   | 'save'
   | 'save-as'
   | 'close-tab'
