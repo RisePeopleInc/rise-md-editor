@@ -457,7 +457,12 @@ function AppContent() {
           if (event.payload?.path) void handleOpenPath(event.payload.path);
           break;
         case 'open-folder':
-          void window.api.openFolder();
+          // Route through the sidebar's openFolderDialog so the menu
+          // entry has the same effect as the sidebar's "Open Folder"
+          // button: pick a folder, populate the tree, swap the watcher.
+          // Without this the menu fired a stub IPC that returned a path
+          // and then dropped it on the floor.
+          void handleOpenFolder();
           break;
         case 'close-folder':
           void sidebar.closeFolder();
@@ -530,6 +535,7 @@ function AppContent() {
     handleNewFile,
     handleCreateFromTemplate,
     handleOpenFile,
+    handleOpenFolder,
     handleOpenPath,
     handleCloseActive,
     handleNextTab,
