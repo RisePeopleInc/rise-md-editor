@@ -281,12 +281,14 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handler, true);
   }, [handleNextTab, handlePrevTab]);
 
-  // Restore the active tab's cursor / scroll AFTER Monaco's content has
-  // been updated. Re-runs on tab change AND on editor-mode change because
-  // Source ↔ Split swap remounts Monaco (different parent in the JSX tree)
-  // — without depending on editorMode the cursor would jump to (1,1) on
-  // every Source↔Split flip. cursor/scroll values are deliberately not
-  // in deps so we don't snap back on every keystroke.
+  // Restore the active tab's cursor / scroll on TAB switches only —
+  // Monaco doesn't remount across same-mode tab switches, so we apply
+  // the captured cursor + scroll imperatively here. Mode switches
+  // remount Monaco and are handled inside SourceEditor's onMount with
+  // a dedicated 4-line offset; running this effect on editorMode change
+  // would override that offset with the captured pixel scrollTop, which
+  // doesn't translate cross-mode and parks the cursor right under the
+  // header bar.
   useEffect(() => {
     if (!file.activeTabId || !editorRef.current) return;
     const target = file.tabs.find((t) => t.id === file.activeTabId);
@@ -298,7 +300,7 @@ function AppContent() {
     }, 0);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file.activeTabId, file.activeTab?.editorMode]);
+  }, [file.activeTabId]);
 
   const wordCount = useMemo(
     () => countWords(file.activeTab?.content ?? ''),

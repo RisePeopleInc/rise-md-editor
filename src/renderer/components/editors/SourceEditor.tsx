@@ -121,34 +121,21 @@ export function SourceEditor({
 
   const handleMount: OnMount = (instance) => {
     editorRef.current = instance;
-    // Apply initial cursor/scroll on mount. We're inside Monaco's onMount
-    // callback so the editor is fully ready — no setTimeout race with the
-    // parent. Order matters:
-    //   1. setPosition — places the caret on the target line.
-    //   2. setScrollTop — restores the prior pixel offset (only meaningful
-    //      when the layout is unchanged; mode swaps re-layout with a
-    //      different viewport width).
-    //   3. revealPositionInCenter — overrides #2 if the cursor isn't
-    //      visible there; brings the caret into the centre of the
-    //      viewport. Net effect: when restoring within the same mode the
-    //      scroll snaps back, when restoring across a mode swap (where
-    //      pixel offsets don't translate) the cursor is at least visible.
+    // Apply initial cursor/scroll on mount (mode swap remount only —
+    // same-mode tab switches go through App's setTimeout effect against
+    // the same Monaco instance). Place the caret, then explicitly scroll
+    // so the cursor lands ~4 lines below the editor's visible top. That
+    // gives breathing room from any chrome above the editor (mode
+    // switcher, tab bar) instead of letting Monaco's built-in 1–2-line
+    // "near top" padding leave the cursor flush against the bar.
     const initCur = initialCursorRef.current;
     if (initCur) {
       instance.setPosition({ lineNumber: initCur.line, column: initCur.column });
-    }
-    if (initialScrollTopRef.current !== undefined) {
+      const targetLine = Math.max(initCur.line - 4, 1);
+      instance.setScrollTop(instance.getTopForLineNumber(targetLine));
+    } else if (initialScrollTopRef.current !== undefined) {
+      // No cursor to restore (fresh tab) — honour the raw pixel offset.
       instance.setScrollTop(initialScrollTopRef.current);
-    }
-    if (initCur) {
-      // revealPositionNearTop instead of InCenter so the cursor lands a
-      // few lines below the visible top — gives some context above and
-      // keeps the cursor clear of any chrome (mode-switcher bar, tabs,
-      // etc.) that lives just above the editor.
-      instance.revealPositionNearTop({
-        lineNumber: initCur.line,
-        column: initCur.column,
-      });
     }
     // Take focus back from whatever fired the remount (typically the
     // mode-switcher button) so the user can keep typing without an extra
