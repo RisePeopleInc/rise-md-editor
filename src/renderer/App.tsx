@@ -145,6 +145,9 @@ function AppContent() {
           if (!ok) return;
           try {
             await window.api.folder.trash(node.path);
+            // Reconcile open tabs: clean tabs close, dirty tabs become
+            // Untitled so the user can rescue their working copy via Save As.
+            file.relocateTabs(node.path, null);
           } catch (err) {
             window.api.showError(
               'Could not move to Trash',
@@ -155,7 +158,7 @@ function AppContent() {
         }
       }
     },
-    [handleOpenPath, sidebar],
+    [handleOpenPath, sidebar, file],
   );
 
   const handleRenameSubmit = useCallback(
@@ -172,7 +175,11 @@ function AppContent() {
         return;
       }
       try {
-        await window.api.folder.rename(oldPath, newName);
+        const newPath = await window.api.folder.rename(oldPath, newName);
+        // Keep open tabs in sync with the rename — without this the tab
+        // still points at the old path and a Cmd+S would write a ghost
+        // file at the original location.
+        file.relocateTabs(oldPath, newPath);
       } catch (err) {
         window.api.showError(
           'Could not rename',
@@ -180,7 +187,7 @@ function AppContent() {
         );
       }
     },
-    [sidebar],
+    [sidebar, file],
   );
 
   const handleCreateSubmit = useCallback(

@@ -161,14 +161,33 @@ async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
 }
 
 // Ask the renderer to walk the dirty-tab resolution flow (either Save All or
-// per-tab Review). Resolves true on success, false if anything was canceled.
+// per-tab Review). Resolves true on success, false if anything was canceled
+// OR if the renderer never replies (window destroyed, renderer crash, or a
+// stuck resolution flow). Without those guards a renderer crash mid-prompt
+// would leave the close handler's promise pending forever and freeze quit.
+const RESOLVE_DIRTY_TIMEOUT_MS = 30_000;
+
 function requestResolveDirtyFromRenderer(
   mode: 'save-all' | 'review',
 ): Promise<boolean> {
   if (!mainWindow) return Promise.resolve(false);
+  const window = mainWindow;
   return new Promise((resolve) => {
-    ipcMain.once('window:resolve-dirty:result', (_e, ok: boolean) => resolve(ok));
-    mainWindow!.webContents.send('window:resolve-dirty', mode);
+    let settled = false;
+    const settle = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener('window:resolve-dirty:result', onResult);
+      window.removeListener('closed', onClosed);
+      clearTimeout(timeoutHandle);
+      resolve(ok);
+    };
+    const onResult = (_e: Electron.IpcMainEvent, ok: boolean): void => settle(ok);
+    const onClosed = (): void => settle(false);
+    const timeoutHandle = setTimeout(() => settle(false), RESOLVE_DIRTY_TIMEOUT_MS);
+    ipcMain.on('window:resolve-dirty:result', onResult);
+    window.once('closed', onClosed);
+    window.webContents.send('window:resolve-dirty', mode);
   });
 }
 
@@ -438,7 +457,15 @@ folderWatcher.setListener({
     folderWatcher.notifyRenderer(mainWindow, { type: 'tree', path: root });
   },
   onFileChanged: (filePath) => {
-    if (recentlyWritten.has(filePath)) return;
+    if (recentlyWritten.has(filePath)) {
+      // Refresh the TTL — slow disks (network mounts, FUSE, large files)
+      // can land chokidar `change` events well after the original write,
+      // and a fixed window risks firing a phantom "reload?" prompt for a
+      // save the user initiated themselves. Extending on each suppressed
+      // event keeps the suppression alive until writes go quiet.
+      markRecentlyWritten(filePath);
+      return;
+    }
     folderWatcher.notifyRenderer(mainWindow, { type: 'file', path: filePath });
   },
 });
