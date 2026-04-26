@@ -53,6 +53,7 @@ function AppContent() {
       const wy = wysiwygRef.current;
       if (!wy) return;
       file.setActiveWysiwygScroll(wy.getScrollTop());
+      file.setActiveWysiwygCursorOffset(wy.getCursorOffset());
       return;
     }
     const ed = editorRef.current;

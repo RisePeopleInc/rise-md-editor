@@ -7,7 +7,8 @@ import {
   useState,
   type Ref,
 } from 'react';
-import { Editor, rootCtx, defaultValueCtx } from '@milkdown/core';
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/core';
+import { TextSelection } from '@milkdown/prose/state';
 import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
@@ -26,6 +27,10 @@ export interface WysiwygEditorHandle {
   triggerRedo: () => void;
   getScrollTop: () => number;
   setScrollTop: (top: number) => void;
+  /** ProseMirror selection-from offset (absolute char position in the doc). */
+  getCursorOffset: () => number;
+  /** Move the caret. Clamped to the current doc size. */
+  setCursorOffset: (offset: number) => void;
 }
 
 interface WysiwygEditorProps {
@@ -34,6 +39,8 @@ interface WysiwygEditorProps {
   onChange: (markdown: string) => void;
   /** Restored on mount via the scroll-container ref. */
   initialScrollTop?: number;
+  /** ProseMirror cursor offset to restore once Milkdown is mounted. */
+  initialCursorOffset?: number;
 }
 
 // Match a YAML frontmatter block at the very start of the document. The
@@ -71,6 +78,7 @@ interface MilkdownBodyProps {
   ref?: Ref<WysiwygEditorHandle>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   initial: string;
+  initialCursorOffset?: number;
   onMarkdownChange: (markdown: string) => void;
 }
 
@@ -78,6 +86,7 @@ function MilkdownBody({
   ref,
   scrollContainerRef,
   initial,
+  initialCursorOffset,
   onMarkdownChange,
 }: MilkdownBodyProps) {
   // Hold the latest callback in a ref so the editor's listener (registered
@@ -85,6 +94,12 @@ function MilkdownBody({
   // re-renders with a new closure.
   const onChangeRef = useRef(onMarkdownChange);
   onChangeRef.current = onMarkdownChange;
+
+  // Capture initial cursor offset in a ref so the listener (registered once
+  // at editor creation) closes over the latest value rather than a stale
+  // prop from a re-render.
+  const initialCursorOffsetRef = useRef(initialCursorOffset);
+  initialCursorOffsetRef.current = initialCursorOffset;
 
   useEditor((root) =>
     Editor.make()
@@ -95,6 +110,20 @@ function MilkdownBody({
         ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prev) => {
           if (markdown === prev) return;
           onChangeRef.current(markdown);
+        });
+        // Once Milkdown finishes its initial mount, jump the caret to the
+        // captured ProseMirror offset (clamped). This is the WYSIWYG
+        // analogue of SourceEditor's onMount cursor restore.
+        ctx.get(listenerCtx).mounted((mountedCtx) => {
+          const offset = initialCursorOffsetRef.current;
+          if (!offset) return;
+          const view = mountedCtx.get(editorViewCtx);
+          const max = view.state.doc.content.size;
+          const safe = Math.min(Math.max(offset, 0), max);
+          const tr = view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, safe),
+          );
+          view.dispatch(tr);
         });
       })
       .use(commonmark)
@@ -122,6 +151,32 @@ function MilkdownBody({
           scrollContainerRef.current.scrollTop = top;
         }
       },
+      getCursorOffset: () => {
+        const editor = get();
+        if (!editor) return 0;
+        let offset = 0;
+        editor.action((ctx) => {
+          offset = ctx.get(editorViewCtx).state.selection.from;
+        });
+        return offset;
+      },
+      setCursorOffset: (offset) => {
+        const editor = get();
+        if (!editor) return;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          // Clamp into the current doc — the doc may have grown / shrunk
+          // since the offset was captured (e.g., user typed in Source then
+          // came back). 0 is always a valid position.
+          const max = view.state.doc.content.size;
+          const safe = Math.min(Math.max(offset, 0), max);
+          const tr = view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, safe),
+          );
+          view.dispatch(tr);
+          view.focus();
+        });
+      },
     }),
     [get, scrollContainerRef],
   );
@@ -134,6 +189,7 @@ export function WysiwygEditor({
   content,
   onChange,
   initialScrollTop,
+  initialCursorOffset,
 }: WysiwygEditorProps) {
   // Split once at mount; the parent keys this component by tab id + load
   // epoch, so a tab switch or re-open of the same file fully remounts and
@@ -210,6 +266,7 @@ export function WysiwygEditor({
                 ref={ref}
                 scrollContainerRef={scrollContainerRef}
                 initial={initialSplit.body}
+                initialCursorOffset={initialCursorOffset}
                 onMarkdownChange={handleBodyChange}
               />
             </div>

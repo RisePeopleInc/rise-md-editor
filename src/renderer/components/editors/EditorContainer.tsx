@@ -45,6 +45,7 @@ export function EditorContainer({
             content={tab.content}
             onChange={onContentChange}
             initialScrollTop={tab.wysiwygScrollPosition}
+            initialCursorOffset={tab.wysiwygCursorOffset}
           />
         ) : mode === 'split' ? (
           <SplitView

@@ -27,6 +27,13 @@ export interface Tab {
   scrollPosition: number;
   /** Milkdown's scroll-container offset (pixels), used in WYSIWYG. */
   wysiwygScrollPosition: number;
+  /**
+   * ProseMirror selection-from offset (an absolute character position in
+   * the parsed doc), used to preserve the WYSIWYG caret across mode
+   * swaps and tab switches. Approximate — if the doc grows/shrinks
+   * between captures the value is clamped to the new doc's size.
+   */
+  wysiwygCursorOffset: number;
   editorMode: EditorMode;
   /**
    * Bumped each time `loadFile` reloads this tab from disk while it is
@@ -60,6 +67,7 @@ export interface FileContextValue {
   setActiveCursor: (cursor: CursorPos) => void;
   setActiveScroll: (top: number) => void;
   setActiveWysiwygScroll: (top: number) => void;
+  setActiveWysiwygCursorOffset: (offset: number) => void;
   setActiveEditorMode: (mode: EditorMode) => void;
 
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
@@ -89,6 +97,7 @@ function makeTab(path: string | null, content: string): Tab {
     cursorPosition: { line: 1, column: 1 },
     scrollPosition: 0,
     wysiwygScrollPosition: 0,
+    wysiwygCursorOffset: 0,
     // RAISE-7: WYSIWYG is the welcoming default — both new files and freshly
     // opened files land in formatted mode. Users can flip to Source or Split
     // per tab via the mode switcher (or Cmd+1/2/3, or Cmd+\ to cycle).
@@ -243,6 +252,15 @@ export function FileProvider({ children }: FileProviderProps) {
       const id = activeTabIdRef.current;
       if (!id) return;
       updateTab(id, { wysiwygScrollPosition: top });
+    },
+    [updateTab],
+  );
+
+  const setActiveWysiwygCursorOffset = useCallback(
+    (offset: number) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { wysiwygCursorOffset: offset });
     },
     [updateTab],
   );
@@ -453,6 +471,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveCursor,
       setActiveScroll,
       setActiveWysiwygScroll,
+      setActiveWysiwygCursorOffset,
       setActiveEditorMode,
       withDirtyGuard,
     }),
@@ -477,6 +496,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveCursor,
       setActiveScroll,
       setActiveWysiwygScroll,
+      setActiveWysiwygCursorOffset,
       setActiveEditorMode,
       withDirtyGuard,
     ],
