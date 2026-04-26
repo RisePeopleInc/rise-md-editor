@@ -481,8 +481,8 @@ ipcMain.handle('folder:close', async () => {
   lastFolderStore.setLastFolder(null);
 });
 
-ipcMain.handle('folder:create-file', async (_, parentPath: string) =>
-  folderOps.createNewFile(parentPath),
+ipcMain.handle('folder:create-file', async (_, parentPath: string, name: string) =>
+  folderOps.createFileNamed(parentPath, name),
 );
 
 ipcMain.handle('folder:create-folder', async (_, parentPath: string, name: string) =>

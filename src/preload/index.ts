@@ -82,8 +82,8 @@ const folder = {
   getLast: (): Promise<{ path: string; tree: TreeNode } | null> =>
     ipcRenderer.invoke('folder:get-last'),
 
-  createFile: (parentPath: string): Promise<string> =>
-    ipcRenderer.invoke('folder:create-file', parentPath),
+  createFile: (parentPath: string, name: string): Promise<string> =>
+    ipcRenderer.invoke('folder:create-file', parentPath, name),
   createFolder: (parentPath: string, name: string): Promise<string> =>
     ipcRenderer.invoke('folder:create-folder', parentPath, name),
   rename: (oldPath: string, newName: string): Promise<string> =>

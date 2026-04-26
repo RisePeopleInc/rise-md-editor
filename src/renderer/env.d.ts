@@ -65,7 +65,7 @@ export interface RaiseFolderApi {
   close: () => Promise<void>;
   getLast: () => Promise<{ path: string; tree: TreeNode } | null>;
 
-  createFile: (parentPath: string) => Promise<string>;
+  createFile: (parentPath: string, name: string) => Promise<string>;
   createFolder: (parentPath: string, name: string) => Promise<string>;
   rename: (oldPath: string, newName: string) => Promise<string>;
   trash: (itemPath: string) => Promise<void>;

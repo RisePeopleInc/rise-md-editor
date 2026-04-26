@@ -8,6 +8,15 @@ export function isOpenable(node: TreeNode): boolean {
   return ACCEPTED_EXTENSIONS.test(node.name);
 }
 
+export type CreateKind = 'file' | 'folder';
+
+export interface CreatingState {
+  parentPath: string;
+  kind: CreateKind;
+  /** Initial value the input should show — e.g. 'Untitled.md' for files. */
+  initialName: string;
+}
+
 export interface SidebarState {
   /** Open folder root (null when in single-file mode). */
   rootPath: string | null;
@@ -23,7 +32,18 @@ export interface SidebarState {
   /** Set of directory paths the user has expanded. */
   expanded: Set<string>;
   toggleExpanded: (path: string) => void;
+  expandPath: (path: string) => void;
   collapseAll: () => void;
+
+  /**
+   * Inline editing state. At most one of these is non-null at a time —
+   * starting a rename cancels an in-flight create, and vice versa.
+   */
+  editingPath: string | null;
+  creating: CreatingState | null;
+  startRename: (path: string) => void;
+  startCreate: (parentPath: string, kind: CreateKind) => void;
+  cancelEdit: () => void;
 
   openFolderDialog: () => Promise<string | null>;
   openFolderByPath: (folderPath: string) => Promise<string | null>;
@@ -45,6 +65,8 @@ export function useSidebarState(): SidebarState {
   const [visible, setVisibleState] = useState<boolean>(true);
   const [width, setWidthState] = useState<number>(SIDEBAR_DEFAULT_WIDTH);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [creating, setCreating] = useState<CreatingState | null>(null);
 
   // Restore visibility / width on mount (from electron-store via IPC), and
   // attempt to re-open the last folder.
@@ -91,6 +113,44 @@ export function useSidebarState(): SidebarState {
       else next.add(path);
       return next;
     });
+  }, []);
+
+  const expandPath = useCallback((path: string) => {
+    setExpanded((prev) => {
+      if (prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.add(path);
+      return next;
+    });
+  }, []);
+
+  const startRename = useCallback((path: string) => {
+    setCreating(null);
+    setEditingPath(path);
+  }, []);
+
+  const startCreate = useCallback(
+    (parentPath: string, kind: CreateKind) => {
+      setEditingPath(null);
+      // Make sure the user can see the input we're about to render.
+      setExpanded((prev) => {
+        if (prev.has(parentPath)) return prev;
+        const next = new Set(prev);
+        next.add(parentPath);
+        return next;
+      });
+      setCreating({
+        parentPath,
+        kind,
+        initialName: kind === 'file' ? 'Untitled.md' : '',
+      });
+    },
+    [],
+  );
+
+  const cancelEdit = useCallback(() => {
+    setEditingPath(null);
+    setCreating(null);
   }, []);
 
   const collapseAll = useCallback(() => {
@@ -171,7 +231,13 @@ export function useSidebarState(): SidebarState {
     setVisible,
     expanded,
     toggleExpanded,
+    expandPath,
     collapseAll,
+    editingPath,
+    creating,
+    startRename,
+    startCreate,
+    cancelEdit,
     openFolderDialog,
     openFolderByPath,
     closeFolder,

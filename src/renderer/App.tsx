@@ -129,37 +129,17 @@ function AppContent() {
         case 'reveal':
           window.api.folder.reveal(node.path);
           break;
-        case 'new-file': {
-          const newPath = await window.api.folder.createFile(node.path);
-          void handleOpenPath(newPath);
+        case 'new-file':
+          // 'new-file' / 'new-folder' only make sense on directories — the
+          // context menu only offers them in that case.
+          if (node.isDirectory) sidebar.startCreate(node.path, 'file');
           break;
-        }
-        case 'new-folder': {
-          const name = window.prompt('Folder name:');
-          if (!name?.trim()) return;
-          try {
-            await window.api.folder.createFolder(node.path, name.trim());
-          } catch (err) {
-            window.api.showError(
-              'Could not create folder',
-              err instanceof Error ? err.message : String(err),
-            );
-          }
+        case 'new-folder':
+          if (node.isDirectory) sidebar.startCreate(node.path, 'folder');
           break;
-        }
-        case 'rename': {
-          const newName = window.prompt('Rename to:', node.name);
-          if (!newName?.trim() || newName === node.name) return;
-          try {
-            await window.api.folder.rename(node.path, newName.trim());
-          } catch (err) {
-            window.api.showError(
-              'Could not rename',
-              err instanceof Error ? err.message : String(err),
-            );
-          }
+        case 'rename':
+          sidebar.startRename(node.path);
           break;
-        }
         case 'delete': {
           const ok = await window.api.folder.confirmDelete(node.name, node.isDirectory);
           if (!ok) return;
@@ -175,7 +155,64 @@ function AppContent() {
         }
       }
     },
-    [handleOpenPath],
+    [handleOpenPath, sidebar],
+  );
+
+  const handleRenameSubmit = useCallback(
+    async (oldPath: string, newName: string) => {
+      sidebar.cancelEdit();
+      if (newName === '') return;
+      // Disallow path separators to prevent accidental moves — rename is
+      // strictly a name change in this UI.
+      if (newName.includes('/') || newName.includes('\\')) {
+        window.api.showError(
+          'Invalid name',
+          'Names cannot contain "/" or "\\".',
+        );
+        return;
+      }
+      try {
+        await window.api.folder.rename(oldPath, newName);
+      } catch (err) {
+        window.api.showError(
+          'Could not rename',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    },
+    [sidebar],
+  );
+
+  const handleCreateSubmit = useCallback(
+    async (parentPath: string, kind: 'file' | 'folder', name: string) => {
+      sidebar.cancelEdit();
+      if (name === '') return;
+      if (name.includes('/') || name.includes('\\')) {
+        window.api.showError(
+          'Invalid name',
+          'Names cannot contain "/" or "\\".',
+        );
+        return;
+      }
+      try {
+        if (kind === 'file') {
+          const newPath = await window.api.folder.createFile(parentPath, name);
+          void handleOpenPath(newPath);
+        } else {
+          await window.api.folder.createFolder(parentPath, name);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        window.api.showError(
+          kind === 'file' ? 'Could not create file' : 'Could not create folder',
+          // EEXIST is the most common failure — surface it readably.
+          /EEXIST/i.test(message)
+            ? `An item named "${name}" already exists in that folder.`
+            : message,
+        );
+      }
+    },
+    [handleOpenPath, sidebar],
   );
 
   const handleNewFile = useCallback(() => {
@@ -441,6 +478,13 @@ function AppContent() {
               onToggle={sidebar.toggleExpanded}
               onOpenFile={(p) => void handleOpenPath(p)}
               onContextMenu={handleTreeContextMenu}
+              editingPath={sidebar.editingPath}
+              creating={sidebar.creating}
+              onRenameSubmit={(p, name) => void handleRenameSubmit(p, name)}
+              onCreateSubmit={(parent, kind, name) =>
+                void handleCreateSubmit(parent, kind, name)
+              }
+              onEditCancel={sidebar.cancelEdit}
             />
           )}
         </Sidebar>

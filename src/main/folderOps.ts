@@ -87,27 +87,17 @@ export async function pickFolder(window: BrowserWindow): Promise<string | null> 
 }
 
 /**
- * Create a new (empty) markdown file in `dirPath`. If `Untitled.md` exists,
- * appends a numeric suffix until a free name is found.
+ * Create a new (empty) file in `parentPath` with the given name. Throws
+ * EEXIST (via the `wx` flag) if a file with that name already exists, so
+ * the renderer can surface a proper error instead of silently overwriting.
  */
-export async function createNewFile(dirPath: string): Promise<string> {
-  const base = 'Untitled';
-  const ext = '.md';
-  let candidate = path.join(dirPath, `${base}${ext}`);
-  let counter = 1;
-  // Loop until we find an unused name. fs.access throws when the path doesn't
-  // exist, which is the success case for us.
-  for (;;) {
-    try {
-      await fs.access(candidate);
-      candidate = path.join(dirPath, `${base} ${counter}${ext}`);
-      counter += 1;
-    } catch {
-      break;
-    }
-  }
-  await fs.writeFile(candidate, '', 'utf-8');
-  return candidate;
+export async function createFileNamed(
+  parentPath: string,
+  name: string,
+): Promise<string> {
+  const target = path.join(parentPath, name);
+  await fs.writeFile(target, '', { encoding: 'utf-8', flag: 'wx' });
+  return target;
 }
 
 export async function createNewFolder(dirPath: string, name: string): Promise<string> {
