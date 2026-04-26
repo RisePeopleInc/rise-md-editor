@@ -4,8 +4,52 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>rAIse</title>
+
+    <!--
+      Rise brand fonts via Google Fonts.
+        - Source Serif Pro Bold 700 for H1 / H2 in WYSIWYG + welcome.
+        - Open Sans 400 / 600 / 700 for body and UI.
+      Preconnect shaves ~100-200ms off first-byte; font-display=swap on
+      both stylesheets so the app renders with system fallbacks if the
+      network is slow or absent (Electron offline launch).
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Source+Serif+Pro:wght@700&display=swap"
+    />
+
+    <!--
+      Bootstrap script: read the persisted theme preference (set by main
+      via electron-store and copied onto the document by App.tsx after
+      first render) and apply the data-theme attribute BEFORE first paint
+      so users who chose dark mode don't see a flash of light surfaces on
+      launch. We can't read electron-store synchronously here (no Node
+      access from the sandboxed renderer); instead main writes the most
+      recent theme onto the window via a CLI-ish localStorage shim that
+      survives reloads. Falls back to matchMedia when no preference exists.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('rise-theme'); // 'system' | 'light' | 'dark'
+          var resolved;
+          if (stored === 'light' || stored === 'dark') {
+            resolved = stored;
+          } else {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', resolved);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-slate-950 text-slate-100">
+  <body>
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>

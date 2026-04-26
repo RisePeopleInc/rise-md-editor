@@ -1,0 +1,225 @@
+/*
+ * RAISE-10: Hybrid theming system.
+ *
+ * TWO distinct zones, deliberately:
+ *   - Zone 1 (`--gruvbox-*` vars): Monaco source editor only. Consumed
+ *     by JavaScript in monaco-themes.ts when defining custom Monaco
+ *     themes; no DOM CSS rule outside the Monaco container should
+ *     reference these variables.
+ *   - Zone 2 (`--rise-*` vars): everything else — WYSIWYG, preview
+ *     pane, app chrome (sidebar, tabs, status bar, banners), welcome
+ *     screen.
+ *
+ * The active palette is selected by `[data-theme="light"]` /
+ * `[data-theme="dark"]` on `<html>`. The bootstrap script in
+ * `index.html` writes the attribute before first paint to prevent flash.
+ */
+
+/* -------------------------------------------------------------------------
+ * Zone 2: Rise design system — light (default)
+ * ------------------------------------------------------------------------- */
+:root,
+[data-theme='light'] {
+  /* Brand */
+  --rise-brand: #09247c;              /* B450 Deep Blue */
+
+  /* Interaction (buttons, links, active states) */
+  --rise-interaction: #555df2;        /* P450 */
+  --rise-interaction-hover: #4d54da;  /* P500 */
+  --rise-interaction-active: #444ac2; /* P550 */
+  --rise-interaction-tint: #ccceeb;   /* P100 light tint */
+
+  /* Neutrals — surfaces */
+  --rise-bg-primary: #ffffff;         /* N000 */
+  --rise-bg-secondary: #f2f5fb;       /* N100 */
+  --rise-bg-tertiary: #e1e6ef;        /* N150 */
+  --rise-border: #c8d0d8;             /* N300 */
+
+  /* Neutrals — text */
+  --rise-text-primary: #0f151b;       /* N1000 */
+  --rise-text-secondary: #2b333a;     /* N700 */
+  --rise-text-body: #555c61;          /* N600 */
+  --rise-text-muted: #6a7075;         /* N550 */
+  --rise-text-disabled: #aaadb0;      /* N400 */
+
+  /* Semantic */
+  --rise-success: #49d186;            /* G450 */
+  --rise-danger: #e00000;             /* R450 */
+  --rise-warning: #ffcc33;            /* Y450 */
+
+  /* Translucent helpers (used for hover layers, focus rings, etc.) */
+  --rise-interaction-translucent: rgb(85 93 242 / 0.12);
+}
+
+/* -------------------------------------------------------------------------
+ * Zone 2: Rise design system — dark
+ * ------------------------------------------------------------------------- */
+[data-theme='dark'] {
+  /* Brand: shifts to a lighter blue so it stays legible on dark surfaces */
+  --rise-brand: #9da7cb;              /* B150 */
+
+  /* Interaction colors stay the same — purple has enough contrast on both */
+  --rise-interaction: #555df2;
+  --rise-interaction-hover: #6770ff;  /* slightly lighter on dark */
+  --rise-interaction-active: #4d54da;
+  --rise-interaction-tint: #2a2f5e;   /* deepened tint for dark surface */
+
+  /* Neutrals — invert the scale */
+  --rise-bg-primary: #0f151b;         /* N1000 as bg */
+  --rise-bg-secondary: #1a2129;
+  --rise-bg-tertiary: #2b333a;        /* N700 */
+  --rise-border: #40474d;             /* N650 */
+
+  /* Text — pull from the upper end of the scale */
+  --rise-text-primary: #ffffff;
+  --rise-text-secondary: #e1e6ef;     /* N150 */
+  --rise-text-body: #c8d0d8;          /* N300 */
+  --rise-text-muted: #aaadb0;         /* N400 */
+  --rise-text-disabled: #6a7075;
+
+  --rise-success: #49d186;
+  --rise-danger: #ff5b5b;
+  --rise-warning: #ffcc33;
+
+  --rise-interaction-translucent: rgb(85 93 242 / 0.18);
+}
+
+/* -------------------------------------------------------------------------
+ * Zone 1: Gruvbox — consumed by Monaco only.
+ *
+ * Defined as CSS variables so Monaco's theme registration can read them
+ * at runtime via getComputedStyle, keeping the palette in one place.
+ * Two distinct sets — light variant and dark variant — gated by the
+ * same `[data-theme]` attribute used by Zone 2.
+ *
+ * Accent colors (red/green/yellow/blue/purple/aqua/orange/gray) are the
+ * canonical Gruvbox values and are shared between light and dark; only
+ * the bg / fg ramps swap.
+ * ------------------------------------------------------------------------- */
+:root,
+[data-theme='light'] {
+  --gruvbox-bg: #fbf1c7;
+  --gruvbox-bg1: #ebdbb2;
+  --gruvbox-bg2: #d5c4a1;
+  --gruvbox-fg: #3c3836;
+  --gruvbox-fg1: #504945;
+
+  --gruvbox-gray: #928374;
+  --gruvbox-red: #cc241d;
+  --gruvbox-green: #98971a;
+  --gruvbox-yellow: #d79921;
+  --gruvbox-blue: #458588;
+  --gruvbox-purple: #b16286;
+  --gruvbox-aqua: #689d6a;
+  --gruvbox-orange: #d65d0e;
+}
+
+[data-theme='dark'] {
+  --gruvbox-bg: #282828;
+  --gruvbox-bg1: #3c3836;
+  --gruvbox-bg2: #504945;
+  --gruvbox-fg: #ebdbb2;
+  --gruvbox-fg1: #d5c4a1;
+  /* accent colors carry over from the :root block */
+}
+
+/* -------------------------------------------------------------------------
+ * Tailwind 4 theme token mapping.
+ *
+ * `@theme inline` tells Tailwind to leave the var() reference intact in
+ * the generated utilities, so a runtime [data-theme] swap actually
+ * changes what `bg-app` / `text-body` / etc. resolve to. Without
+ * `inline`, Tailwind would resolve at build time and freeze the palette.
+ * ------------------------------------------------------------------------- */
+@theme inline {
+  /* Surfaces */
+  --color-app: var(--rise-bg-primary);
+  --color-surface: var(--rise-bg-secondary);
+  --color-elevated: var(--rise-bg-tertiary);
+  /* `stroke` (rather than `border`) avoids the awkward
+   * `border-border-app` Tailwind utility name. Generates `border-stroke`,
+   * `bg-stroke` (unused), `text-stroke` (unused). */
+  --color-stroke: var(--rise-border);
+
+  /* Text */
+  --color-strong: var(--rise-text-primary);
+  --color-secondary: var(--rise-text-secondary);
+  --color-body: var(--rise-text-body);
+  --color-muted: var(--rise-text-muted);
+  --color-disabled: var(--rise-text-disabled);
+
+  /* Brand + interaction */
+  --color-brand: var(--rise-brand);
+  --color-interaction: var(--rise-interaction);
+  --color-interaction-hover: var(--rise-interaction-hover);
+  --color-interaction-active: var(--rise-interaction-active);
+  --color-interaction-tint: var(--rise-interaction-tint);
+
+  /* Semantic */
+  --color-success: var(--rise-success);
+  --color-danger: var(--rise-danger);
+  --color-warning: var(--rise-warning);
+
+  /* Font families — used via Tailwind's `font-*` utilities */
+  --font-serif:
+    'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-sans:
+    'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+/* -------------------------------------------------------------------------
+ * Smooth transitions on theme swap.
+ *
+ * Limited to color properties — animating layout would jank. The 0.15s
+ * window covers the data-theme attribute change and the CSS var
+ * resolution without lingering when the user is just hovering.
+ * ------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+html,
+body,
+.theme-transition,
+.theme-transition * {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    fill 0.15s ease,
+    stroke 0.15s ease;
+}
+
+/* -------------------------------------------------------------------------
+ * Custom scrollbars — Rise neutrals on both themes. Default Chrome
+ * scrollbars are far too high-contrast for a dark UI and clash with
+ * the muted Rise palette in light mode.
+ * ------------------------------------------------------------------------- */
+* {
+  scrollbar-color: var(--rise-text-disabled) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--rise-bg-tertiary);
+  border-radius: 8px;
+  border: 2px solid var(--rise-bg-primary);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--rise-text-disabled);
+}

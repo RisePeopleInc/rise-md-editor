@@ -22,7 +22,10 @@ export type MenuActionType =
   | 'source-mode'
   | 'split-mode'
   | 'cycle-mode'
-  | 'toggle-theme'
+  | 'theme-system'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'cycle-theme'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -75,6 +78,19 @@ export interface RaiseTemplatesApi {
   dismissClaudeBanner: (rootPath: string) => void;
 }
 
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type ResolvedTheme = 'light' | 'dark';
+export interface ThemeState {
+  preference: ThemePreference;
+  resolved: ResolvedTheme;
+}
+
+export interface RaiseThemeApi {
+  get: () => Promise<ThemeState>;
+  set: (pref: ThemePreference) => Promise<ThemeState>;
+  onChange: (callback: (state: ThemeState) => void) => () => void;
+}
+
 export interface RaiseFolderApi {
   open: () => Promise<{ path: string; tree: TreeNode } | null>;
   openPath: (folderPath: string) => Promise<{ path: string; tree: TreeNode }>;
@@ -113,6 +129,7 @@ export interface RaiseApi {
   files: RaiseFilesApi;
   folder: RaiseFolderApi;
   templates: RaiseTemplatesApi;
+  theme: RaiseThemeApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;

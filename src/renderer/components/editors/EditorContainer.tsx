@@ -30,8 +30,8 @@ export function EditorContainer({
   const mode = tab.editorMode;
 
   return (
-    <div className="flex h-full w-full flex-col bg-slate-950">
-      <div className="flex h-9 shrink-0 items-center justify-end border-b border-slate-800 bg-slate-950 px-2">
+    <div className="flex h-full w-full flex-col bg-app">
+      <div className="flex h-9 shrink-0 items-center justify-end border-b border-stroke bg-app px-2">
         <ModeSwitcher mode={mode} onChange={onModeChange} />
       </div>
       <div className="min-h-0 flex-1">

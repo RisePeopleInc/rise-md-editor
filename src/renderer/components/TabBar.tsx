@@ -145,7 +145,7 @@ export function TabBar({ tabs, activeTabId, onActivate, onClose, onReorder }: Ta
   return (
     <div
       role="tablist"
-      className="flex shrink-0 items-stretch overflow-x-auto border-b border-slate-800 bg-slate-950 select-none"
+      className="flex shrink-0 items-stretch overflow-x-auto border-b border-stroke bg-surface select-none"
     >
       {tabs.map((tab, index) => {
         const isActive = tab.id === activeTabId;
@@ -170,11 +170,13 @@ export function TabBar({ tabs, activeTabId, onActivate, onClose, onReorder }: Ta
               }
             }}
             className={[
-              'group relative flex shrink-0 cursor-pointer items-center gap-2 border-r border-slate-800 px-3 py-1.5 text-xs',
+              // Active tab uses the app surface (matches the editor below) with
+              // a brand accent stripe; inactive tabs sit on the secondary surface.
+              'group relative flex shrink-0 cursor-pointer items-center gap-2 border-r border-stroke px-3 py-1.5 text-xs',
               isActive
-                ? 'bg-slate-800 text-slate-100'
-                : 'bg-slate-950 text-slate-400 hover:bg-slate-900 hover:text-slate-200',
-              showDropMarker ? 'ring-1 ring-inset ring-brand-500' : '',
+                ? 'bg-app text-strong border-b-2 border-b-interaction'
+                : 'bg-surface text-muted hover:bg-elevated hover:text-secondary',
+              showDropMarker ? 'ring-1 ring-inset ring-interaction' : '',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -201,8 +203,8 @@ export function TabBar({ tabs, activeTabId, onActivate, onClose, onReorder }: Ta
               className={[
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none transition',
                 isActive
-                  ? 'text-slate-300 hover:bg-slate-700 hover:text-slate-100'
-                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-200',
+                  ? 'text-body hover:bg-elevated hover:text-strong'
+                  : 'text-muted hover:bg-elevated hover:text-secondary',
                 isDirty ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
               ].join(' ')}
             >

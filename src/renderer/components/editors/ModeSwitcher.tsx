@@ -16,7 +16,7 @@ export function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
     <div
       role="radiogroup"
       aria-label="Editor mode"
-      className="inline-flex h-7 shrink-0 overflow-hidden rounded border border-slate-700 bg-slate-900 text-xs"
+      className="inline-flex h-7 shrink-0 overflow-hidden rounded border border-stroke bg-surface text-xs"
     >
       {OPTIONS.map((opt) => {
         const active = opt.mode === mode;
@@ -29,10 +29,10 @@ export function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
             title={opt.title}
             onClick={() => onChange(opt.mode)}
             className={[
-              'px-2.5 font-medium transition',
+              'px-2.5 font-semibold transition',
               active
-                ? 'bg-slate-700 text-slate-50'
-                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+                ? 'bg-interaction text-white'
+                : 'text-muted hover:bg-elevated hover:text-secondary',
             ].join(' ')}
           >
             {opt.label}

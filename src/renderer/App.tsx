@@ -14,6 +14,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
 import { useSidebarState, isOpenable } from './state/sidebarState';
+import { useThemeState } from './state/themeState';
 import type { MenuActionEvent, TemplateKind, TreeNode } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
@@ -44,6 +45,7 @@ function basenameOfPath(p: string): string {
 function AppContent() {
   const file = useFileState();
   const sidebar = useSidebarState();
+  const theme = useThemeState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
@@ -522,6 +524,18 @@ function AppContent() {
         case 'toggle-sidebar':
           sidebar.toggleVisible();
           break;
+        case 'theme-system':
+          void theme.setPreference('system');
+          break;
+        case 'theme-light':
+          void theme.setPreference('light');
+          break;
+        case 'theme-dark':
+          void theme.setPreference('dark');
+          break;
+        case 'cycle-theme':
+          void theme.cycle();
+          break;
         default:
           break;
       }
@@ -532,6 +546,7 @@ function AppContent() {
     isWysiwyg,
     isMonacoActive,
     sidebar,
+    theme,
     handleNewFile,
     handleCreateFromTemplate,
     handleOpenFile,

@@ -12,7 +12,7 @@ export function TemplateHintBanner({ onDismiss }: TemplateHintBannerProps) {
   return (
     <div
       role="status"
-      className="flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/70 px-4 py-1 text-[11px] text-slate-300"
+      className="flex items-center justify-between gap-3 border-b border-stroke bg-surface px-4 py-1 text-[11px] text-body"
     >
       <span className="min-w-0 truncate">
         Created from template. Replace the placeholder text with your own
@@ -22,7 +22,7 @@ export function TemplateHintBanner({ onDismiss }: TemplateHintBannerProps) {
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss template hint"
-        className="shrink-0 rounded px-1.5 py-0.5 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+        className="shrink-0 rounded px-1.5 py-0.5 text-muted hover:bg-elevated hover:text-strong"
       >
         ×
       </button>

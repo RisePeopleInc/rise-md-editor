@@ -136,7 +136,7 @@ export function SplitView({
   }, [html]);
 
   return (
-    <div ref={containerRef} className="flex h-full w-full bg-slate-950">
+    <div ref={containerRef} className="flex h-full w-full bg-app">
       <div className="min-h-0" style={{ width: `${splitPercent}%` }}>
         <SourceEditor
           ref={sourceRef}
@@ -153,7 +153,7 @@ export function SplitView({
         aria-orientation="vertical"
         aria-label="Resize panes"
         onMouseDown={handleDragStart}
-        className="w-1 shrink-0 cursor-col-resize bg-slate-800 hover:bg-slate-600 active:bg-brand-500"
+        className="w-1 shrink-0 cursor-col-resize bg-stroke hover:bg-elevated active:bg-interaction"
       />
       <div
         ref={previewRef}

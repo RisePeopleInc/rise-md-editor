@@ -3,24 +3,44 @@ interface WelcomeScreenProps {
   onOpenFolder: () => void;
 }
 
+/**
+ * Splash / no-file landing page. Rise-branded — Source Serif Pro for the
+ * app title (with the Rise deep-blue brand color), Open Sans for body,
+ * the canonical purple interaction color for the primary action button.
+ *
+ * The optional gradient panel at the top uses the Rise interaction-tint
+ * (P100 in light, a deepened tint in dark) as a subtle hero accent that
+ * fades into the primary surface.
+ */
 export function WelcomeScreen({ onOpenFile, onOpenFolder }: WelcomeScreenProps) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-slate-950">
-      <div className="flex flex-col items-center gap-6 px-8 text-center">
-        <h1 className="text-6xl font-semibold tracking-tight text-slate-50">rAIse</h1>
-        <p className="text-base text-slate-400">Open a file or folder to get started</p>
+    <div className="flex h-full w-full items-center justify-center bg-app">
+      {/* Subtle hero gradient — fades from the brand-tint into the page
+          background. Sits behind the content, no interaction. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-interaction-tint to-app"
+      />
+      <div className="relative flex flex-col items-center gap-6 px-8 text-center">
+        <h1
+          className="font-serif text-5xl font-bold tracking-tight text-brand"
+          style={{ fontSize: '32px' }}
+        >
+          rAIse
+        </h1>
+        <p className="text-base text-body">Markdown editor for Rise People</p>
         <div className="mt-2 flex gap-3">
           <button
             type="button"
             onClick={onOpenFile}
-            className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            className="rounded-lg bg-interaction px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-interaction-hover active:bg-interaction-active focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
           >
             Open File
           </button>
           <button
             type="button"
             onClick={onOpenFolder}
-            className="rounded-md border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-100 shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            className="rounded-lg border border-stroke bg-surface px-4 py-2 text-sm font-semibold text-strong shadow-sm transition hover:bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
           >
             Open Folder
           </button>

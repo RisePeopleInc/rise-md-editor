@@ -71,12 +71,12 @@ export function Sidebar({
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col border-r border-slate-800 bg-slate-950"
+      className="relative flex h-full shrink-0 flex-col border-r border-stroke bg-surface"
       style={{ width }}
     >
-      <header className="flex h-9 shrink-0 items-center justify-between border-b border-slate-800 px-3">
+      <header className="flex h-9 shrink-0 items-center justify-between border-b border-stroke px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-xs font-semibold uppercase tracking-wide text-slate-300">
+          <span className="truncate text-xs font-semibold uppercase tracking-wide text-secondary">
             {rootName ?? 'No folder open'}
           </span>
         </div>
@@ -88,7 +88,7 @@ export function Sidebar({
                 title="Collapse all folders"
                 aria-label="Collapse all folders"
                 onClick={onCollapseAll}
-                className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-elevated hover:text-strong"
               >
                 {/* Double up-chevron — reads as "fold everything up". */}
                 <svg
@@ -111,7 +111,7 @@ export function Sidebar({
                 title="Close folder"
                 aria-label="Close folder"
                 onClick={onCloseFolder}
-                className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-elevated hover:text-strong"
               >
                 <svg
                   width="12"
@@ -131,7 +131,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onOpenFolder}
-              className="rounded bg-brand-500 px-2 py-0.5 text-[11px] font-medium text-slate-50 hover:bg-brand-600"
+              className="rounded bg-interaction px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-interaction-hover active:bg-interaction-active"
             >
               Open Folder
             </button>
@@ -144,7 +144,7 @@ export function Sidebar({
         aria-orientation="vertical"
         aria-label="Resize sidebar"
         onMouseDown={handleResizeStart}
-        className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-slate-700 active:bg-brand-500"
+        className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-elevated active:bg-interaction"
       />
     </aside>
   );

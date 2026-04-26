@@ -23,7 +23,10 @@ export type MenuAction =
   | 'source-mode'
   | 'split-mode'
   | 'cycle-mode'
-  | 'toggle-theme'
+  | 'theme-system'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'cycle-theme'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -41,6 +44,11 @@ export interface MenuDeps {
    * the renderer routes correctly via `templates:create`.
    */
   claudeMdPresent: () => boolean;
+  /**
+   * Current theme preference — one of 'system' | 'light' | 'dark'.
+   * Drives the radio-style checkmarks under View → Theme.
+   */
+  getThemePreference: () => 'system' | 'light' | 'dark';
   /**
    * Dispatch a menu action. The implementation is responsible for queuing and
    * (if needed) reopening the window — never short-circuits on a missing
@@ -229,9 +237,35 @@ export function buildMenu(deps: MenuDeps): Menu {
         },
         { type: 'separator' },
         {
-          label: 'Toggle Theme',
-          accelerator: 'CmdOrCtrl+Shift+T',
-          click: () => send(deps, 'toggle-theme'),
+          label: 'Theme',
+          submenu: [
+            {
+              label: 'Follow System',
+              type: 'checkbox',
+              checked: deps.getThemePreference() === 'system',
+              click: () => send(deps, 'theme-system'),
+            },
+            {
+              label: 'Light',
+              type: 'checkbox',
+              checked: deps.getThemePreference() === 'light',
+              click: () => send(deps, 'theme-light'),
+            },
+            {
+              label: 'Dark',
+              type: 'checkbox',
+              checked: deps.getThemePreference() === 'dark',
+              click: () => send(deps, 'theme-dark'),
+            },
+            { type: 'separator' },
+            {
+              // Cycle: system → light → dark → system. Preserves the
+              // shortcut users already learned for the previous toggle.
+              label: 'Cycle Theme',
+              accelerator: 'CmdOrCtrl+Shift+T',
+              click: () => send(deps, 'cycle-theme'),
+            },
+          ],
         },
         { type: 'separator' },
         {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, type MenuItemConstructorOptions } from 'electron';
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
@@ -8,6 +8,7 @@ import * as folderWatcher from './folderWatcher';
 import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
 import * as templates from './templates';
+import * as themeStore from './themeStore';
 
 const APP_NAME = 'rAIse';
 
@@ -107,6 +108,7 @@ const menuDeps: MenuDeps = {
   getRecentFiles: () => recentStore.getRecent(),
   rebuildMenu: () => rebuildMenu(),
   claudeMdPresent,
+  getThemePreference: () => themeStore.getThemePreference(),
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -317,6 +319,10 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    // Apply the persisted theme preference to nativeTheme before any
+    // window opens, so window-chrome (titlebar tint on macOS, scrollbars,
+    // form-control defaults) match from the first frame.
+    themeStore.bootstrapNativeTheme();
     rebuildMenu();
     createWindow();
 
@@ -749,4 +755,38 @@ ipcMain.handle(
 
 ipcMain.on('templates:dismiss-claude-banner', (_, rootPath: string) => {
   lastFolderStore.dismissClaudeBanner(rootPath);
+});
+
+// ---------------------------------------------------------------------------
+// Theme: hybrid light / dark with optional follow-system
+// ---------------------------------------------------------------------------
+
+function broadcastThemeUpdate(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('theme:updated', {
+    preference: themeStore.getThemePreference(),
+    resolved: themeStore.getResolvedTheme(),
+  });
+  // Menu has Light / Dark / Follow System checkmarks that need to match
+  // the new state.
+  rebuildMenu();
+}
+
+ipcMain.handle('theme:get', async () => ({
+  preference: themeStore.getThemePreference(),
+  resolved: themeStore.getResolvedTheme(),
+}));
+
+ipcMain.handle('theme:set', async (_, pref: themeStore.ThemePreference) => {
+  themeStore.setThemePreference(pref);
+  broadcastThemeUpdate();
+  return { preference: pref, resolved: themeStore.getResolvedTheme() };
+});
+
+// macOS / Windows fire `nativeTheme.updated` when the OS appearance
+// changes. We only care when the user has set preference='system' — but
+// even when they've pinned light/dark, refreshing the resolved value is
+// harmless (it'll be the pinned value).
+nativeTheme.on('updated', () => {
+  broadcastThemeUpdate();
 });

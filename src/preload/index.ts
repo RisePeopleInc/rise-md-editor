@@ -22,7 +22,10 @@ export type MenuActionType =
   | 'source-mode'
   | 'split-mode'
   | 'cycle-mode'
-  | 'toggle-theme'
+  | 'theme-system'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'cycle-theme'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -75,6 +78,28 @@ export type TemplateCreateResult =
   | { status: 'created'; path: string; content: string }
   | { status: 'exists'; path: string }
   | { status: 'untitled'; content: string };
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type ResolvedTheme = 'light' | 'dark';
+export interface ThemeState {
+  preference: ThemePreference;
+  resolved: ResolvedTheme;
+}
+
+const theme = {
+  get: (): Promise<ThemeState> => ipcRenderer.invoke('theme:get'),
+  set: (pref: ThemePreference): Promise<ThemeState> =>
+    ipcRenderer.invoke('theme:set', pref),
+  /** Subscribe to OS theme flips and explicit set events from main. */
+  onChange: (callback: (state: ThemeState) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, state: ThemeState): void =>
+      callback(state);
+    ipcRenderer.on('theme:updated', handler);
+    return () => {
+      ipcRenderer.off('theme:updated', handler);
+    };
+  },
+};
 
 const templates = {
   /**
@@ -183,6 +208,7 @@ const api = {
   files,
   folder,
   templates,
+  theme,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

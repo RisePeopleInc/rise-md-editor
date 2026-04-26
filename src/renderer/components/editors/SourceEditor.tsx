@@ -1,6 +1,19 @@
 import { useImperativeHandle, useRef, type Ref } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
+import { GRUVBOX_DARK_ID, GRUVBOX_LIGHT_ID } from '../../monaco-themes';
+
+/**
+ * Read the current resolved app theme from the `data-theme` attribute
+ * the bootstrap script wrote. Used to seed Monaco with the right
+ * Gruvbox variant on first mount; later theme changes flow through the
+ * useThemeState hook, which calls `monaco.editor.setTheme` directly so
+ * existing instances pick up the swap without re-rendering.
+ */
+function initialMonacoTheme(): string {
+  const attr = document.documentElement.getAttribute('data-theme');
+  return attr === 'dark' ? GRUVBOX_DARK_ID : GRUVBOX_LIGHT_ID;
+}
 
 export interface CursorPosition {
   line: number;
@@ -158,7 +171,11 @@ export function SourceEditor({
     <Editor
       height="100%"
       language="markdown"
-      theme="vs-dark"
+      // Gruvbox is registered in monaco-setup.ts. The variant is chosen
+      // from the current data-theme so the source editor picks the right
+      // palette on first paint; later toggles call monaco.editor.setTheme
+      // globally from useThemeState.
+      theme={initialMonacoTheme()}
       value={content}
       onChange={(value) => onChange(value ?? '')}
       onMount={handleMount}
