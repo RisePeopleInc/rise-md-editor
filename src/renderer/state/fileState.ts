@@ -69,6 +69,13 @@ export interface FileContextValue {
   setActiveWysiwygScroll: (top: number) => void;
   setActiveWysiwygCursorOffset: (offset: number) => void;
   setActiveEditorMode: (mode: EditorMode) => void;
+  /**
+   * Replace a specific tab's content + saved baseline (used by the
+   * external-change reload flow). Doesn't touch the active tab id.
+   * Bumps loadEpoch so uncontrolled-with-reset editors (Milkdown) remount
+   * with the new content.
+   */
+  refreshTabFromDisk: (filePath: string, content: string) => void;
 
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
 }
@@ -263,6 +270,18 @@ export function FileProvider({ children }: FileProviderProps) {
       updateTab(id, { wysiwygCursorOffset: offset });
     },
     [updateTab],
+  );
+
+  const refreshTabFromDisk = useCallback(
+    (filePath: string, content: string) => {
+      const next = tabsRef.current.map((t) =>
+        t.path === filePath
+          ? { ...t, content, savedContent: content, loadEpoch: t.loadEpoch + 1 }
+          : t,
+      );
+      writeTabs(next);
+    },
+    [writeTabs],
   );
 
   const setActiveEditorMode = useCallback(
@@ -473,6 +492,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveWysiwygScroll,
       setActiveWysiwygCursorOffset,
       setActiveEditorMode,
+      refreshTabFromDisk,
       withDirtyGuard,
     }),
     [
@@ -498,6 +518,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveWysiwygScroll,
       setActiveWysiwygCursorOffset,
       setActiveEditorMode,
+      refreshTabFromDisk,
       withDirtyGuard,
     ],
   );

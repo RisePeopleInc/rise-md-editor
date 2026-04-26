@@ -51,6 +51,85 @@ const files = {
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 };
 
+export interface TreeNode {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children?: TreeNode[];
+}
+
+export type ItemMenuAction =
+  | 'new-file'
+  | 'new-folder'
+  | 'rename'
+  | 'delete'
+  | 'reveal'
+  | 'open';
+
+const folder = {
+  /** Show the folder dialog, populate the sidebar, and start watching. */
+  open: (): Promise<{ path: string; tree: TreeNode } | null> =>
+    ipcRenderer.invoke('folder:open'),
+  /** Open a known folder path (e.g., from drag-drop or restore). */
+  openPath: (folderPath: string): Promise<{ path: string; tree: TreeNode }> =>
+    ipcRenderer.invoke('folder:open-path', folderPath),
+  /** Re-read the tree without restarting the watcher. */
+  getTree: (folderPath: string): Promise<TreeNode> =>
+    ipcRenderer.invoke('folder:get-tree', folderPath),
+  /** Stop watching and clear the persisted entry. */
+  close: (): Promise<void> => ipcRenderer.invoke('folder:close'),
+  /** Return the persisted last-opened folder + its tree if it still exists. */
+  getLast: (): Promise<{ path: string; tree: TreeNode } | null> =>
+    ipcRenderer.invoke('folder:get-last'),
+
+  createFile: (parentPath: string): Promise<string> =>
+    ipcRenderer.invoke('folder:create-file', parentPath),
+  createFolder: (parentPath: string, name: string): Promise<string> =>
+    ipcRenderer.invoke('folder:create-folder', parentPath, name),
+  rename: (oldPath: string, newName: string): Promise<string> =>
+    ipcRenderer.invoke('folder:rename', oldPath, newName),
+  trash: (itemPath: string): Promise<void> =>
+    ipcRenderer.invoke('folder:trash', itemPath),
+  reveal: (itemPath: string): void => {
+    ipcRenderer.send('folder:reveal', itemPath);
+  },
+  confirmDelete: (name: string, isDirectory: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('folder:confirm-delete', name, isDirectory),
+  statPath: (p: string): Promise<'file' | 'directory' | 'missing'> =>
+    ipcRenderer.invoke('folder:stat-path', p),
+  showItemMenu: (payload: {
+    isDirectory: boolean;
+    isMarkdown: boolean;
+  }): Promise<ItemMenuAction | null> =>
+    ipcRenderer.invoke('folder:show-item-menu', payload),
+
+  getSidebarPref: (): Promise<{ width: number; visible: boolean }> =>
+    ipcRenderer.invoke('folder:get-sidebar-pref'),
+  setSidebarWidth: (width: number): void => {
+    ipcRenderer.send('folder:set-sidebar-width', width);
+  },
+  setSidebarVisible: (visible: boolean): void => {
+    ipcRenderer.send('folder:set-sidebar-visible', visible);
+  },
+
+  onTreeChanged: (callback: (root: string) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, event: { root: string }): void =>
+      callback(event.root);
+    ipcRenderer.on('folder:tree-changed', handler);
+    return () => {
+      ipcRenderer.off('folder:tree-changed', handler);
+    };
+  },
+  onFileChanged: (callback: (filePath: string) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, event: { path: string }): void =>
+      callback(event.path);
+    ipcRenderer.on('folder:file-changed', handler);
+    return () => {
+      ipcRenderer.off('folder:file-changed', handler);
+    };
+  },
+};
+
 const api = {
   // 'darwin' | 'win32' | 'linux' | etc. Lets the renderer branch on
   // macOS without parsing navigator.userAgent.
@@ -58,6 +137,8 @@ const api = {
   openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:open-folder'),
   confirmUnsavedChanges: (filename: string): Promise<'save' | 'discard' | 'cancel'> =>
     ipcRenderer.invoke('dialog:confirm-unsaved', filename),
+  confirmFileReload: (filename: string, isDirty: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('dialog:confirm-reload', filename, isDirty),
   showError: (title: string, message: string): void => {
     ipcRenderer.send('dialog:show-error', { title, message });
   },
@@ -68,6 +149,7 @@ const api = {
     ipcRenderer.send('window:close');
   },
   files,
+  folder,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

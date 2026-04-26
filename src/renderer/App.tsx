@@ -8,8 +8,11 @@ import {
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
 import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
+import { Sidebar } from './components/sidebar/Sidebar';
+import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
-import type { MenuActionEvent } from './env';
+import { useSidebarState, isOpenable } from './state/sidebarState';
+import type { MenuActionEvent, TreeNode } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
 
@@ -32,8 +35,13 @@ function modeLabel(mode: EditorMode): 'Source' | 'WYSIWYG' | 'Split' {
   return 'Source';
 }
 
+function basenameOfPath(p: string): string {
+  return p.split(/[\\/]/).pop() || p;
+}
+
 function AppContent() {
   const file = useFileState();
+  const sidebar = useSidebarState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
@@ -104,8 +112,71 @@ function AppContent() {
   );
 
   const handleOpenFolder = useCallback(async () => {
-    await window.api.openFolder();
-  }, []);
+    await sidebar.openFolderDialog();
+  }, [sidebar]);
+
+  const handleTreeContextMenu = useCallback(
+    async (node: TreeNode) => {
+      const action = await window.api.folder.showItemMenu({
+        isDirectory: node.isDirectory,
+        isMarkdown: isOpenable(node) || /\.(md|markdown)$/i.test(node.name),
+      });
+      if (!action) return;
+      switch (action) {
+        case 'open':
+          if (isOpenable(node)) void handleOpenPath(node.path);
+          break;
+        case 'reveal':
+          window.api.folder.reveal(node.path);
+          break;
+        case 'new-file': {
+          const newPath = await window.api.folder.createFile(node.path);
+          void handleOpenPath(newPath);
+          break;
+        }
+        case 'new-folder': {
+          const name = window.prompt('Folder name:');
+          if (!name?.trim()) return;
+          try {
+            await window.api.folder.createFolder(node.path, name.trim());
+          } catch (err) {
+            window.api.showError(
+              'Could not create folder',
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+          break;
+        }
+        case 'rename': {
+          const newName = window.prompt('Rename to:', node.name);
+          if (!newName?.trim() || newName === node.name) return;
+          try {
+            await window.api.folder.rename(node.path, newName.trim());
+          } catch (err) {
+            window.api.showError(
+              'Could not rename',
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+          break;
+        }
+        case 'delete': {
+          const ok = await window.api.folder.confirmDelete(node.name, node.isDirectory);
+          if (!ok) return;
+          try {
+            await window.api.folder.trash(node.path);
+          } catch (err) {
+            window.api.showError(
+              'Could not move to Trash',
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+          break;
+        }
+      }
+    },
+    [handleOpenPath],
+  );
 
   const handleNewFile = useCallback(() => {
     file.newFile();
@@ -144,22 +215,37 @@ function AppContent() {
     file.setActiveEditorMode(nextMode(current));
   }, [file, captureActivePosition]);
 
-  // Drag-and-drop: open the first matching file in the drop. Multi-file
-  // selection waits for proper multi-select semantics — for now we treat a
-  // drop as a single-file open routed through the recent-files flow.
+  // Drag-and-drop. A dropped *folder* opens Project Mode; a dropped
+  // markdown/text file opens in a tab. We can't tell which from the File
+  // object alone (browsers don't expose `kind`), so we ask main to stat
+  // the path. Empty drops or unsupported file types are silently ignored.
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
       e.preventDefault();
     };
-    const onDrop = (e: DragEvent) => {
+    const onDrop = async (e: DragEvent) => {
       e.preventDefault();
       const dropped = e.dataTransfer?.files;
       if (!dropped || dropped.length === 0) return;
-      const target = Array.from(dropped).find((f) => ACCEPTED_EXTENSIONS.test(f.name));
-      if (!target) return;
-      const filePath = window.api.files.getPathForFile(target);
-      if (!filePath) return;
-      void handleOpenPath(filePath);
+      const first = dropped[0];
+      if (!first) return;
+      const droppedPath = window.api.files.getPathForFile(first);
+      if (!droppedPath) return;
+      const kind = await window.api.folder.statPath(droppedPath);
+      if (kind === 'directory') {
+        await sidebar.openFolderByPath(droppedPath);
+        return;
+      }
+      if (kind === 'file') {
+        // Only open recognised text/markdown extensions to match the
+        // explicit filter on the Open File dialog.
+        const target = Array.from(dropped).find((f) =>
+          ACCEPTED_EXTENSIONS.test(f.name),
+        );
+        if (!target) return;
+        const filePath = window.api.files.getPathForFile(target);
+        if (filePath) void handleOpenPath(filePath);
+      }
     };
     window.addEventListener('dragover', onDragOver);
     window.addEventListener('drop', onDrop);
@@ -167,7 +253,7 @@ function AppContent() {
       window.removeEventListener('dragover', onDragOver);
       window.removeEventListener('drop', onDrop);
     };
-  }, [handleOpenPath]);
+  }, [handleOpenPath, sidebar]);
 
   // Menu IPC dispatch.
   useEffect(() => {
@@ -237,6 +323,9 @@ function AppContent() {
         case 'cycle-mode':
           handleCycleMode();
           break;
+        case 'toggle-sidebar':
+          sidebar.toggleVisible();
+          break;
         default:
           break;
       }
@@ -246,6 +335,7 @@ function AppContent() {
     file,
     isWysiwyg,
     isMonacoActive,
+    sidebar,
     handleNewFile,
     handleOpenFile,
     handleOpenPath,
@@ -255,6 +345,32 @@ function AppContent() {
     handleCycleMode,
     handleModeChange,
   ]);
+
+  // External-change reload prompt: when chokidar reports a content change
+  // for a file that's currently open in a tab, ask the user if they want
+  // to discard their working copy and reload from disk.
+  useEffect(() => {
+    const off = window.api.folder.onFileChanged(async (filePath) => {
+      const tab = file.tabs.find((t) => t.path === filePath);
+      if (!tab) return;
+      const isDirty = tab.content !== tab.savedContent;
+      const reload = await window.api.confirmFileReload(
+        basenameOfPath(filePath),
+        isDirty,
+      );
+      if (!reload) return;
+      try {
+        const result = await window.api.files.openPath(filePath);
+        file.refreshTabFromDisk(result.path, result.content);
+      } catch (err) {
+        window.api.showError(
+          'Could not reload file',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+    return off;
+  }, [file]);
 
   // Signal readiness once on mount, after the menu listener effect above has
   // attached. Effects run in declaration order, so the listener is bound by
@@ -309,38 +425,59 @@ function AppContent() {
   );
 
   return (
-    <div className="flex h-full w-full flex-col">
-      {file.tabs.length > 0 && (
-        <TabBar
-          tabs={file.tabs}
-          activeTabId={file.activeTabId}
-          onActivate={handleSwitchTab}
-          onClose={handleCloseTab}
-          onReorder={file.reorderTabs}
-        />
+    <div className="flex h-full w-full">
+      {sidebar.visible && (
+        <Sidebar
+          width={sidebar.width}
+          onWidthChange={sidebar.setWidth}
+          rootName={sidebar.rootPath ? basenameOfPath(sidebar.rootPath) : null}
+          onCollapseAll={sidebar.collapseAll}
+          onOpenFolder={handleOpenFolder}
+        >
+          {sidebar.rootTree && (
+            <FileTree
+              root={sidebar.rootTree}
+              expanded={sidebar.expanded}
+              onToggle={sidebar.toggleExpanded}
+              onOpenFile={(p) => void handleOpenPath(p)}
+              onContextMenu={handleTreeContextMenu}
+            />
+          )}
+        </Sidebar>
       )}
-      <main className="min-h-0 flex-1">
-        {file.activeTab ? (
-          <EditorContainer
-            tab={file.activeTab}
-            onContentChange={file.setContent}
-            onModeChange={handleModeChange}
-            onCursorChange={setCursor}
-            sourceRef={editorRef}
-            wysiwygRef={wysiwygRef}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {file.tabs.length > 0 && (
+          <TabBar
+            tabs={file.tabs}
+            activeTabId={file.activeTabId}
+            onActivate={handleSwitchTab}
+            onClose={handleCloseTab}
+            onReorder={file.reorderTabs}
           />
-        ) : (
-          <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
-      </main>
-      {file.activeTab && (
-        <StatusBar
-          line={cursor.line}
-          column={cursor.column}
-          wordCount={wordCount}
-          mode={modeLabel(file.activeTab.editorMode)}
-        />
-      )}
+        <main className="min-h-0 flex-1">
+          {file.activeTab ? (
+            <EditorContainer
+              tab={file.activeTab}
+              onContentChange={file.setContent}
+              onModeChange={handleModeChange}
+              onCursorChange={setCursor}
+              sourceRef={editorRef}
+              wysiwygRef={wysiwygRef}
+            />
+          ) : (
+            <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
+          )}
+        </main>
+        {file.activeTab && (
+          <StatusBar
+            line={cursor.line}
+            column={cursor.column}
+            wordCount={wordCount}
+            mode={modeLabel(file.activeTab.editorMode)}
+          />
+        )}
+      </div>
     </div>
   );
 }
