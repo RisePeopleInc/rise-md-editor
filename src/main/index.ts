@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
-import { promises as fs } from 'node:fs';
+import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
 import * as fileOps from './fileOperations';
@@ -88,10 +88,25 @@ function rememberRecent(filePath: string): void {
   rebuildMenu();
 }
 
+// Sync stat — called from the menu builder, which runs rarely (workspace
+// changes, chokidar tree ticks). The blocking I/O is fine in those
+// contexts and the cache lookups are O(1) from the OS's perspective for
+// a path the user is already working in.
+function claudeMdPresent(): boolean {
+  const root = lastFolderStore.getLastFolder();
+  if (!root) return false;
+  try {
+    return statSync(path.join(root, 'CLAUDE.md')).isFile();
+  } catch {
+    return false;
+  }
+}
+
 const menuDeps: MenuDeps = {
   getWindow,
   getRecentFiles: () => recentStore.getRecent(),
   rebuildMenu: () => rebuildMenu(),
+  claudeMdPresent,
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -456,6 +471,10 @@ function markRecentlyWritten(filePath: string): void {
 folderWatcher.setListener({
   onTreeChanged: (root) => {
     folderWatcher.notifyRenderer(mainWindow, { type: 'tree', path: root });
+    // Tree changes can include CLAUDE.md being created/deleted, which
+    // flips the File menu's "New" / "Open" CLAUDE.md label. Rebuilds
+    // are cheap and chokidar already debounces 75ms upstream.
+    rebuildMenu();
   },
   onFileChanged: (filePath) => {
     if (recentlyWritten.has(filePath)) {
@@ -478,6 +497,10 @@ ipcMain.handle('folder:open', async () => {
   const tree = await folderOps.readFolderTree(folder);
   await folderWatcher.watchFolder(folder);
   lastFolderStore.setLastFolder(folder);
+  // Refresh the File menu label immediately — chokidar's debounced
+  // tree event will catch up later, but the user expects the menu to
+  // reflect the just-opened workspace on the next click, not in 75ms.
+  rebuildMenu();
   return { path: folder, tree };
 });
 
@@ -485,6 +508,7 @@ ipcMain.handle('folder:open-path', async (_, folderPath: string) => {
   const tree = await folderOps.readFolderTree(folderPath);
   await folderWatcher.watchFolder(folderPath);
   lastFolderStore.setLastFolder(folderPath);
+  rebuildMenu();
   return { path: folderPath, tree };
 });
 
@@ -507,6 +531,7 @@ ipcMain.handle('folder:stat-path', async (_, p: string): Promise<'file' | 'direc
 ipcMain.handle('folder:close', async () => {
   await folderWatcher.stopWatching();
   lastFolderStore.setLastFolder(null);
+  rebuildMenu();
 });
 
 ipcMain.handle('folder:create-file', async (_, parentPath: string, name: string) =>
@@ -602,6 +627,9 @@ ipcMain.handle('folder:get-last', async () => {
   try {
     const tree = await folderOps.readFolderTree(last);
     await folderWatcher.watchFolder(last);
+    // Refresh the File menu so "Open CLAUDE.md" / "New CLAUDE.md"
+    // matches the restored workspace's state on first paint.
+    rebuildMenu();
     return { path: last, tree };
   } catch {
     // Folder no longer exists or is unreadable — clear the persisted entry.

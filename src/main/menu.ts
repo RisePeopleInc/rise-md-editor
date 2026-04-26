@@ -34,6 +34,14 @@ export interface MenuDeps {
   getRecentFiles: () => string[];
   rebuildMenu: () => void;
   /**
+   * `true` when an open workspace has a CLAUDE.md at its root. Used to
+   * flip the File menu label between "New CLAUDE.md" (creates from
+   * template) and "Open CLAUDE.md" (opens the existing one) — the
+   * action under the hood is the same `new-claude-md` dispatch which
+   * the renderer routes correctly via `templates:create`.
+   */
+  claudeMdPresent: () => boolean;
+  /**
    * Dispatch a menu action. The implementation is responsible for queuing and
    * (if needed) reopening the window — never short-circuits on a missing
    * window, so File→New / File→Open work after Cmd+W on macOS.
@@ -96,7 +104,12 @@ export function buildMenu(deps: MenuDeps): Menu {
           click: () => send(deps, 'new'),
         },
         {
-          label: 'New CLAUDE.md',
+          // Label flips when the workspace already has a CLAUDE.md so
+          // the menu reflects what the action will actually do — the
+          // shortcut is the same in either case (the renderer's
+          // templates:create handler returns 'exists' and opens the
+          // existing file when one is there).
+          label: deps.claudeMdPresent() ? 'Open CLAUDE.md' : 'New CLAUDE.md',
           // Cmd/Ctrl+Shift+C is unused in our app and intuitive — "C for
           // Claude". Doesn't conflict with the OS-level Copy shortcut.
           accelerator: 'CmdOrCtrl+Shift+C',
