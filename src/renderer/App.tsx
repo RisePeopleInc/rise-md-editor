@@ -8,8 +8,11 @@ import {
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
 import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
+import { Sidebar } from './components/sidebar/Sidebar';
+import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
-import type { MenuActionEvent } from './env';
+import { useSidebarState, isOpenable } from './state/sidebarState';
+import type { MenuActionEvent, TreeNode } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
 
@@ -32,8 +35,13 @@ function modeLabel(mode: EditorMode): 'Source' | 'WYSIWYG' | 'Split' {
   return 'Source';
 }
 
+function basenameOfPath(p: string): string {
+  return p.split(/[\\/]/).pop() || p;
+}
+
 function AppContent() {
   const file = useFileState();
+  const sidebar = useSidebarState();
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
@@ -104,8 +112,131 @@ function AppContent() {
   );
 
   const handleOpenFolder = useCallback(async () => {
-    await window.api.openFolder();
-  }, []);
+    await sidebar.openFolderDialog();
+  }, [sidebar]);
+
+  const handleTreeContextMenu = useCallback(
+    async (node: TreeNode) => {
+      const action = await window.api.folder.showItemMenu({
+        isDirectory: node.isDirectory,
+        isMarkdown: isOpenable(node) || /\.(md|markdown)$/i.test(node.name),
+      });
+      if (!action) return;
+      switch (action) {
+        case 'open':
+          if (isOpenable(node)) void handleOpenPath(node.path);
+          break;
+        case 'reveal':
+          window.api.folder.reveal(node.path);
+          break;
+        case 'new-file':
+          // 'new-file' / 'new-folder' only make sense on directories — the
+          // context menu only offers them in that case.
+          if (node.isDirectory) sidebar.startCreate(node.path, 'file');
+          break;
+        case 'new-folder':
+          if (node.isDirectory) sidebar.startCreate(node.path, 'folder');
+          break;
+        case 'rename':
+          sidebar.startRename(node.path);
+          break;
+        case 'delete': {
+          const ok = await window.api.folder.confirmDelete(node.name, node.isDirectory);
+          if (!ok) return;
+          try {
+            await window.api.folder.trash(node.path);
+            // Reconcile open tabs: clean tabs close, dirty tabs become
+            // Untitled so the user can rescue their working copy via Save As.
+            file.relocateTabs(node.path, null);
+          } catch (err) {
+            window.api.showError(
+              'Could not move to Trash',
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+          break;
+        }
+      }
+    },
+    [handleOpenPath, sidebar, file],
+  );
+
+  // Both submit handlers follow the same shape: validate (and bail with
+  // the input still open if invalid), try the IPC, only call cancelEdit
+  // on success. On error the inline input stays mounted with the user's
+  // typed value preserved — they can fix the conflict and re-press Enter
+  // without retyping from scratch.
+  const handleRenameSubmit = useCallback(
+    async (oldPath: string, newName: string) => {
+      if (newName === '') {
+        sidebar.cancelEdit();
+        return;
+      }
+      if (newName.includes('/') || newName.includes('\\')) {
+        window.api.showError(
+          'Invalid name',
+          'Names cannot contain "/" or "\\".',
+        );
+        return; // Keep the input open so the user can correct.
+      }
+      try {
+        const newPath = await window.api.folder.rename(oldPath, newName);
+        // Keep open tabs in sync with the rename — without this the tab
+        // still points at the old path and a Cmd+S would write a ghost
+        // file at the original location.
+        file.relocateTabs(oldPath, newPath);
+        sidebar.cancelEdit();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        window.api.showError(
+          'Could not rename',
+          /EEXIST/i.test(message)
+            ? `An item named "${newName}" already exists in that folder.`
+            : message,
+        );
+        // Don't cancelEdit — leave the input visible so the user can
+        // pick a different name.
+      }
+    },
+    [sidebar, file],
+  );
+
+  const handleCreateSubmit = useCallback(
+    async (parentPath: string, kind: 'file' | 'folder', name: string) => {
+      if (name === '') {
+        sidebar.cancelEdit();
+        return;
+      }
+      if (name.includes('/') || name.includes('\\')) {
+        window.api.showError(
+          'Invalid name',
+          'Names cannot contain "/" or "\\".',
+        );
+        return;
+      }
+      try {
+        if (kind === 'file') {
+          const newPath = await window.api.folder.createFile(parentPath, name);
+          sidebar.cancelEdit();
+          void handleOpenPath(newPath);
+        } else {
+          await window.api.folder.createFolder(parentPath, name);
+          sidebar.cancelEdit();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        window.api.showError(
+          kind === 'file' ? 'Could not create file' : 'Could not create folder',
+          /EEXIST/i.test(message)
+            ? `An item named "${name}" already exists in that folder.`
+            : message,
+        );
+        // Don't cancelEdit — keep the input mounted so the user's typing
+        // is preserved and they can pick a different name.
+      }
+    },
+    [handleOpenPath, sidebar],
+  );
 
   const handleNewFile = useCallback(() => {
     file.newFile();
@@ -144,22 +275,37 @@ function AppContent() {
     file.setActiveEditorMode(nextMode(current));
   }, [file, captureActivePosition]);
 
-  // Drag-and-drop: open the first matching file in the drop. Multi-file
-  // selection waits for proper multi-select semantics — for now we treat a
-  // drop as a single-file open routed through the recent-files flow.
+  // Drag-and-drop. A dropped *folder* opens Project Mode; a dropped
+  // markdown/text file opens in a tab. We can't tell which from the File
+  // object alone (browsers don't expose `kind`), so we ask main to stat
+  // the path. Empty drops or unsupported file types are silently ignored.
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
       e.preventDefault();
     };
-    const onDrop = (e: DragEvent) => {
+    const onDrop = async (e: DragEvent) => {
       e.preventDefault();
       const dropped = e.dataTransfer?.files;
       if (!dropped || dropped.length === 0) return;
-      const target = Array.from(dropped).find((f) => ACCEPTED_EXTENSIONS.test(f.name));
-      if (!target) return;
-      const filePath = window.api.files.getPathForFile(target);
-      if (!filePath) return;
-      void handleOpenPath(filePath);
+      const first = dropped[0];
+      if (!first) return;
+      const droppedPath = window.api.files.getPathForFile(first);
+      if (!droppedPath) return;
+      const kind = await window.api.folder.statPath(droppedPath);
+      if (kind === 'directory') {
+        await sidebar.openFolderByPath(droppedPath);
+        return;
+      }
+      if (kind === 'file') {
+        // Only open recognised text/markdown extensions to match the
+        // explicit filter on the Open File dialog.
+        const target = Array.from(dropped).find((f) =>
+          ACCEPTED_EXTENSIONS.test(f.name),
+        );
+        if (!target) return;
+        const filePath = window.api.files.getPathForFile(target);
+        if (filePath) void handleOpenPath(filePath);
+      }
     };
     window.addEventListener('dragover', onDragOver);
     window.addEventListener('drop', onDrop);
@@ -167,7 +313,7 @@ function AppContent() {
       window.removeEventListener('dragover', onDragOver);
       window.removeEventListener('drop', onDrop);
     };
-  }, [handleOpenPath]);
+  }, [handleOpenPath, sidebar]);
 
   // Menu IPC dispatch.
   useEffect(() => {
@@ -237,6 +383,9 @@ function AppContent() {
         case 'cycle-mode':
           handleCycleMode();
           break;
+        case 'toggle-sidebar':
+          sidebar.toggleVisible();
+          break;
         default:
           break;
       }
@@ -246,6 +395,7 @@ function AppContent() {
     file,
     isWysiwyg,
     isMonacoActive,
+    sidebar,
     handleNewFile,
     handleOpenFile,
     handleOpenPath,
@@ -255,6 +405,32 @@ function AppContent() {
     handleCycleMode,
     handleModeChange,
   ]);
+
+  // External-change reload prompt: when chokidar reports a content change
+  // for a file that's currently open in a tab, ask the user if they want
+  // to discard their working copy and reload from disk.
+  useEffect(() => {
+    const off = window.api.folder.onFileChanged(async (filePath) => {
+      const tab = file.tabs.find((t) => t.path === filePath);
+      if (!tab) return;
+      const isDirty = tab.content !== tab.savedContent;
+      const reload = await window.api.confirmFileReload(
+        basenameOfPath(filePath),
+        isDirty,
+      );
+      if (!reload) return;
+      try {
+        const result = await window.api.files.openPath(filePath);
+        file.refreshTabFromDisk(result.path, result.content);
+      } catch (err) {
+        window.api.showError(
+          'Could not reload file',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+    return off;
+  }, [file]);
 
   // Signal readiness once on mount, after the menu listener effect above has
   // attached. Effects run in declaration order, so the listener is bound by
@@ -309,38 +485,71 @@ function AppContent() {
   );
 
   return (
-    <div className="flex h-full w-full flex-col">
-      {file.tabs.length > 0 && (
-        <TabBar
-          tabs={file.tabs}
-          activeTabId={file.activeTabId}
-          onActivate={handleSwitchTab}
-          onClose={handleCloseTab}
-          onReorder={file.reorderTabs}
-        />
+    <div className="flex h-full w-full">
+      {/* Gate on prefsReady so the persisted visibility wins on first
+          paint — otherwise the default `false` would flash for users who
+          had the sidebar shown last time, and the default `true` (used
+          previously) flashed it open for users who had it hidden. */}
+      {sidebar.prefsReady && sidebar.visible && (
+        <Sidebar
+          width={sidebar.width}
+          onWidthChange={sidebar.setWidth}
+          onWidthCommit={sidebar.commitWidth}
+          rootName={sidebar.rootPath ? basenameOfPath(sidebar.rootPath) : null}
+          onCollapseAll={sidebar.collapseAll}
+          onOpenFolder={handleOpenFolder}
+        >
+          {sidebar.rootTree && (
+            <FileTree
+              root={sidebar.rootTree}
+              expanded={sidebar.expanded}
+              onToggle={sidebar.toggleExpanded}
+              onOpenFile={(p) => void handleOpenPath(p)}
+              onContextMenu={handleTreeContextMenu}
+              editingPath={sidebar.editingPath}
+              creating={sidebar.creating}
+              onRenameSubmit={(p, name) => void handleRenameSubmit(p, name)}
+              onCreateSubmit={(parent, kind, name) =>
+                void handleCreateSubmit(parent, kind, name)
+              }
+              onEditCancel={sidebar.cancelEdit}
+            />
+          )}
+        </Sidebar>
       )}
-      <main className="min-h-0 flex-1">
-        {file.activeTab ? (
-          <EditorContainer
-            tab={file.activeTab}
-            onContentChange={file.setContent}
-            onModeChange={handleModeChange}
-            onCursorChange={setCursor}
-            sourceRef={editorRef}
-            wysiwygRef={wysiwygRef}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {file.tabs.length > 0 && (
+          <TabBar
+            tabs={file.tabs}
+            activeTabId={file.activeTabId}
+            onActivate={handleSwitchTab}
+            onClose={handleCloseTab}
+            onReorder={file.reorderTabs}
           />
-        ) : (
-          <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
         )}
-      </main>
-      {file.activeTab && (
-        <StatusBar
-          line={cursor.line}
-          column={cursor.column}
-          wordCount={wordCount}
-          mode={modeLabel(file.activeTab.editorMode)}
-        />
-      )}
+        <main className="min-h-0 flex-1">
+          {file.activeTab ? (
+            <EditorContainer
+              tab={file.activeTab}
+              onContentChange={file.setContent}
+              onModeChange={handleModeChange}
+              onCursorChange={setCursor}
+              sourceRef={editorRef}
+              wysiwygRef={wysiwygRef}
+            />
+          ) : (
+            <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
+          )}
+        </main>
+        {file.activeTab && (
+          <StatusBar
+            line={cursor.line}
+            column={cursor.column}
+            wordCount={wordCount}
+            mode={modeLabel(file.activeTab.editorMode)}
+          />
+        )}
+      </div>
     </div>
   );
 }

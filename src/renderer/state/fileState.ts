@@ -69,6 +69,27 @@ export interface FileContextValue {
   setActiveWysiwygScroll: (top: number) => void;
   setActiveWysiwygCursorOffset: (offset: number) => void;
   setActiveEditorMode: (mode: EditorMode) => void;
+  /**
+   * Replace a specific tab's content + saved baseline (used by the
+   * external-change reload flow). Doesn't touch the active tab id.
+   * Bumps loadEpoch so uncontrolled-with-reset editors (Milkdown) remount
+   * with the new content.
+   */
+  refreshTabFromDisk: (filePath: string, content: string) => void;
+  /**
+   * Update tabs whose path matches (or is a descendant of) `oldPath`.
+   *
+   *  - If `newPath` is a string, rewrite each match's path so it points at
+   *    its new location (used after a rename or a folder rename).
+   *  - If `newPath` is `null`, the source no longer exists on disk:
+   *    dirty tabs are kept open with `path: null` (so Cmd+S routes through
+   *    Save As and the user can rescue their working copy), and clean tabs
+   *    are closed.
+   *
+   * Returns the list of tab ids that were closed, so the caller can react
+   * (e.g. clear file-state on the main side).
+   */
+  relocateTabs: (oldPath: string, newPath: string | null) => string[];
 
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
 }
@@ -263,6 +284,84 @@ export function FileProvider({ children }: FileProviderProps) {
       updateTab(id, { wysiwygCursorOffset: offset });
     },
     [updateTab],
+  );
+
+  const refreshTabFromDisk = useCallback(
+    (filePath: string, content: string) => {
+      const next = tabsRef.current.map((t) =>
+        t.path === filePath
+          ? { ...t, content, savedContent: content, loadEpoch: t.loadEpoch + 1 }
+          : t,
+      );
+      writeTabs(next);
+    },
+    [writeTabs],
+  );
+
+  // Followed by FileTree rename / delete to keep open tabs in sync with the
+  // sidebar ops. Without this a renamed file's tab still points at the old
+  // path — saving recreates the original ghost file at the old location.
+  const relocateTabs = useCallback(
+    (oldPath: string, newPath: string | null): string[] => {
+      // Match exact path AND any descendants. Test both POSIX and Windows
+      // separators since `path` strings in the renderer come from main and
+      // we don't normalise them here.
+      const oldPosixPrefix = `${oldPath}/`;
+      const oldWinPrefix = `${oldPath}\\`;
+      const matches = (p: string): boolean =>
+        p === oldPath ||
+        p.startsWith(oldPosixPrefix) ||
+        p.startsWith(oldWinPrefix);
+
+      const before = tabsRef.current;
+      const closedIds: string[] = [];
+      const next: Tab[] = [];
+
+      for (const t of before) {
+        if (t.path === null || !matches(t.path)) {
+          next.push(t);
+          continue;
+        }
+        if (newPath !== null) {
+          // Rename: rewrite the tab's path. Preserve the tail beyond
+          // oldPath so descendants follow folder renames correctly.
+          const tail = t.path === oldPath ? '' : t.path.slice(oldPath.length);
+          next.push({ ...t, path: newPath + tail });
+          continue;
+        }
+        // Delete: dirty work survives as an Untitled tab; clean tabs close.
+        if (isTabDirty(t)) {
+          next.push({ ...t, path: null });
+        } else {
+          closedIds.push(t.id);
+        }
+      }
+
+      // Snapshot the active id's position in the *pre*-mutation list before
+      // writeTabs swaps the ref out from under us — otherwise the neighbour
+      // fallback below would index into the new list.
+      const prevActiveIdx =
+        activeTabIdRef.current !== null
+          ? before.findIndex((t) => t.id === activeTabIdRef.current)
+          : -1;
+
+      writeTabs(next);
+
+      // If the active tab was closed, fall back to the next-best neighbour
+      // (matches `closeTab`'s behaviour: prefer the tab at the same index,
+      // else the one before, else null when nothing remains).
+      if (
+        activeTabIdRef.current !== null &&
+        closedIds.includes(activeTabIdRef.current)
+      ) {
+        const neighbour =
+          next[prevActiveIdx] ?? next[prevActiveIdx - 1] ?? next[0] ?? null;
+        writeActiveTabId(neighbour ? neighbour.id : null);
+      }
+
+      return closedIds;
+    },
+    [writeTabs, writeActiveTabId],
   );
 
   const setActiveEditorMode = useCallback(
@@ -473,6 +572,8 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveWysiwygScroll,
       setActiveWysiwygCursorOffset,
       setActiveEditorMode,
+      refreshTabFromDisk,
+      relocateTabs,
       withDirtyGuard,
     }),
     [
@@ -498,6 +599,8 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveWysiwygScroll,
       setActiveWysiwygCursorOffset,
       setActiveEditorMode,
+      refreshTabFromDisk,
+      relocateTabs,
       withDirtyGuard,
     ],
   );

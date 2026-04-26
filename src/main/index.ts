@@ -1,7 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
 import * as fileOps from './fileOperations';
+import * as folderOps from './folderOps';
+import * as folderWatcher from './folderWatcher';
+import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
 
 const APP_NAME = 'rAIse';
@@ -157,14 +161,33 @@ async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
 }
 
 // Ask the renderer to walk the dirty-tab resolution flow (either Save All or
-// per-tab Review). Resolves true on success, false if anything was canceled.
+// per-tab Review). Resolves true on success, false if anything was canceled
+// OR if the renderer never replies (window destroyed, renderer crash, or a
+// stuck resolution flow). Without those guards a renderer crash mid-prompt
+// would leave the close handler's promise pending forever and freeze quit.
+const RESOLVE_DIRTY_TIMEOUT_MS = 30_000;
+
 function requestResolveDirtyFromRenderer(
   mode: 'save-all' | 'review',
 ): Promise<boolean> {
   if (!mainWindow) return Promise.resolve(false);
+  const window = mainWindow;
   return new Promise((resolve) => {
-    ipcMain.once('window:resolve-dirty:result', (_e, ok: boolean) => resolve(ok));
-    mainWindow!.webContents.send('window:resolve-dirty', mode);
+    let settled = false;
+    const settle = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener('window:resolve-dirty:result', onResult);
+      window.removeListener('closed', onClosed);
+      clearTimeout(timeoutHandle);
+      resolve(ok);
+    };
+    const onResult = (_e: Electron.IpcMainEvent, ok: boolean): void => settle(ok);
+    const onClosed = (): void => settle(false);
+    const timeoutHandle = setTimeout(() => settle(false), RESOLVE_DIRTY_TIMEOUT_MS);
+    ipcMain.on('window:resolve-dirty:result', onResult);
+    window.once('closed', onClosed);
+    window.webContents.send('window:resolve-dirty', mode);
   });
 }
 
@@ -230,6 +253,9 @@ function createWindow(): void {
     mainWindow = null;
     rendererReady = false;
     resetFileState();
+    // Tear down the folder watcher with the window. The persisted last
+    // folder is still in lastFolderStore, so a future window can restore.
+    void folderWatcher.stopWatching();
   });
 
   // Block default file:// navigation for files dropped on the window.
@@ -305,19 +331,40 @@ ipcMain.handle('files:open-path', async (_, filePath: string) => fileOps.openPat
 
 ipcMain.handle('files:save', async (_, filePath: string, content: string) => {
   await fileOps.saveFile(filePath, content);
+  markRecentlyWritten(filePath);
 });
 
 ipcMain.handle(
   'files:save-as',
   async (_, content: string, suggestedName?: string) => {
     if (!mainWindow) return null;
-    return fileOps.saveFileAs(mainWindow, content, suggestedName);
+    const result = await fileOps.saveFileAs(mainWindow, content, suggestedName);
+    if (result) markRecentlyWritten(result.path);
+    return result;
   },
 );
 
 ipcMain.handle(
   'dialog:confirm-unsaved',
   async (_, filename?: string): Promise<UnsavedChoice> => promptUnsavedChanges(filename),
+);
+
+ipcMain.handle(
+  'dialog:confirm-reload',
+  async (_, filename: string, isDirty: boolean): Promise<boolean> => {
+    if (!mainWindow) return false;
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      buttons: ['Reload', 'Keep Editing'],
+      defaultId: isDirty ? 1 : 0,
+      cancelId: 1,
+      message: `"${filename}" has been changed on disk.`,
+      detail: isDirty
+        ? 'You have unsaved changes — reloading will discard them.'
+        : 'Reload the file from disk?',
+    });
+    return result.response === 0;
+  },
 );
 
 ipcMain.on('dialog:show-error', (_, payload: { title: string; message: string }) => {
@@ -379,4 +426,198 @@ ipcMain.on('recent:clear', () => {
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
   dispatchMenuAction('open-path', { path: filePath });
+});
+
+// ---------------------------------------------------------------------------
+// Project Mode: file-tree sidebar + folder watch
+// ---------------------------------------------------------------------------
+
+// Saves we initiated land in chokidar as `change` events too. Mark each
+// outgoing write so the watcher's onFileChanged can ignore it for a short
+// window — otherwise every save would prompt "this file changed on disk,
+// reload?" and the user would think the editor was haunted.
+const recentlyWritten = new Map<string, ReturnType<typeof setTimeout>>();
+const RECENT_WRITE_TTL_MS = 1500;
+
+function markRecentlyWritten(filePath: string): void {
+  const existing = recentlyWritten.get(filePath);
+  if (existing) clearTimeout(existing);
+  recentlyWritten.set(
+    filePath,
+    setTimeout(() => recentlyWritten.delete(filePath), RECENT_WRITE_TTL_MS),
+  );
+}
+
+// Forward chokidar events to the renderer. Tree changes ask the renderer to
+// re-fetch the tree (it's a single IPC, the doc is small); single-file
+// content changes go through a separate channel so the renderer can prompt
+// "this file changed on disk, reload?" if the file is open in a tab.
+folderWatcher.setListener({
+  onTreeChanged: (root) => {
+    folderWatcher.notifyRenderer(mainWindow, { type: 'tree', path: root });
+  },
+  onFileChanged: (filePath) => {
+    if (recentlyWritten.has(filePath)) {
+      // Refresh the TTL — slow disks (network mounts, FUSE, large files)
+      // can land chokidar `change` events well after the original write,
+      // and a fixed window risks firing a phantom "reload?" prompt for a
+      // save the user initiated themselves. Extending on each suppressed
+      // event keeps the suppression alive until writes go quiet.
+      markRecentlyWritten(filePath);
+      return;
+    }
+    folderWatcher.notifyRenderer(mainWindow, { type: 'file', path: filePath });
+  },
+});
+
+ipcMain.handle('folder:open', async () => {
+  if (!mainWindow) return null;
+  const folder = await folderOps.pickFolder(mainWindow);
+  if (!folder) return null;
+  const tree = await folderOps.readFolderTree(folder);
+  await folderWatcher.watchFolder(folder);
+  lastFolderStore.setLastFolder(folder);
+  return { path: folder, tree };
+});
+
+ipcMain.handle('folder:open-path', async (_, folderPath: string) => {
+  const tree = await folderOps.readFolderTree(folderPath);
+  await folderWatcher.watchFolder(folderPath);
+  lastFolderStore.setLastFolder(folderPath);
+  return { path: folderPath, tree };
+});
+
+ipcMain.handle('folder:get-tree', async (_, folderPath: string) =>
+  folderOps.readFolderTree(folderPath),
+);
+
+// Probe a path's kind for the renderer's drag-drop handler. Returns
+// 'directory' / 'file' / 'missing' so the dropper can route to the
+// folder-open or file-open flow without relying on the file extension.
+ipcMain.handle('folder:stat-path', async (_, p: string): Promise<'file' | 'directory' | 'missing'> => {
+  try {
+    const stats = await fs.stat(p);
+    return stats.isDirectory() ? 'directory' : 'file';
+  } catch {
+    return 'missing';
+  }
+});
+
+ipcMain.handle('folder:close', async () => {
+  await folderWatcher.stopWatching();
+  lastFolderStore.setLastFolder(null);
+});
+
+ipcMain.handle('folder:create-file', async (_, parentPath: string, name: string) =>
+  folderOps.createFileNamed(parentPath, name),
+);
+
+ipcMain.handle('folder:create-folder', async (_, parentPath: string, name: string) =>
+  folderOps.createNewFolder(parentPath, name),
+);
+
+ipcMain.handle('folder:rename', async (_, oldPath: string, newName: string) =>
+  folderOps.renamePath(oldPath, newName),
+);
+
+ipcMain.handle('folder:trash', async (_, itemPath: string) => {
+  await folderOps.trashPath(itemPath);
+});
+
+ipcMain.on('folder:reveal', (_, itemPath: string) => {
+  folderOps.revealInFolder(itemPath);
+});
+
+ipcMain.handle(
+  'folder:confirm-delete',
+  async (_, name: string, isDirectory: boolean): Promise<boolean> => {
+    if (!mainWindow) return false;
+    const noun = isDirectory ? 'folder' : 'file';
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['Move to Trash', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Move "${name}" to the Trash?`,
+      detail: `The ${noun} will be moved to the system Trash and can be restored from there.`,
+    });
+    return result.response === 0;
+  },
+);
+
+// Returns the user's chosen action from a native context menu for a file or
+// folder in the tree. The renderer dispatches the actual operation.
+type ItemMenuAction =
+  | 'new-file'
+  | 'new-folder'
+  | 'rename'
+  | 'delete'
+  | 'reveal'
+  | 'open';
+
+ipcMain.handle(
+  'folder:show-item-menu',
+  async (_, payload: { isDirectory: boolean; isMarkdown: boolean }): Promise<ItemMenuAction | null> => {
+    if (!mainWindow) return null;
+    return new Promise<ItemMenuAction | null>((resolve) => {
+      let chosen: ItemMenuAction | null = null;
+      const items: MenuItemConstructorOptions[] = [];
+      if (payload.isDirectory) {
+        items.push(
+          { label: 'New File', click: () => (chosen = 'new-file') },
+          { label: 'New Folder', click: () => (chosen = 'new-folder') },
+          { type: 'separator' },
+        );
+      } else if (payload.isMarkdown) {
+        items.push(
+          { label: 'Open', click: () => (chosen = 'open') },
+          { type: 'separator' },
+        );
+      }
+      items.push(
+        { label: 'Rename', click: () => (chosen = 'rename') },
+        { label: 'Delete', click: () => (chosen = 'delete') },
+        { type: 'separator' },
+        {
+          label: process.platform === 'darwin' ? 'Reveal in Finder' : 'Reveal in Explorer',
+          click: () => (chosen = 'reveal'),
+        },
+      );
+      const menu = Menu.buildFromTemplate(items);
+      menu.popup({
+        window: mainWindow!,
+        callback: () => resolve(chosen),
+      });
+    });
+  },
+);
+
+ipcMain.handle('folder:get-last', async () => {
+  // Restore on launch — return the last opened folder + its tree if it
+  // still exists, otherwise null. Also primes the watcher so the renderer
+  // can seed the sidebar without a separate round-trip.
+  const last = lastFolderStore.getLastFolder();
+  if (!last) return null;
+  try {
+    const tree = await folderOps.readFolderTree(last);
+    await folderWatcher.watchFolder(last);
+    return { path: last, tree };
+  } catch {
+    // Folder no longer exists or is unreadable — clear the persisted entry.
+    lastFolderStore.setLastFolder(null);
+    return null;
+  }
+});
+
+ipcMain.handle('folder:get-sidebar-pref', async () => ({
+  width: lastFolderStore.getSidebarWidth(),
+  visible: lastFolderStore.getSidebarVisible(),
+}));
+
+ipcMain.on('folder:set-sidebar-width', (_, width: number) => {
+  lastFolderStore.setSidebarWidth(width);
+});
+
+ipcMain.on('folder:set-sidebar-visible', (_, visible: boolean) => {
+  lastFolderStore.setSidebarVisible(visible);
 });

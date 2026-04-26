@@ -30,6 +30,7 @@
     "@milkdown/react": "^7.20.0",
     "@milkdown/theme-nord": "^7.20.0",
     "@monaco-editor/react": "^4.7.0",
+    "chokidar": "^3.6.0",
     "electron-store": "^8.2.0",
     "markdown-it": "^14.1.1",
     "monaco-editor": "^0.55.1",
