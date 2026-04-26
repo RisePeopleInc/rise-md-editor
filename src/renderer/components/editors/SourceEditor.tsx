@@ -141,7 +141,11 @@ export function SourceEditor({
       instance.setScrollTop(initialScrollTopRef.current);
     }
     if (initCur) {
-      instance.revealPositionInCenter({
+      // revealPositionNearTop instead of InCenter so the cursor lands a
+      // few lines below the visible top — gives some context above and
+      // keeps the cursor clear of any chrome (mode-switcher bar, tabs,
+      // etc.) that lives just above the editor.
+      instance.revealPositionNearTop({
         lineNumber: initCur.line,
         column: initCur.column,
       });

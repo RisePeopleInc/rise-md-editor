@@ -23,7 +23,10 @@ export interface Tab {
   content: string;
   savedContent: string;
   cursorPosition: CursorPos;
+  /** Monaco's vertical scroll offset (pixels), used in Source / Split. */
   scrollPosition: number;
+  /** Milkdown's scroll-container offset (pixels), used in WYSIWYG. */
+  wysiwygScrollPosition: number;
   editorMode: EditorMode;
   /**
    * Bumped each time `loadFile` reloads this tab from disk while it is
@@ -56,6 +59,7 @@ export interface FileContextValue {
 
   setActiveCursor: (cursor: CursorPos) => void;
   setActiveScroll: (top: number) => void;
+  setActiveWysiwygScroll: (top: number) => void;
   setActiveEditorMode: (mode: EditorMode) => void;
 
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
@@ -84,6 +88,7 @@ function makeTab(path: string | null, content: string): Tab {
     savedContent: content,
     cursorPosition: { line: 1, column: 1 },
     scrollPosition: 0,
+    wysiwygScrollPosition: 0,
     // RAISE-7: WYSIWYG is the welcoming default — both new files and freshly
     // opened files land in formatted mode. Users can flip to Source or Split
     // per tab via the mode switcher (or Cmd+1/2/3, or Cmd+\ to cycle).
@@ -229,6 +234,15 @@ export function FileProvider({ children }: FileProviderProps) {
       const id = activeTabIdRef.current;
       if (!id) return;
       updateTab(id, { scrollPosition: top });
+    },
+    [updateTab],
+  );
+
+  const setActiveWysiwygScroll = useCallback(
+    (top: number) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { wysiwygScrollPosition: top });
     },
     [updateTab],
   );
@@ -438,6 +452,7 @@ export function FileProvider({ children }: FileProviderProps) {
       reorderTabs,
       setActiveCursor,
       setActiveScroll,
+      setActiveWysiwygScroll,
       setActiveEditorMode,
       withDirtyGuard,
     }),
@@ -461,6 +476,7 @@ export function FileProvider({ children }: FileProviderProps) {
       reorderTabs,
       setActiveCursor,
       setActiveScroll,
+      setActiveWysiwygScroll,
       setActiveEditorMode,
       withDirtyGuard,
     ],

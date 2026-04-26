@@ -42,17 +42,25 @@ function AppContent() {
   // Source-style editor (Monaco) drives undo/redo for both Source AND Split.
   const isMonacoActive = !isWysiwyg;
 
-  // Capture the current source-editor cursor/scroll into the (about-to-leave)
-  // active tab before switching, so a switch back can restore. Only Monaco
-  // is exposed via editorRef today; Milkdown's cursor mapping is approximate
-  // and intentionally not preserved across mode swaps (per RAISE-7 spec).
+  // Capture the active editor's cursor/scroll into the (about-to-leave)
+  // tab before switching, so a switch back can restore. Each editor has
+  // its own scroll field on Tab (Monaco pixels in scrollPosition, Milkdown
+  // container pixels in wysiwygScrollPosition) so the two don't collide
+  // when the user crosses modes. ProseMirror cursor mapping isn't done —
+  // WYSIWYG just gets scroll preservation today.
   const captureActivePosition = useCallback(() => {
+    if (isWysiwyg) {
+      const wy = wysiwygRef.current;
+      if (!wy) return;
+      file.setActiveWysiwygScroll(wy.getScrollTop());
+      return;
+    }
     const ed = editorRef.current;
     if (!ed) return;
     const c = ed.getCursor();
     if (c) file.setActiveCursor(c);
     file.setActiveScroll(ed.getScrollTop());
-  }, [file]);
+  }, [file, isWysiwyg]);
 
   const handleSwitchTab = useCallback(
     (id: string) => {
@@ -118,23 +126,22 @@ function AppContent() {
 
   const handleModeChange = useCallback(
     (mode: EditorMode) => {
-      // Capture before the swap. Source ↔ Split both use Monaco but at
-      // different positions in the JSX tree, so React unmounts/remounts
-      // the editor on the swap; without capturing, Monaco re-instantiates
-      // at (1,1) / scroll 0. The restore effect picks the captured cursor
-      // back up via the editorMode dep below.
-      if (isMonacoActive) captureActivePosition();
+      // Capture before the swap so cursor + scroll round-trip across
+      // mode flips. captureActivePosition routes to the correct editor
+      // based on the current mode (Monaco for source/split, Milkdown for
+      // wysiwyg) and stores scroll into the editor-specific Tab field.
+      captureActivePosition();
       file.setActiveEditorMode(mode);
     },
-    [file, isMonacoActive, captureActivePosition],
+    [file, captureActivePosition],
   );
 
   const handleCycleMode = useCallback(() => {
     const current = file.activeTab?.editorMode;
     if (!current) return;
-    if (isMonacoActive) captureActivePosition();
+    captureActivePosition();
     file.setActiveEditorMode(nextMode(current));
-  }, [file, isMonacoActive, captureActivePosition]);
+  }, [file, captureActivePosition]);
 
   // Drag-and-drop: open the first matching file in the drop. Multi-file
   // selection waits for proper multi-select semantics — for now we treat a

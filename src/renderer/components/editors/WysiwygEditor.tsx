@@ -1,4 +1,12 @@
-import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import { Editor, rootCtx, defaultValueCtx } from '@milkdown/core';
 import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
@@ -16,12 +24,16 @@ import { Toolbar } from './Toolbar';
 export interface WysiwygEditorHandle {
   triggerUndo: () => void;
   triggerRedo: () => void;
+  getScrollTop: () => number;
+  setScrollTop: (top: number) => void;
 }
 
 interface WysiwygEditorProps {
   ref?: Ref<WysiwygEditorHandle>;
   content: string;
   onChange: (markdown: string) => void;
+  /** Restored on mount via the scroll-container ref. */
+  initialScrollTop?: number;
 }
 
 // Match a YAML frontmatter block at the very start of the document. The
@@ -57,11 +69,17 @@ const slashPlugin = slashFactory('raise-slash');
 
 interface MilkdownBodyProps {
   ref?: Ref<WysiwygEditorHandle>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   initial: string;
   onMarkdownChange: (markdown: string) => void;
 }
 
-function MilkdownBody({ ref, initial, onMarkdownChange }: MilkdownBodyProps) {
+function MilkdownBody({
+  ref,
+  scrollContainerRef,
+  initial,
+  onMarkdownChange,
+}: MilkdownBodyProps) {
   // Hold the latest callback in a ref so the editor's listener (registered
   // once on mount) always invokes the current handler, even if the parent
   // re-renders with a new closure.
@@ -98,19 +116,48 @@ function MilkdownBody({ ref, initial, onMarkdownChange }: MilkdownBodyProps) {
     () => ({
       triggerUndo: () => get()?.action(callCommand(undoCommand.key)),
       triggerRedo: () => get()?.action(callCommand(redoCommand.key)),
+      getScrollTop: () => scrollContainerRef.current?.scrollTop ?? 0,
+      setScrollTop: (top) => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = top;
+        }
+      },
     }),
-    [get],
+    [get, scrollContainerRef],
   );
 
   return <Milkdown />;
 }
 
-export function WysiwygEditor({ ref, content, onChange }: WysiwygEditorProps) {
+export function WysiwygEditor({
+  ref,
+  content,
+  onChange,
+  initialScrollTop,
+}: WysiwygEditorProps) {
   // Split once at mount; the parent keys this component by tab id + load
   // epoch, so a tab switch or re-open of the same file fully remounts and
   // we re-split against the new content.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialSplit = useMemo<Split>(() => splitFrontmatter(content), []);
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Capture the initial scrollTop on mount so the restore effect (below)
+  // runs against the value that was current when the component mounted.
+  const initialScrollTopRef = useRef(initialScrollTop);
+
+  // Restore scroll position once Milkdown has finished its initial layout.
+  // Defer to the next frame so scrollHeight is meaningful — setting it
+  // synchronously could clamp to 0 before the editor renders.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const target = initialScrollTopRef.current;
+    if (!container || target === undefined || target === 0) return;
+    const id = requestAnimationFrame(() => {
+      container.scrollTop = target;
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   const [frontmatter, setFrontmatter] = useState<string | null>(initialSplit.frontmatter);
   // Mirror the React state in a ref so handleBodyChange can read the latest
@@ -146,7 +193,7 @@ export function WysiwygEditor({ ref, content, onChange }: WysiwygEditorProps) {
     <MilkdownProvider>
       <div className="flex h-full w-full flex-col bg-slate-950">
         <Toolbar />
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <div className="mx-auto max-w-[720px] px-6 py-8">
             {frontmatter !== null && (
               <textarea
@@ -161,6 +208,7 @@ export function WysiwygEditor({ ref, content, onChange }: WysiwygEditorProps) {
             <div className="raise-prose">
               <MilkdownBody
                 ref={ref}
+                scrollContainerRef={scrollContainerRef}
                 initial={initialSplit.body}
                 onMarkdownChange={handleBodyChange}
               />
