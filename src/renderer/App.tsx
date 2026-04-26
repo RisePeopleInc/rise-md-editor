@@ -15,6 +15,11 @@ import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
 import { useSidebarState, isOpenable } from './state/sidebarState';
 import { useThemeState } from './state/themeState';
+import {
+  processImageDrop,
+  processImagePaste,
+  type ImageInsertion,
+} from './state/imageInsert';
 import type { MenuActionEvent, TemplateKind, TreeNode } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
@@ -220,6 +225,36 @@ function AppContent() {
     }
     setShowMissingClaudeBanner(false);
   }, [sidebar.rootPath]);
+
+  // Image drop / paste glue: ensure the active tab has a saved path
+  // (otherwise we don't know where to put assets/), then hand off to
+  // the shared imageInsert helper. Both editors call these.
+  const handleImageDrop = useCallback(
+    async (files: File[]): Promise<ImageInsertion[]> => {
+      const path = await file.requireSavedPath();
+      if (!path) return [];
+      return processImageDrop(path, files);
+    },
+    [file],
+  );
+
+  const handleImagePaste = useCallback(
+    async (item: DataTransferItem): Promise<ImageInsertion | null> => {
+      const path = await file.requireSavedPath();
+      if (!path) return null;
+      return processImagePaste(path, item);
+    },
+    [file],
+  );
+
+  const handleOpenImage = useCallback(
+    (relPath: string) => {
+      const mdPath = file.activeTab?.path;
+      if (!mdPath) return;
+      void window.api.assets.openRelative(mdPath, relPath);
+    },
+    [file.activeTab?.path],
+  );
 
   // Drop hint ids whose tabs have closed. Without this the Set leaks
   // forever (tiny cost, but the next tab to take that id would
@@ -730,6 +765,9 @@ function AppContent() {
               sourceRef={editorRef}
               wysiwygRef={wysiwygRef}
               monacoThemeId={theme.monacoThemeId}
+              onImageDrop={handleImageDrop}
+              onImagePaste={handleImagePaste}
+              onOpenImage={handleOpenImage}
             />
           ) : (
             <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />

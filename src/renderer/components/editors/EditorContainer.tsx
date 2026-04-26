@@ -4,6 +4,7 @@ import { SourceEditor, type CursorPosition, type SourceEditorHandle } from './So
 import { SplitView } from './SplitView';
 import { WysiwygEditor, type WysiwygEditorHandle } from './WysiwygEditor';
 import type { EditorMode, Tab } from '../../state/fileState';
+import type { ImageInsertion } from '../../state/imageInsert';
 
 interface EditorContainerProps {
   tab: Tab;
@@ -14,6 +15,12 @@ interface EditorContainerProps {
   wysiwygRef: Ref<WysiwygEditorHandle>;
   /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
   monacoThemeId: string;
+  /** Image-drop handler — saves files via IPC, returns markdown to insert. */
+  onImageDrop: (files: File[]) => Promise<ImageInsertion[]>;
+  /** Image-paste handler — saves clipboard image, returns markdown to insert. */
+  onImagePaste: (item: DataTransferItem) => Promise<ImageInsertion | null>;
+  /** "View full size" handler for image-click tooltip in WYSIWYG. */
+  onOpenImage: (relPath: string) => void;
 }
 
 /**
@@ -29,6 +36,9 @@ export function EditorContainer({
   sourceRef,
   wysiwygRef,
   monacoThemeId,
+  onImageDrop,
+  onImagePaste,
+  onOpenImage,
 }: EditorContainerProps) {
   const mode = tab.editorMode;
 
@@ -49,6 +59,10 @@ export function EditorContainer({
             onChange={onContentChange}
             initialScrollTop={tab.wysiwygScrollPosition}
             initialCursorOffset={tab.wysiwygCursorOffset}
+            onImageDrop={onImageDrop}
+            onImagePaste={onImagePaste}
+            markdownPath={tab.path}
+            onOpenImage={onOpenImage}
           />
         ) : mode === 'split' ? (
           <SplitView
@@ -59,6 +73,8 @@ export function EditorContainer({
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
             monacoThemeId={monacoThemeId}
+            onImageDrop={onImageDrop}
+            onImagePaste={onImagePaste}
           />
         ) : (
           <SourceEditor
@@ -69,6 +85,8 @@ export function EditorContainer({
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
             monacoThemeId={monacoThemeId}
+            onImageDrop={onImageDrop}
+            onImagePaste={onImagePaste}
           />
         )}
       </div>

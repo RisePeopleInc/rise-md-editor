@@ -123,6 +123,28 @@ const theme = {
   },
 };
 
+export interface SavedAsset {
+  /** Markdown-relative path for insertion (e.g. `assets/screenshot.png`). */
+  relPath: string;
+  /** Absolute on-disk path — used by "View full size" → shell.openPath. */
+  absPath: string;
+}
+
+const assets = {
+  saveDroppedImage: (markdownPath: string, sourcePath: string): Promise<SavedAsset> =>
+    ipcRenderer.invoke('assets:save-dropped-image', { markdownPath, sourcePath }),
+  savePastedImage: (
+    markdownPath: string,
+    bytes: ArrayBuffer,
+    mimeType: string,
+  ): Promise<SavedAsset> =>
+    ipcRenderer.invoke('assets:save-pasted-image', { markdownPath, bytes, mimeType }),
+  openInSystem: (absPath: string): Promise<string> =>
+    ipcRenderer.invoke('assets:open-in-system', absPath),
+  openRelative: (markdownPath: string, relPath: string): Promise<string> =>
+    ipcRenderer.invoke('assets:open-relative', { markdownPath, relPath }),
+};
+
 const templates = {
   /**
    * Create a file from the named template. If a workspace is open
@@ -231,6 +253,7 @@ const api = {
   folder,
   templates,
   theme,
+  assets,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

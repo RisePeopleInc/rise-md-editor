@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, type MenuItemConstructorOptions } from 'electron';
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
+import * as assetOps from './assetOps';
 import * as fileOps from './fileOperations';
 import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
@@ -828,3 +829,47 @@ ipcMain.handle(
 nativeTheme.on('updated', () => {
   broadcastThemeUpdate();
 });
+
+// ---------------------------------------------------------------------------
+// Image assets — drag-and-drop + paste (RAISE-11)
+// ---------------------------------------------------------------------------
+
+ipcMain.handle(
+  'assets:save-dropped-image',
+  async (
+    _,
+    payload: { markdownPath: string; sourcePath: string },
+  ): Promise<assetOps.SavedAsset> =>
+    assetOps.saveDroppedImage(payload.markdownPath, payload.sourcePath),
+);
+
+ipcMain.handle(
+  'assets:save-pasted-image',
+  async (
+    _,
+    payload: { markdownPath: string; bytes: ArrayBuffer; mimeType: string },
+  ): Promise<assetOps.SavedAsset> =>
+    assetOps.savePastedImage(payload.markdownPath, payload.bytes, payload.mimeType),
+);
+
+// Open an image in the OS-default application (Preview on macOS, Photos
+// on Windows, default image viewer on Linux). Returns an empty string on
+// success or the OS error message on failure.
+ipcMain.handle('assets:open-in-system', async (_, absPath: string): Promise<string> => {
+  return shell.openPath(absPath);
+});
+
+// Resolve a markdown-relative image path against its containing file
+// and open it. The renderer doesn't have node:path, and joining
+// platform-aware paths in JS is just begging for slash-vs-backslash
+// bugs on Windows.
+ipcMain.handle(
+  'assets:open-relative',
+  async (
+    _,
+    payload: { markdownPath: string; relPath: string },
+  ): Promise<string> => {
+    const abs = path.resolve(path.dirname(payload.markdownPath), payload.relPath);
+    return shell.openPath(abs);
+  },
+);

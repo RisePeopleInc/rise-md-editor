@@ -13,6 +13,7 @@ import {
   type CursorPosition,
   type SourceEditorHandle,
 } from './SourceEditor';
+import type { ImageInsertion } from '../../state/imageInsert';
 
 interface SplitViewProps {
   sourceRef?: Ref<SourceEditorHandle>;
@@ -23,6 +24,10 @@ interface SplitViewProps {
   initialScrollTop?: number;
   /** Monaco theme id passed through to the source pane. */
   monacoThemeId: string;
+  /** Image-drop handler forwarded to the source pane. */
+  onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
+  /** Image-paste handler forwarded to the source pane. */
+  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
 }
 
 const MIN_PERCENT = 20;
@@ -37,6 +42,8 @@ export function SplitView({
   initialCursor,
   initialScrollTop,
   monacoThemeId,
+  onImageDrop,
+  onImagePaste,
 }: SplitViewProps) {
   const [splitPercent, setSplitPercent] = useState(DEFAULT_PERCENT);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -150,6 +157,8 @@ export function SplitView({
           initialCursor={initialCursor}
           initialScrollTop={initialScrollTop}
           monacoThemeId={monacoThemeId}
+          onImageDrop={onImageDrop}
+          onImagePaste={onImagePaste}
         />
       </div>
       <div

@@ -7,9 +7,15 @@ import {
   useState,
   type Ref,
 } from 'react';
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/core';
+import {
+  Editor,
+  rootCtx,
+  defaultValueCtx,
+  editorViewCtx,
+  editorViewOptionsCtx,
+} from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
-import { commonmark } from '@milkdown/preset-commonmark';
+import { commonmark, insertImageCommand } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history, undoCommand, redoCommand } from '@milkdown/plugin-history';
@@ -21,6 +27,11 @@ import { nord } from '@milkdown/theme-nord';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import { callCommand } from '@milkdown/utils';
 import { Toolbar } from './Toolbar';
+import {
+  firstImageItem,
+  pickImageFiles,
+  type ImageInsertion,
+} from '../../state/imageInsert';
 
 export interface WysiwygEditorHandle {
   triggerUndo: () => void;
@@ -41,6 +52,21 @@ interface WysiwygEditorProps {
   initialScrollTop?: number;
   /** ProseMirror cursor offset to restore once Milkdown is mounted. */
   initialCursorOffset?: number;
+  /**
+   * Image-drop callback. Should save the dropped images and return the
+   * markdown insertions to dispatch into the editor at the drop point.
+   */
+  onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
+  /**
+   * Image-paste callback. Should save the clipboard image and return
+   * the markdown insertion (or null) to dispatch at the cursor.
+   */
+  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
+  /** Path of the markdown file currently in the editor — used to
+   *  resolve image relPaths against the right base for image clicks. */
+  markdownPath: string | null;
+  /** "View full size" handler for an image clicked in WYSIWYG. */
+  onOpenImage?: (relPath: string) => void;
 }
 
 // Match a YAML frontmatter block at the very start of the document. The
@@ -80,6 +106,8 @@ interface MilkdownBodyProps {
   initial: string;
   initialCursorOffset?: number;
   onMarkdownChange: (markdown: string) => void;
+  onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
+  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
 }
 
 function MilkdownBody({
@@ -88,6 +116,8 @@ function MilkdownBody({
   initial,
   initialCursorOffset,
   onMarkdownChange,
+  onImageDrop,
+  onImagePaste,
 }: MilkdownBodyProps) {
   // Hold the latest callback in a ref so the editor's listener (registered
   // once on mount) always invokes the current handler, even if the parent
@@ -100,6 +130,19 @@ function MilkdownBody({
   // prop from a re-render.
   const initialCursorOffsetRef = useRef(initialCursorOffset);
   initialCursorOffsetRef.current = initialCursorOffset;
+
+  // Image handlers go through refs too — the prosemirror plugin
+  // registered in the editor's config closes over these once at
+  // creation, so a ref keeps later renders' callbacks reachable.
+  const onImageDropRef = useRef(onImageDrop);
+  onImageDropRef.current = onImageDrop;
+  const onImagePasteRef = useRef(onImagePaste);
+  onImagePasteRef.current = onImagePaste;
+  // Captured editor instance — needed inside the prosemirror handler
+  // to dispatch insertImageCommand. useInstance() returns it once
+  // creation finishes; we mirror into a ref so the handler can use it
+  // without a re-render dependency.
+  const editorInstanceRef = useRef<Editor | null>(null);
 
   useEditor((root) =>
     Editor.make()
@@ -125,6 +168,82 @@ function MilkdownBody({
           );
           view.dispatch(tr);
         });
+        // RAISE-11: image drop / paste interception. ProseMirror's
+        // editor view exposes `handleDrop` / `handlePaste` hooks that
+        // run before the default behaviour — returning true tells
+        // ProseMirror we handled it.
+        ctx.update(editorViewOptionsCtx, (prev) => ({
+          ...prev,
+          handleDrop(view, event) {
+            const dt = (event as DragEvent).dataTransfer;
+            if (!dt) return false;
+            const images = pickImageFiles(dt.files);
+            if (images.length === 0) return false;
+            const dropEvent = event as DragEvent;
+            const coords = view.posAtCoords({
+              left: dropEvent.clientX,
+              top: dropEvent.clientY,
+            });
+            if (!coords) return false;
+            event.preventDefault();
+            void (async () => {
+              const handler = onImageDropRef.current;
+              if (!handler) return;
+              const insertions = await handler(images);
+              if (insertions.length === 0) return;
+              const editor = editorInstanceRef.current;
+              if (!editor) return;
+              // Move the caret to the drop point so insertImageCommand
+              // (which uses replaceSelectionWith) lands the image
+              // there. Subsequent images stack at the new caret.
+              const max = view.state.doc.content.size;
+              const safe = Math.min(Math.max(coords.pos, 0), max);
+              view.dispatch(
+                view.state.tr.setSelection(
+                  TextSelection.create(view.state.doc, safe),
+                ),
+              );
+              for (const ins of insertions) {
+                const stem = ins.asset.relPath.split('/').pop() ?? '';
+                const alt = stem.replace(/\.[^.]+$/, '');
+                editor.action(
+                  callCommand(insertImageCommand.key, {
+                    src: ins.asset.relPath,
+                    alt,
+                  }),
+                );
+              }
+            })();
+            return true;
+          },
+          handlePaste(view, event) {
+            const items = (event as ClipboardEvent).clipboardData?.items ?? null;
+            const imageItem = firstImageItem(items);
+            if (!imageItem) return false;
+            event.preventDefault();
+            void (async () => {
+              const handler = onImagePasteRef.current;
+              if (!handler) return;
+              const insertion = await handler(imageItem);
+              if (!insertion) return;
+              const editor = editorInstanceRef.current;
+              if (!editor) return;
+              const stem = insertion.asset.relPath.split('/').pop() ?? '';
+              const alt = stem.replace(/\.[^.]+$/, '');
+              editor.action(
+                callCommand(insertImageCommand.key, {
+                  src: insertion.asset.relPath,
+                  alt,
+                }),
+              );
+              // Re-focus the editor — the system-level paste interrupts
+              // ProseMirror's focus tracking; without this the user
+              // sees the image inserted but the caret on the wrong side.
+              view.focus();
+            })();
+            return true;
+          },
+        }));
       })
       .use(commonmark)
       .use(gfm)
@@ -140,6 +259,12 @@ function MilkdownBody({
   // CmdOrCtrl+Z accelerator otherwise reaches editorRef (the SourceEditor
   // ref) and silently no-ops in WYSIWYG mode.
   const [, get] = useInstance();
+  // Mirror the Milkdown instance into a ref so the prosemirror plugin
+  // registered above can dispatch commands once creation finishes. The
+  // plugin closes over `editorInstanceRef` (defined above), not `get()`,
+  // because `get()` returns the current value at call-site whereas the
+  // plugin needs lazy access from inside a future event handler.
+  editorInstanceRef.current = get() ?? null;
   useImperativeHandle(
     ref,
     () => ({
@@ -190,6 +315,10 @@ export function WysiwygEditor({
   onChange,
   initialScrollTop,
   initialCursorOffset,
+  onImageDrop,
+  onImagePaste,
+  markdownPath,
+  onOpenImage,
 }: WysiwygEditorProps) {
   // Split once at mount; the parent keys this component by tab id + load
   // epoch, so a tab switch or re-open of the same file fully remounts and
@@ -245,6 +374,58 @@ export function WysiwygEditor({
     [emit],
   );
 
+  // Image-click tooltip state. Shows filename + "View full size" when
+  // an <img> in the prose surface is clicked. Dismissed by Escape, by
+  // clicking elsewhere, or by scrolling (the tooltip is viewport-fixed
+  // and would drift away from the image otherwise).
+  const [imageTooltip, setImageTooltip] = useState<{
+    relPath: string;
+    filename: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-image-tooltip]')) return; // tooltip clicks
+      if (target.tagName === 'IMG' && container.contains(target)) {
+        const src = target.getAttribute('src') ?? '';
+        const filename = src.split('/').pop() || src;
+        const rect = target.getBoundingClientRect();
+        setImageTooltip({
+          relPath: src,
+          filename,
+          x: rect.left,
+          y: rect.bottom + 6,
+        });
+        return;
+      }
+      setImageTooltip(null);
+    };
+    const handleKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setImageTooltip(null);
+    };
+    const handleScroll = (): void => setImageTooltip(null);
+    container.addEventListener('click', handleClick);
+    container.addEventListener('scroll', handleScroll);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      container.removeEventListener('click', handleClick);
+      container.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, []);
+
+  const dismissTooltip = useCallback(() => setImageTooltip(null), []);
+  const handleViewFullSize = useCallback(() => {
+    if (imageTooltip && onOpenImage) onOpenImage(imageTooltip.relPath);
+    setImageTooltip(null);
+  }, [imageTooltip, onOpenImage]);
+
   return (
     <MilkdownProvider>
       <div className="flex h-full w-full flex-col bg-app">
@@ -268,10 +449,49 @@ export function WysiwygEditor({
                 initial={initialSplit.body}
                 initialCursorOffset={initialCursorOffset}
                 onMarkdownChange={handleBodyChange}
+                onImageDrop={onImageDrop}
+                onImagePaste={onImagePaste}
               />
             </div>
           </div>
         </div>
+        {imageTooltip && (
+          <div
+            data-image-tooltip
+            role="dialog"
+            aria-label={`Image: ${imageTooltip.filename}`}
+            // Viewport-fixed so absolute coords from getBoundingClientRect
+            // line up. The container scroll listener (above) dismisses
+            // the tooltip if the user scrolls, so drift isn't a concern.
+            style={{ left: imageTooltip.x, top: imageTooltip.y }}
+            className="fixed z-50 flex items-center gap-3 rounded-[var(--rise-radius-card)] border border-stroke bg-app px-3 py-1.5 text-xs text-strong shadow-[var(--rise-shadow-depth-1)]"
+          >
+            <span className="max-w-[24ch] truncate font-mono text-muted">
+              {imageTooltip.filename}
+            </span>
+            <button
+              type="button"
+              onClick={handleViewFullSize}
+              disabled={!markdownPath}
+              className="rounded bg-interaction px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-interaction-hover active:bg-interaction-active disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                markdownPath
+                  ? 'Open in system image viewer'
+                  : 'Save the file first to resolve image paths'
+              }
+            >
+              View full size
+            </button>
+            <button
+              type="button"
+              onClick={dismissTooltip}
+              aria-label="Dismiss"
+              className="rounded px-1 text-muted hover:bg-elevated hover:text-strong"
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
     </MilkdownProvider>
   );
