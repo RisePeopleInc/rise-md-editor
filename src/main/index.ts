@@ -7,6 +7,7 @@ import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
 import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
+import * as templates from './templates';
 
 const APP_NAME = 'rAIse';
 
@@ -620,4 +621,104 @@ ipcMain.on('folder:set-sidebar-width', (_, width: number) => {
 
 ipcMain.on('folder:set-sidebar-visible', (_, visible: boolean) => {
   lastFolderStore.setSidebarVisible(visible);
+});
+
+// ---------------------------------------------------------------------------
+// Cowork templates: CLAUDE.md and SKILL.md scaffolding
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a template-create request. Three shapes:
+ *
+ *  - `created` — file was written to disk; `path` points at it. The
+ *    renderer should open it as a tab using the loaded content.
+ *  - `exists` — target already exists (CLAUDE.md path collision); the
+ *    renderer should just open the existing file.
+ *  - `untitled` — no workspace was open, so we hand back the template
+ *    body for the renderer to drop into a fresh untitled tab.
+ */
+type TemplateCreateResult =
+  | { status: 'created'; path: string; content: string }
+  | { status: 'exists'; path: string }
+  | { status: 'untitled'; content: string };
+
+/**
+ * Find an unused filename inside `parentPath` by appending `-1`, `-2`,
+ * ... before the extension. Used for skill-file creation when the
+ * default name is already taken.
+ */
+async function findFreshSkillName(parentPath: string): Promise<string> {
+  const base = 'untitled-skill';
+  const ext = '.md';
+  let candidate = `${base}${ext}`;
+  let counter = 1;
+  for (;;) {
+    try {
+      await fs.access(path.join(parentPath, candidate));
+      candidate = `${base}-${counter}${ext}`;
+      counter += 1;
+    } catch {
+      return candidate;
+    }
+  }
+}
+
+ipcMain.handle(
+  'templates:create',
+  async (
+    _,
+    payload: { kind: templates.TemplateKind; rootPath: string | null },
+  ): Promise<TemplateCreateResult> => {
+    const { kind, rootPath } = payload;
+    const content = templates.getTemplate(kind);
+    if (!rootPath) {
+      // Single-file mode — renderer creates an untitled tab from this body.
+      return { status: 'untitled', content };
+    }
+
+    if (kind === 'claude') {
+      const target = path.join(rootPath, templates.defaultFilename(kind));
+      try {
+        // `wx` fails with EEXIST if the file is already there — surface
+        // that as a distinct status so the renderer can just open the
+        // existing CLAUDE.md instead of overwriting it.
+        await fs.writeFile(target, content, { encoding: 'utf-8', flag: 'wx' });
+        markRecentlyWritten(target);
+        return { status: 'created', path: target, content };
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST') return { status: 'exists', path: target };
+        throw err;
+      }
+    }
+
+    // Skill: ensure `<root>/skills/` exists, then pick a non-colliding name.
+    const subdir = templates.workspaceSubdir(kind); // 'skills'
+    const parent = subdir ? path.join(rootPath, subdir) : rootPath;
+    await fs.mkdir(parent, { recursive: true });
+    const name = await findFreshSkillName(parent);
+    const target = path.join(parent, name);
+    await fs.writeFile(target, content, { encoding: 'utf-8', flag: 'wx' });
+    markRecentlyWritten(target);
+    return { status: 'created', path: target, content };
+  },
+);
+
+ipcMain.handle('templates:claude-md-exists', async (_, rootPath: string): Promise<boolean> => {
+  try {
+    await fs.access(path.join(rootPath, 'CLAUDE.md'));
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle(
+  'templates:is-claude-banner-dismissed',
+  async (_, rootPath: string): Promise<boolean> =>
+    lastFolderStore.isClaudeBannerDismissed(rootPath),
+);
+
+ipcMain.on('templates:dismiss-claude-banner', (_, rootPath: string) => {
+  lastFolderStore.dismissClaudeBanner(rootPath);
 });

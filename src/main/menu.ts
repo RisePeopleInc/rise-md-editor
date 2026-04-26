@@ -3,6 +3,8 @@ import path from 'node:path';
 
 export type MenuAction =
   | 'new'
+  | 'new-claude-md'
+  | 'new-skill-file'
   | 'open-file'
   | 'open-folder'
   | 'open-path'
@@ -91,6 +93,17 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'New',
           accelerator: 'CmdOrCtrl+N',
           click: () => send(deps, 'new'),
+        },
+        {
+          label: 'New CLAUDE.md',
+          // Cmd/Ctrl+Shift+C is unused in our app and intuitive — "C for
+          // Claude". Doesn't conflict with the OS-level Copy shortcut.
+          accelerator: 'CmdOrCtrl+Shift+C',
+          click: () => send(deps, 'new-claude-md'),
+        },
+        {
+          label: 'New Skill File',
+          click: () => send(deps, 'new-skill-file'),
         },
         {
           label: 'Open File…',

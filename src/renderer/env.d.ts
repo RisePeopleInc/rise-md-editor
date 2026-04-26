@@ -2,6 +2,8 @@
 
 export type MenuActionType =
   | 'new'
+  | 'new-claude-md'
+  | 'new-skill-file'
   | 'open-file'
   | 'open-folder'
   | 'open-path'
@@ -58,6 +60,20 @@ export type ItemMenuAction =
   | 'reveal'
   | 'open';
 
+export type TemplateKind = 'claude' | 'skill';
+
+export type TemplateCreateResult =
+  | { status: 'created'; path: string; content: string }
+  | { status: 'exists'; path: string }
+  | { status: 'untitled'; content: string };
+
+export interface RaiseTemplatesApi {
+  create: (kind: TemplateKind, rootPath: string | null) => Promise<TemplateCreateResult>;
+  claudeMdExists: (rootPath: string) => Promise<boolean>;
+  isClaudeBannerDismissed: (rootPath: string) => Promise<boolean>;
+  dismissClaudeBanner: (rootPath: string) => void;
+}
+
 export interface RaiseFolderApi {
   open: () => Promise<{ path: string; tree: TreeNode } | null>;
   openPath: (folderPath: string) => Promise<{ path: string; tree: TreeNode }>;
@@ -95,6 +111,7 @@ export interface RaiseApi {
   closeWindow: () => void;
   files: RaiseFilesApi;
   folder: RaiseFolderApi;
+  templates: RaiseTemplatesApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;
