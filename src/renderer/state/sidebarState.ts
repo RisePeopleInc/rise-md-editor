@@ -172,14 +172,16 @@ export function useSidebarState(): SidebarState {
 
   const collapseAll = useCallback(() => {
     setExpanded((prev) => {
-      // Keep the root expanded so the user still sees the top level — that
-      // matches most file-tree UIs (collapse-all = collapse children, not
-      // hide the entire tree).
-      const next = new Set<string>();
-      if (rootPath) next.add(rootPath);
-      return prev.size === next.size && [...prev][0] === rootPath ? prev : next;
+      // Collapse everything, including the root. We previously kept the
+      // root expanded to "preserve the top level", but that meant
+      // clicking the button did nothing visible when only the root was
+      // open — which is the most common case. Folding the root too gives
+      // unambiguous feedback; the user re-expands with one click on the
+      // root caret.
+      if (prev.size === 0) return prev;
+      return new Set<string>();
     });
-  }, [rootPath]);
+  }, []);
 
   const openFolderDialog = useCallback(async () => {
     const result = await window.api.folder.open();

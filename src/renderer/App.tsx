@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { StatusBar } from './components/StatusBar';
 import { TabBar } from './components/TabBar';
+import { WorkspaceBanner } from './components/WorkspaceBanner';
+import { TemplateHintBanner } from './components/TemplateHintBanner';
 import { EditorContainer } from './components/editors/EditorContainer';
 import {
   type CursorPosition,
@@ -12,7 +14,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
 import { useSidebarState, isOpenable } from './state/sidebarState';
-import type { MenuActionEvent, TreeNode } from './env';
+import type { MenuActionEvent, TemplateKind, TreeNode } from './env';
 
 const ACCEPTED_EXTENSIONS = /\.(md|markdown|txt)$/i;
 
@@ -45,6 +47,20 @@ function AppContent() {
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
+
+  // Tabs that were freshly opened from a template — these get a small
+  // dismissible hint banner above the editor reminding the user to fill
+  // in the placeholders. Cleared when the user dismisses or when the
+  // tab is closed.
+  const [templateHintTabIds, setTemplateHintTabIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  // Visibility of the workspace-level "no CLAUDE.md found" banner. Driven
+  // by an effect below: re-checked whenever the open folder changes and
+  // when the tree refreshes (so the banner clears as soon as the user
+  // creates the file via this banner OR via File → New CLAUDE.md).
+  const [showMissingClaudeBanner, setShowMissingClaudeBanner] =
+    useState<boolean>(false);
 
   const isWysiwyg = file.activeTab?.editorMode === 'wysiwyg';
   // Source-style editor (Monaco) drives undo/redo for both Source AND Split.
@@ -114,6 +130,112 @@ function AppContent() {
   const handleOpenFolder = useCallback(async () => {
     await sidebar.openFolderDialog();
   }, [sidebar]);
+
+  // Create a file from a bundled template (CLAUDE.md or Skill). The
+  // main process decides where it lands based on whether a workspace
+  // is open: project root for CLAUDE.md, `<root>/skills/` for skills,
+  // or "untitled tab with template body" if no folder is open.
+  const handleCreateFromTemplate = useCallback(
+    async (kind: TemplateKind): Promise<void> => {
+      try {
+        const result = await window.api.templates.create(
+          kind,
+          sidebar.rootPath,
+        );
+        let hintId: string | null = null;
+        if (result.status === 'created') {
+          hintId = file.loadFile(result.path, result.content);
+          window.api.addRecent(result.path);
+        } else if (result.status === 'exists') {
+          // CLAUDE.md was already there — just open it. No hint, since
+          // the user didn't actually create something fresh.
+          await handleOpenPath(result.path);
+        } else {
+          // No workspace — drop the template body into a new untitled
+          // tab. Tab id is generated client-side.
+          hintId = file.newFileFromContent(result.content);
+        }
+        if (hintId !== null) {
+          const id = hintId;
+          setTemplateHintTabIds((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
+        }
+      } catch (err) {
+        window.api.showError(
+          kind === 'claude'
+            ? 'Could not create CLAUDE.md'
+            : 'Could not create skill file',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    },
+    [file, handleOpenPath, sidebar.rootPath],
+  );
+
+  const dismissTemplateHint = useCallback((id: string) => {
+    setTemplateHintTabIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Workspace banner: offer to create a CLAUDE.md when the open folder
+  // doesn't have one, unless the user has explicitly dismissed it for
+  // this folder. Re-runs whenever the open folder changes OR when the
+  // tree refreshes (so creating the file hides the banner immediately).
+  useEffect(() => {
+    let cancelled = false;
+    const root = sidebar.rootPath;
+    if (!root) {
+      setShowMissingClaudeBanner(false);
+      return;
+    }
+    void (async () => {
+      const [exists, dismissed] = await Promise.all([
+        window.api.templates.claudeMdExists(root),
+        window.api.templates.isClaudeBannerDismissed(root),
+      ]);
+      if (cancelled) return;
+      setShowMissingClaudeBanner(!exists && !dismissed);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `sidebar.rootTree` ticks every time the watcher reports a change,
+    // which is exactly when we want to re-check (e.g. after the user
+    // creates CLAUDE.md the banner should clear).
+  }, [sidebar.rootPath, sidebar.rootTree]);
+
+  const handleDismissClaudeBanner = useCallback(() => {
+    if (sidebar.rootPath) {
+      window.api.templates.dismissClaudeBanner(sidebar.rootPath);
+    }
+    setShowMissingClaudeBanner(false);
+  }, [sidebar.rootPath]);
+
+  // Drop hint ids whose tabs have closed. Without this the Set leaks
+  // forever (tiny cost, but the next tab to take that id would
+  // erroneously inherit the hint — IDs are crypto.randomUUID() so the
+  // chance is vanishing, but cleaning up is also just correct).
+  useEffect(() => {
+    setTemplateHintTabIds((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(file.tabs.map((t) => t.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [file.tabs]);
 
   const handleTreeContextMenu = useCallback(
     async (node: TreeNode) => {
@@ -322,6 +444,12 @@ function AppContent() {
         case 'new':
           handleNewFile();
           break;
+        case 'new-claude-md':
+          void handleCreateFromTemplate('claude');
+          break;
+        case 'new-skill-file':
+          void handleCreateFromTemplate('skill');
+          break;
         case 'open-file':
           void handleOpenFile();
           break;
@@ -329,7 +457,15 @@ function AppContent() {
           if (event.payload?.path) void handleOpenPath(event.payload.path);
           break;
         case 'open-folder':
-          void window.api.openFolder();
+          // Route through the sidebar's openFolderDialog so the menu
+          // entry has the same effect as the sidebar's "Open Folder"
+          // button: pick a folder, populate the tree, swap the watcher.
+          // Without this the menu fired a stub IPC that returned a path
+          // and then dropped it on the floor.
+          void handleOpenFolder();
+          break;
+        case 'close-folder':
+          void sidebar.closeFolder();
           break;
         case 'save':
           void file.save();
@@ -397,7 +533,9 @@ function AppContent() {
     isMonacoActive,
     sidebar,
     handleNewFile,
+    handleCreateFromTemplate,
     handleOpenFile,
+    handleOpenFolder,
     handleOpenPath,
     handleCloseActive,
     handleNextTab,
@@ -497,6 +635,7 @@ function AppContent() {
           onWidthCommit={sidebar.commitWidth}
           rootName={sidebar.rootPath ? basenameOfPath(sidebar.rootPath) : null}
           onCollapseAll={sidebar.collapseAll}
+          onCloseFolder={() => void sidebar.closeFolder()}
           onOpenFolder={handleOpenFolder}
         >
           {sidebar.rootTree && (
@@ -518,6 +657,14 @@ function AppContent() {
         </Sidebar>
       )}
       <div className="flex min-h-0 flex-1 flex-col">
+        {showMissingClaudeBanner && (
+          <WorkspaceBanner
+            message="This workspace doesn't have a CLAUDE.md file. Would you like to create one from a template?"
+            primaryLabel="Create"
+            onPrimary={() => void handleCreateFromTemplate('claude')}
+            onDismiss={handleDismissClaudeBanner}
+          />
+        )}
         {file.tabs.length > 0 && (
           <TabBar
             tabs={file.tabs}
@@ -525,6 +672,13 @@ function AppContent() {
             onActivate={handleSwitchTab}
             onClose={handleCloseTab}
             onReorder={file.reorderTabs}
+          />
+        )}
+        {file.activeTab && templateHintTabIds.has(file.activeTab.id) && (
+          <TemplateHintBanner
+            onDismiss={() => {
+              if (file.activeTab) dismissTemplateHint(file.activeTab.id);
+            }}
           />
         )}
         <main className="min-h-0 flex-1">

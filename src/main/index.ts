@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
-import { promises as fs } from 'node:fs';
+import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { buildMenu, type MenuDeps } from './menu';
 import * as fileOps from './fileOperations';
@@ -7,6 +7,7 @@ import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
 import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
+import * as templates from './templates';
 
 const APP_NAME = 'rAIse';
 
@@ -87,10 +88,25 @@ function rememberRecent(filePath: string): void {
   rebuildMenu();
 }
 
+// Sync stat — called from the menu builder, which runs rarely (workspace
+// changes, chokidar tree ticks). The blocking I/O is fine in those
+// contexts and the cache lookups are O(1) from the OS's perspective for
+// a path the user is already working in.
+function claudeMdPresent(): boolean {
+  const root = lastFolderStore.getLastFolder();
+  if (!root) return false;
+  try {
+    return statSync(path.join(root, 'CLAUDE.md')).isFile();
+  } catch {
+    return false;
+  }
+}
+
 const menuDeps: MenuDeps = {
   getWindow,
   getRecentFiles: () => recentStore.getRecent(),
   rebuildMenu: () => rebuildMenu(),
+  claudeMdPresent,
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -455,6 +471,10 @@ function markRecentlyWritten(filePath: string): void {
 folderWatcher.setListener({
   onTreeChanged: (root) => {
     folderWatcher.notifyRenderer(mainWindow, { type: 'tree', path: root });
+    // Tree changes can include CLAUDE.md being created/deleted, which
+    // flips the File menu's "New" / "Open" CLAUDE.md label. Rebuilds
+    // are cheap and chokidar already debounces 75ms upstream.
+    rebuildMenu();
   },
   onFileChanged: (filePath) => {
     if (recentlyWritten.has(filePath)) {
@@ -477,6 +497,10 @@ ipcMain.handle('folder:open', async () => {
   const tree = await folderOps.readFolderTree(folder);
   await folderWatcher.watchFolder(folder);
   lastFolderStore.setLastFolder(folder);
+  // Refresh the File menu label immediately — chokidar's debounced
+  // tree event will catch up later, but the user expects the menu to
+  // reflect the just-opened workspace on the next click, not in 75ms.
+  rebuildMenu();
   return { path: folder, tree };
 });
 
@@ -484,6 +508,7 @@ ipcMain.handle('folder:open-path', async (_, folderPath: string) => {
   const tree = await folderOps.readFolderTree(folderPath);
   await folderWatcher.watchFolder(folderPath);
   lastFolderStore.setLastFolder(folderPath);
+  rebuildMenu();
   return { path: folderPath, tree };
 });
 
@@ -506,6 +531,7 @@ ipcMain.handle('folder:stat-path', async (_, p: string): Promise<'file' | 'direc
 ipcMain.handle('folder:close', async () => {
   await folderWatcher.stopWatching();
   lastFolderStore.setLastFolder(null);
+  rebuildMenu();
 });
 
 ipcMain.handle('folder:create-file', async (_, parentPath: string, name: string) =>
@@ -601,6 +627,9 @@ ipcMain.handle('folder:get-last', async () => {
   try {
     const tree = await folderOps.readFolderTree(last);
     await folderWatcher.watchFolder(last);
+    // Refresh the File menu so "Open CLAUDE.md" / "New CLAUDE.md"
+    // matches the restored workspace's state on first paint.
+    rebuildMenu();
     return { path: last, tree };
   } catch {
     // Folder no longer exists or is unreadable — clear the persisted entry.
@@ -620,4 +649,104 @@ ipcMain.on('folder:set-sidebar-width', (_, width: number) => {
 
 ipcMain.on('folder:set-sidebar-visible', (_, visible: boolean) => {
   lastFolderStore.setSidebarVisible(visible);
+});
+
+// ---------------------------------------------------------------------------
+// Cowork templates: CLAUDE.md and SKILL.md scaffolding
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a template-create request. Three shapes:
+ *
+ *  - `created` — file was written to disk; `path` points at it. The
+ *    renderer should open it as a tab using the loaded content.
+ *  - `exists` — target already exists (CLAUDE.md path collision); the
+ *    renderer should just open the existing file.
+ *  - `untitled` — no workspace was open, so we hand back the template
+ *    body for the renderer to drop into a fresh untitled tab.
+ */
+type TemplateCreateResult =
+  | { status: 'created'; path: string; content: string }
+  | { status: 'exists'; path: string }
+  | { status: 'untitled'; content: string };
+
+/**
+ * Find an unused filename inside `parentPath` by appending `-1`, `-2`,
+ * ... before the extension. Used for skill-file creation when the
+ * default name is already taken.
+ */
+async function findFreshSkillName(parentPath: string): Promise<string> {
+  const base = 'untitled-skill';
+  const ext = '.md';
+  let candidate = `${base}${ext}`;
+  let counter = 1;
+  for (;;) {
+    try {
+      await fs.access(path.join(parentPath, candidate));
+      candidate = `${base}-${counter}${ext}`;
+      counter += 1;
+    } catch {
+      return candidate;
+    }
+  }
+}
+
+ipcMain.handle(
+  'templates:create',
+  async (
+    _,
+    payload: { kind: templates.TemplateKind; rootPath: string | null },
+  ): Promise<TemplateCreateResult> => {
+    const { kind, rootPath } = payload;
+    const content = templates.getTemplate(kind);
+    if (!rootPath) {
+      // Single-file mode — renderer creates an untitled tab from this body.
+      return { status: 'untitled', content };
+    }
+
+    if (kind === 'claude') {
+      const target = path.join(rootPath, templates.defaultFilename(kind));
+      try {
+        // `wx` fails with EEXIST if the file is already there — surface
+        // that as a distinct status so the renderer can just open the
+        // existing CLAUDE.md instead of overwriting it.
+        await fs.writeFile(target, content, { encoding: 'utf-8', flag: 'wx' });
+        markRecentlyWritten(target);
+        return { status: 'created', path: target, content };
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST') return { status: 'exists', path: target };
+        throw err;
+      }
+    }
+
+    // Skill: ensure `<root>/skills/` exists, then pick a non-colliding name.
+    const subdir = templates.workspaceSubdir(kind); // 'skills'
+    const parent = subdir ? path.join(rootPath, subdir) : rootPath;
+    await fs.mkdir(parent, { recursive: true });
+    const name = await findFreshSkillName(parent);
+    const target = path.join(parent, name);
+    await fs.writeFile(target, content, { encoding: 'utf-8', flag: 'wx' });
+    markRecentlyWritten(target);
+    return { status: 'created', path: target, content };
+  },
+);
+
+ipcMain.handle('templates:claude-md-exists', async (_, rootPath: string): Promise<boolean> => {
+  try {
+    await fs.access(path.join(rootPath, 'CLAUDE.md'));
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle(
+  'templates:is-claude-banner-dismissed',
+  async (_, rootPath: string): Promise<boolean> =>
+    lastFolderStore.isClaudeBannerDismissed(rootPath),
+);
+
+ipcMain.on('templates:dismiss-claude-banner', (_, rootPath: string) => {
+  lastFolderStore.dismissClaudeBanner(rootPath);
 });

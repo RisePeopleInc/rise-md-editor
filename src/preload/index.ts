@@ -2,9 +2,12 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export type MenuActionType =
   | 'new'
+  | 'new-claude-md'
+  | 'new-skill-file'
   | 'open-file'
   | 'open-folder'
   | 'open-path'
+  | 'close-folder'
   | 'save'
   | 'save-as'
   | 'close-tab'
@@ -65,6 +68,35 @@ export type ItemMenuAction =
   | 'delete'
   | 'reveal'
   | 'open';
+
+export type TemplateKind = 'claude' | 'skill';
+
+export type TemplateCreateResult =
+  | { status: 'created'; path: string; content: string }
+  | { status: 'exists'; path: string }
+  | { status: 'untitled'; content: string };
+
+const templates = {
+  /**
+   * Create a file from the named template. If a workspace is open
+   * (`rootPath` non-null), the file is written to disk at the canonical
+   * location and the renderer opens it as a regular tab. Without a
+   * workspace, the body is handed back so the renderer can populate an
+   * untitled tab from template content.
+   */
+  create: (
+    kind: TemplateKind,
+    rootPath: string | null,
+  ): Promise<TemplateCreateResult> =>
+    ipcRenderer.invoke('templates:create', { kind, rootPath }),
+  claudeMdExists: (rootPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('templates:claude-md-exists', rootPath),
+  isClaudeBannerDismissed: (rootPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('templates:is-claude-banner-dismissed', rootPath),
+  dismissClaudeBanner: (rootPath: string): void => {
+    ipcRenderer.send('templates:dismiss-claude-banner', rootPath);
+  },
+};
 
 const folder = {
   /** Show the folder dialog, populate the sidebar, and start watching. */
@@ -150,6 +182,7 @@ const api = {
   },
   files,
   folder,
+  templates,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

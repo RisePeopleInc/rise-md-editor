@@ -10,6 +10,8 @@ interface SidebarProps {
   onWidthCommit: (width: number) => void;
   rootName: string | null;
   onCollapseAll: () => void;
+  /** Close the open workspace and return to single-file mode. */
+  onCloseFolder: () => void;
   onOpenFolder: () => void;
   children: ReactNode;
 }
@@ -20,6 +22,7 @@ export function Sidebar({
   onWidthCommit,
   rootName,
   onCollapseAll,
+  onCloseFolder,
   onOpenFolder,
   children,
 }: SidebarProps) {
@@ -79,22 +82,51 @@ export function Sidebar({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {rootName ? (
-            <button
-              type="button"
-              title="Collapse all"
-              onClick={onCollapseAll}
-              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                aria-hidden
-                fill="currentColor"
+            <>
+              <button
+                type="button"
+                title="Collapse all folders"
+                aria-label="Collapse all folders"
+                onClick={onCollapseAll}
+                className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100"
               >
-                <path d="M2 5h8v2H2z" />
-              </svg>
-            </button>
+                {/* Double up-chevron — reads as "fold everything up". */}
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  aria-hidden
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 7 L6 4 L9 7" />
+                  <path d="M3 9 L6 6 L9 9" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Close folder"
+                aria-label="Close folder"
+                onClick={onCloseFolder}
+                className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  aria-hidden
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M3 3 L9 9 M9 3 L3 9" />
+                </svg>
+              </button>
+            </>
           ) : (
             <button
               type="button"

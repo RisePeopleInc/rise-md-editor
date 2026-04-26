@@ -50,8 +50,21 @@ export interface FileContextValue {
   isDirty: boolean;
 
   setContent: (content: string) => void;
-  loadFile: (path: string, content: string) => void;
+  /**
+   * Load a file (or refresh an already-open one) into a tab and make it
+   * active. Returns the tab id so callers can attach UI state — e.g. the
+   * "created from template" hint banner — keyed by id.
+   */
+  loadFile: (path: string, content: string) => string;
   newFile: () => void;
+  /**
+   * Open a fresh untitled tab pre-populated with the given content. Used
+   * for File → New CLAUDE.md / New Skill File when no workspace is open
+   * — the template body is dropped into the editor and the tab starts
+   * dirty so the user is prompted before discarding it.
+   * Returns the new tab id so callers can attach UI state to it.
+   */
+  newFileFromContent: (content: string) => string;
   save: (id?: string) => Promise<boolean>;
   saveAs: (id?: string) => Promise<boolean>;
   saveAllDirty: () => Promise<boolean>;
@@ -194,7 +207,7 @@ export function FileProvider({ children }: FileProviderProps) {
   );
 
   const loadFile = useCallback(
-    (nextPath: string, nextContent: string) => {
+    (nextPath: string, nextContent: string): string => {
       // Read + write against the synchronous ref so two `loadFile` calls in
       // the same tick can't both miss an existing tab and create duplicates.
       const existing = tabsRef.current.find((t) => t.path === nextPath);
@@ -215,11 +228,12 @@ export function FileProvider({ children }: FileProviderProps) {
           ),
         );
         writeActiveTabId(existing.id);
-        return;
+        return existing.id;
       }
       const tab = makeTab(nextPath, nextContent);
       writeTabs([...tabsRef.current, tab]);
       writeActiveTabId(tab.id);
+      return tab.id;
     },
     [writeTabs, writeActiveTabId],
   );
@@ -229,6 +243,19 @@ export function FileProvider({ children }: FileProviderProps) {
     writeTabs([...tabsRef.current, tab]);
     writeActiveTabId(tab.id);
   }, [writeTabs, writeActiveTabId]);
+
+  const newFileFromContent = useCallback(
+    (content: string): string => {
+      // Build the tab manually so savedContent stays empty — that way the
+      // tab reads as dirty, and Cmd+W / window-close prompts the user
+      // before discarding the template content they just opened.
+      const tab: Tab = { ...makeTab(null, content), savedContent: '' };
+      writeTabs([...tabsRef.current, tab]);
+      writeActiveTabId(tab.id);
+      return tab.id;
+    },
+    [writeTabs, writeActiveTabId],
+  );
 
   const reorderTabs = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -557,6 +584,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setContent,
       loadFile,
       newFile,
+      newFileFromContent,
       save,
       saveAs,
       saveAllDirty,
@@ -584,6 +612,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setContent,
       loadFile,
       newFile,
+      newFileFromContent,
       save,
       saveAs,
       saveAllDirty,
