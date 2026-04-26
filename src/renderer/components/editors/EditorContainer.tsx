@@ -51,6 +51,8 @@ export function EditorContainer({
             content={tab.content}
             onChange={onContentChange}
             onCursorChange={onCursorChange}
+            initialCursor={tab.cursorPosition}
+            initialScrollTop={tab.scrollPosition}
           />
         ) : (
           <SourceEditor
@@ -58,6 +60,8 @@ export function EditorContainer({
             content={tab.content}
             onChange={onContentChange}
             onCursorChange={onCursorChange}
+            initialCursor={tab.cursorPosition}
+            initialScrollTop={tab.scrollPosition}
           />
         )}
       </div>

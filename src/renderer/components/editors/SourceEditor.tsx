@@ -35,6 +35,14 @@ interface SourceEditorProps {
    * mode to drive proportional preview-pane scroll sync.
    */
   onScrollChange?: (scrollTop: number, scrollHeight: number) => void;
+  /**
+   * Cursor position to apply once Monaco has finished mounting. Used to
+   * preserve the cursor across mode switches that remount Monaco (Source
+   * ↔ Split). Read once on mount; later changes are ignored.
+   */
+  initialCursor?: CursorPosition;
+  /** Scroll offset to apply once Monaco has finished mounting. */
+  initialScrollTop?: number;
 }
 
 const MONO_STACK =
@@ -58,12 +66,19 @@ export function SourceEditor({
   onChange,
   onCursorChange,
   onScrollChange,
+  initialCursor,
+  initialScrollTop,
 }: SourceEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   // Hold the latest callback so the editor's scroll listener (registered
   // once on mount) always invokes the current handler.
   const onScrollChangeRef = useRef(onScrollChange);
   onScrollChangeRef.current = onScrollChange;
+  // Capture mount-time initial cursor/scroll in refs so handleMount sees
+  // the values that were current when SourceEditor mounted (subsequent
+  // prop changes are ignored — apply-once-on-mount semantics).
+  const initialCursorRef = useRef(initialCursor);
+  const initialScrollTopRef = useRef(initialScrollTop);
 
   const runAction = (id: string): void => {
     const ed = editorRef.current;
@@ -106,6 +121,21 @@ export function SourceEditor({
 
   const handleMount: OnMount = (instance) => {
     editorRef.current = instance;
+    // Apply initial cursor/scroll FIRST so the editor lands at the
+    // restored position before the parent reads it. Settled here (rather
+    // than via a setTimeout in the parent) means we don't race Monaco's
+    // async creation; by the time onMount fires, Monaco is fully ready.
+    const initCur = initialCursorRef.current;
+    if (initCur) {
+      instance.setPosition({ lineNumber: initCur.line, column: initCur.column });
+      instance.revealPositionInCenterIfOutsideViewport({
+        lineNumber: initCur.line,
+        column: initCur.column,
+      });
+    }
+    if (initialScrollTopRef.current !== undefined) {
+      instance.setScrollTop(initialScrollTopRef.current);
+    }
     const pos = instance.getPosition();
     if (pos && onCursorChange) {
       onCursorChange({ line: pos.lineNumber, column: pos.column });

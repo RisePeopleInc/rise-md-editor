@@ -19,13 +19,22 @@ interface SplitViewProps {
   content: string;
   onChange: (value: string) => void;
   onCursorChange?: (position: CursorPosition) => void;
+  initialCursor?: CursorPosition;
+  initialScrollTop?: number;
 }
 
 const MIN_PERCENT = 20;
 const MAX_PERCENT = 80;
 const DEFAULT_PERCENT = 50;
 
-export function SplitView({ sourceRef, content, onChange, onCursorChange }: SplitViewProps) {
+export function SplitView({
+  sourceRef,
+  content,
+  onChange,
+  onCursorChange,
+  initialCursor,
+  initialScrollTop,
+}: SplitViewProps) {
   const [splitPercent, setSplitPercent] = useState(DEFAULT_PERCENT);
   const containerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -135,6 +144,8 @@ export function SplitView({ sourceRef, content, onChange, onCursorChange }: Spli
           onChange={onChange}
           onCursorChange={onCursorChange}
           onScrollChange={handleSourceScroll}
+          initialCursor={initialCursor}
+          initialScrollTop={initialScrollTop}
         />
       </div>
       <div
