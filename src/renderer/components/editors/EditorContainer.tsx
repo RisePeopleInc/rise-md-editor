@@ -12,6 +12,8 @@ interface EditorContainerProps {
   onCursorChange: (position: CursorPosition) => void;
   sourceRef: Ref<SourceEditorHandle>;
   wysiwygRef: Ref<WysiwygEditorHandle>;
+  /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
+  monacoThemeId: string;
 }
 
 /**
@@ -26,6 +28,7 @@ export function EditorContainer({
   onCursorChange,
   sourceRef,
   wysiwygRef,
+  monacoThemeId,
 }: EditorContainerProps) {
   const mode = tab.editorMode;
 
@@ -55,6 +58,7 @@ export function EditorContainer({
             onCursorChange={onCursorChange}
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
+            monacoThemeId={monacoThemeId}
           />
         ) : (
           <SourceEditor
@@ -64,6 +68,7 @@ export function EditorContainer({
             onCursorChange={onCursorChange}
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
+            monacoThemeId={monacoThemeId}
           />
         )}
       </div>

@@ -21,6 +21,8 @@ interface SplitViewProps {
   onCursorChange?: (position: CursorPosition) => void;
   initialCursor?: CursorPosition;
   initialScrollTop?: number;
+  /** Monaco theme id passed through to the source pane. */
+  monacoThemeId: string;
 }
 
 const MIN_PERCENT = 20;
@@ -34,6 +36,7 @@ export function SplitView({
   onCursorChange,
   initialCursor,
   initialScrollTop,
+  monacoThemeId,
 }: SplitViewProps) {
   const [splitPercent, setSplitPercent] = useState(DEFAULT_PERCENT);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -146,6 +149,7 @@ export function SplitView({
           onScrollChange={handleSourceScroll}
           initialCursor={initialCursor}
           initialScrollTop={initialScrollTop}
+          monacoThemeId={monacoThemeId}
         />
       </div>
       <div

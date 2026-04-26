@@ -109,6 +109,8 @@ const menuDeps: MenuDeps = {
   rebuildMenu: () => rebuildMenu(),
   claudeMdPresent,
   getThemePreference: () => themeStore.getThemePreference(),
+  getEditorThemePreference: () => themeStore.getEditorThemePreference(),
+  getEditorContrast: () => themeStore.getEditorContrast(),
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -761,32 +763,63 @@ ipcMain.on('templates:dismiss-claude-banner', (_, rootPath: string) => {
 // Theme: hybrid light / dark with optional follow-system
 // ---------------------------------------------------------------------------
 
+function snapshotThemeState() {
+  return {
+    app: {
+      preference: themeStore.getThemePreference(),
+      resolved: themeStore.getResolvedTheme(),
+    },
+    editor: {
+      preference: themeStore.getEditorThemePreference(),
+      contrast: themeStore.getEditorContrast(),
+      resolved: themeStore.getResolvedEditorTheme(),
+    },
+  };
+}
+
 function broadcastThemeUpdate(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('theme:updated', {
-    preference: themeStore.getThemePreference(),
-    resolved: themeStore.getResolvedTheme(),
-  });
-  // Menu has Light / Dark / Follow System checkmarks that need to match
-  // the new state.
+  mainWindow.webContents.send('theme:updated', snapshotThemeState());
+  // Menu has Light / Dark / Follow System checkmarks (both for the app
+  // and the editor submenus) that need to match the new state.
   rebuildMenu();
 }
 
-ipcMain.handle('theme:get', async () => ({
-  preference: themeStore.getThemePreference(),
-  resolved: themeStore.getResolvedTheme(),
-}));
+ipcMain.handle('theme:get', async () => snapshotThemeState());
 
-ipcMain.handle('theme:set', async (_, pref: themeStore.ThemePreference) => {
-  themeStore.setThemePreference(pref);
-  broadcastThemeUpdate();
-  return { preference: pref, resolved: themeStore.getResolvedTheme() };
-});
+ipcMain.handle(
+  'theme:set-app',
+  async (_, pref: themeStore.ThemePreference) => {
+    themeStore.setThemePreference(pref);
+    broadcastThemeUpdate();
+    return snapshotThemeState();
+  },
+);
+
+ipcMain.handle(
+  'theme:set-editor',
+  async (
+    _,
+    payload: {
+      preference?: themeStore.ThemePreference;
+      contrast?: themeStore.EditorContrast;
+    },
+  ) => {
+    if (payload.preference !== undefined) {
+      themeStore.setEditorThemePreference(payload.preference);
+    }
+    if (payload.contrast !== undefined) {
+      themeStore.setEditorContrast(payload.contrast);
+    }
+    broadcastThemeUpdate();
+    return snapshotThemeState();
+  },
+);
 
 // macOS / Windows fire `nativeTheme.updated` when the OS appearance
-// changes. We only care when the user has set preference='system' — but
-// even when they've pinned light/dark, refreshing the resolved value is
-// harmless (it'll be the pinned value).
+// changes. Both the app and editor zones may follow it (when their
+// preference is 'system'), so refreshing both resolved values is the
+// right move regardless of which zone(s) are pinned.
 nativeTheme.on('updated', () => {
   broadcastThemeUpdate();
 });

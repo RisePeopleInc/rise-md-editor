@@ -26,6 +26,12 @@ export type MenuActionType =
   | 'theme-light'
   | 'theme-dark'
   | 'cycle-theme'
+  | 'editor-theme-system'
+  | 'editor-theme-light'
+  | 'editor-theme-dark'
+  | 'editor-contrast-hard'
+  | 'editor-contrast-medium'
+  | 'editor-contrast-soft'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -81,15 +87,30 @@ export type TemplateCreateResult =
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
-export interface ThemeState {
+export type EditorContrast = 'hard' | 'medium' | 'soft';
+
+export interface AppThemeState {
   preference: ThemePreference;
   resolved: ResolvedTheme;
+}
+export interface EditorThemeState {
+  preference: ThemePreference;
+  contrast: EditorContrast;
+  resolved: ResolvedTheme;
+}
+export interface ThemeState {
+  app: AppThemeState;
+  editor: EditorThemeState;
 }
 
 const theme = {
   get: (): Promise<ThemeState> => ipcRenderer.invoke('theme:get'),
-  set: (pref: ThemePreference): Promise<ThemeState> =>
-    ipcRenderer.invoke('theme:set', pref),
+  setApp: (pref: ThemePreference): Promise<ThemeState> =>
+    ipcRenderer.invoke('theme:set-app', pref),
+  setEditor: (payload: {
+    preference?: ThemePreference;
+    contrast?: EditorContrast;
+  }): Promise<ThemeState> => ipcRenderer.invoke('theme:set-editor', payload),
   /** Subscribe to OS theme flips and explicit set events from main. */
   onChange: (callback: (state: ThemeState) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, state: ThemeState): void =>

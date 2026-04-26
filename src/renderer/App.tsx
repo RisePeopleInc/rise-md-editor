@@ -525,16 +525,34 @@ function AppContent() {
           sidebar.toggleVisible();
           break;
         case 'theme-system':
-          void theme.setPreference('system');
+          void theme.setAppPreference('system');
           break;
         case 'theme-light':
-          void theme.setPreference('light');
+          void theme.setAppPreference('light');
           break;
         case 'theme-dark':
-          void theme.setPreference('dark');
+          void theme.setAppPreference('dark');
           break;
         case 'cycle-theme':
-          void theme.cycle();
+          void theme.cycleAppPreference();
+          break;
+        case 'editor-theme-system':
+          void theme.setEditorPreference('system');
+          break;
+        case 'editor-theme-light':
+          void theme.setEditorPreference('light');
+          break;
+        case 'editor-theme-dark':
+          void theme.setEditorPreference('dark');
+          break;
+        case 'editor-contrast-hard':
+          void theme.setEditorContrast('hard');
+          break;
+        case 'editor-contrast-medium':
+          void theme.setEditorContrast('medium');
+          break;
+        case 'editor-contrast-soft':
+          void theme.setEditorContrast('soft');
           break;
         default:
           break;
@@ -708,6 +726,7 @@ function AppContent() {
               onCursorChange={setCursor}
               sourceRef={editorRef}
               wysiwygRef={wysiwygRef}
+              monacoThemeId={theme.monacoThemeId}
             />
           ) : (
             <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />

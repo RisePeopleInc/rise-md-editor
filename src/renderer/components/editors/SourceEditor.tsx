@@ -1,19 +1,6 @@
 import { useImperativeHandle, useRef, type Ref } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import { GRUVBOX_DARK_ID, GRUVBOX_LIGHT_ID } from '../../monaco-themes';
-
-/**
- * Read the current resolved app theme from the `data-theme` attribute
- * the bootstrap script wrote. Used to seed Monaco with the right
- * Gruvbox variant on first mount; later theme changes flow through the
- * useThemeState hook, which calls `monaco.editor.setTheme` directly so
- * existing instances pick up the swap without re-rendering.
- */
-function initialMonacoTheme(): string {
-  const attr = document.documentElement.getAttribute('data-theme');
-  return attr === 'dark' ? GRUVBOX_DARK_ID : GRUVBOX_LIGHT_ID;
-}
 
 export interface CursorPosition {
   line: number;
@@ -56,6 +43,12 @@ interface SourceEditorProps {
   initialCursor?: CursorPosition;
   /** Scroll offset to apply once Monaco has finished mounting. */
   initialScrollTop?: number;
+  /**
+   * Monaco theme id (one of `gruvbox-{contrast}-{mode}`). Reactive — when
+   * the user changes editor contrast or theme, this prop updates and
+   * Monaco swaps to the matching variant.
+   */
+  monacoThemeId: string;
 }
 
 const MONO_STACK =
@@ -81,6 +74,7 @@ export function SourceEditor({
   onScrollChange,
   initialCursor,
   initialScrollTop,
+  monacoThemeId,
 }: SourceEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   // Hold the latest callback so the editor's scroll listener (registered
@@ -171,11 +165,11 @@ export function SourceEditor({
     <Editor
       height="100%"
       language="markdown"
-      // Gruvbox is registered in monaco-setup.ts. The variant is chosen
-      // from the current data-theme so the source editor picks the right
-      // palette on first paint; later toggles call monaco.editor.setTheme
-      // globally from useThemeState.
-      theme={initialMonacoTheme()}
+      // All 6 Gruvbox variants are registered in monaco-setup.ts. The
+      // active variant id flows from useThemeState in App down through
+      // EditorContainer; @monaco-editor/react re-applies on prop change
+      // so contrast/mode swaps happen reactively.
+      theme={monacoThemeId}
       value={content}
       onChange={(value) => onChange(value ?? '')}
       onMount={handleMount}

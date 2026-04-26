@@ -26,6 +26,12 @@ export type MenuActionType =
   | 'theme-light'
   | 'theme-dark'
   | 'cycle-theme'
+  | 'editor-theme-system'
+  | 'editor-theme-light'
+  | 'editor-theme-dark'
+  | 'editor-contrast-hard'
+  | 'editor-contrast-medium'
+  | 'editor-contrast-soft'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -80,14 +86,29 @@ export interface RaiseTemplatesApi {
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
-export interface ThemeState {
+export type EditorContrast = 'hard' | 'medium' | 'soft';
+
+export interface AppThemeState {
   preference: ThemePreference;
   resolved: ResolvedTheme;
+}
+export interface EditorThemeState {
+  preference: ThemePreference;
+  contrast: EditorContrast;
+  resolved: ResolvedTheme;
+}
+export interface ThemeState {
+  app: AppThemeState;
+  editor: EditorThemeState;
 }
 
 export interface RaiseThemeApi {
   get: () => Promise<ThemeState>;
-  set: (pref: ThemePreference) => Promise<ThemeState>;
+  setApp: (pref: ThemePreference) => Promise<ThemeState>;
+  setEditor: (payload: {
+    preference?: ThemePreference;
+    contrast?: EditorContrast;
+  }) => Promise<ThemeState>;
   onChange: (callback: (state: ThemeState) => void) => () => void;
 }
 

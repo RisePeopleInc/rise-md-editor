@@ -2,15 +2,15 @@
  * RAISE-10: Hybrid theming system.
  *
  * TWO distinct zones, deliberately:
- *   - Zone 1 (`--gruvbox-*` vars): Monaco source editor only. Consumed
- *     by JavaScript in monaco-themes.ts when defining custom Monaco
- *     themes; no DOM CSS rule outside the Monaco container should
- *     reference these variables.
- *   - Zone 2 (`--rise-*` vars): everything else — WYSIWYG, preview
- *     pane, app chrome (sidebar, tabs, status bar, banners), welcome
- *     screen.
+ *   - Zone 1 — Monaco source editor: Gruvbox (3 contrast variants ×
+ *     light/dark, decoupled from the app theme so the user can lock
+ *     the editor independently). Palettes live as JS constants in
+ *     `monaco-themes.ts`; no CSS variables involved.
+ *   - Zone 2 (`--rise-*` vars below): everything else — WYSIWYG,
+ *     preview pane, app chrome (sidebar, tabs, status bar, banners),
+ *     welcome screen.
  *
- * The active palette is selected by `[data-theme="light"]` /
+ * The active app palette is selected by `[data-theme="light"]` /
  * `[data-theme="dark"]` on `<html>`. The bootstrap script in
  * `index.html` writes the attribute before first paint to prevent flash.
  */
@@ -82,45 +82,6 @@
   --rise-warning: #ffcc33;
 
   --rise-interaction-translucent: rgb(85 93 242 / 0.18);
-}
-
-/* -------------------------------------------------------------------------
- * Zone 1: Gruvbox — consumed by Monaco only.
- *
- * Defined as CSS variables so Monaco's theme registration can read them
- * at runtime via getComputedStyle, keeping the palette in one place.
- * Two distinct sets — light variant and dark variant — gated by the
- * same `[data-theme]` attribute used by Zone 2.
- *
- * Accent colors (red/green/yellow/blue/purple/aqua/orange/gray) are the
- * canonical Gruvbox values and are shared between light and dark; only
- * the bg / fg ramps swap.
- * ------------------------------------------------------------------------- */
-:root,
-[data-theme='light'] {
-  --gruvbox-bg: #fbf1c7;
-  --gruvbox-bg1: #ebdbb2;
-  --gruvbox-bg2: #d5c4a1;
-  --gruvbox-fg: #3c3836;
-  --gruvbox-fg1: #504945;
-
-  --gruvbox-gray: #928374;
-  --gruvbox-red: #cc241d;
-  --gruvbox-green: #98971a;
-  --gruvbox-yellow: #d79921;
-  --gruvbox-blue: #458588;
-  --gruvbox-purple: #b16286;
-  --gruvbox-aqua: #689d6a;
-  --gruvbox-orange: #d65d0e;
-}
-
-[data-theme='dark'] {
-  --gruvbox-bg: #282828;
-  --gruvbox-bg1: #3c3836;
-  --gruvbox-bg2: #504945;
-  --gruvbox-fg: #ebdbb2;
-  --gruvbox-fg1: #d5c4a1;
-  /* accent colors carry over from the :root block */
 }
 
 /* -------------------------------------------------------------------------
