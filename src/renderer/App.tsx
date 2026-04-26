@@ -218,13 +218,13 @@ function AppContent() {
           editorRef.current?.zoomReset();
           break;
         case 'source-mode':
-          file.setActiveEditorMode('source');
+          handleModeChange('source');
           break;
         case 'wysiwyg-mode':
-          file.setActiveEditorMode('wysiwyg');
+          handleModeChange('wysiwyg');
           break;
         case 'split-mode':
-          file.setActiveEditorMode('split');
+          handleModeChange('split');
           break;
         case 'cycle-mode':
           handleCycleMode();
@@ -245,6 +245,7 @@ function AppContent() {
     handleNextTab,
     handlePrevTab,
     handleCycleMode,
+    handleModeChange,
   ]);
 
   // Signal readiness once on mount, after the menu listener effect above has

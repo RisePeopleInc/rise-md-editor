@@ -136,6 +136,11 @@ export function SourceEditor({
     if (initialScrollTopRef.current !== undefined) {
       instance.setScrollTop(initialScrollTopRef.current);
     }
+    // Take focus back from whatever fired the remount (typically the
+    // mode-switcher button) so the user can keep typing without an extra
+    // click. focus() is async-ish; defer to the next tick so it lands
+    // after Monaco's own post-create paint.
+    queueMicrotask(() => instance.focus());
     const pos = instance.getPosition();
     if (pos && onCursorChange) {
       onCursorChange({ line: pos.lineNumber, column: pos.column });
