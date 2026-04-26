@@ -642,8 +642,11 @@ function AppContent() {
       {/* Gate on prefsReady so the persisted visibility wins on first
           paint — otherwise the default `false` would flash for users who
           had the sidebar shown last time, and the default `true` (used
-          previously) flashed it open for users who had it hidden. */}
-      {sidebar.prefsReady && sidebar.visible && (
+          previously) flashed it open for users who had it hidden. Also
+          require a `rootPath` — without an open folder the sidebar would
+          be an empty stub redundant with the welcome screen's Open Folder
+          button. */}
+      {sidebar.prefsReady && sidebar.visible && sidebar.rootPath && (
         <Sidebar
           width={sidebar.width}
           onWidthChange={sidebar.setWidth}

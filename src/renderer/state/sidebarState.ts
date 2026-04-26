@@ -183,30 +183,42 @@ export function useSidebarState(): SidebarState {
     });
   }, []);
 
+  // Force the sidebar visible when a folder is opened. The user's
+  // implicit intent when picking a folder is "show me the tree" —
+  // leaving visible:false (a stale preference from a prior session)
+  // would silently land the workspace and leave the user wondering why
+  // nothing happened.
+  const showSidebarFor = useCallback((path: string, tree: TreeNode) => {
+    setRootPath(path);
+    setRootTree(tree);
+    setExpanded(new Set([path]));
+    setVisibleState(true);
+    window.api.folder.setSidebarVisible(true);
+  }, []);
+
   const openFolderDialog = useCallback(async () => {
     const result = await window.api.folder.open();
     if (!result) return null;
-    setRootPath(result.path);
-    setRootTree(result.tree);
-    setExpanded(new Set([result.path]));
+    showSidebarFor(result.path, result.tree);
     return result.path;
-  }, []);
+  }, [showSidebarFor]);
 
-  const openFolderByPath = useCallback(async (folderPath: string) => {
-    try {
-      const result = await window.api.folder.openPath(folderPath);
-      setRootPath(result.path);
-      setRootTree(result.tree);
-      setExpanded(new Set([result.path]));
-      return result.path;
-    } catch (err) {
-      window.api.showError(
-        'Could not open folder',
-        `${folderPath}\n\n${err instanceof Error ? err.message : String(err)}`,
-      );
-      return null;
-    }
-  }, []);
+  const openFolderByPath = useCallback(
+    async (folderPath: string) => {
+      try {
+        const result = await window.api.folder.openPath(folderPath);
+        showSidebarFor(result.path, result.tree);
+        return result.path;
+      } catch (err) {
+        window.api.showError(
+          'Could not open folder',
+          `${folderPath}\n\n${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      }
+    },
+    [showSidebarFor],
+  );
 
   const closeFolder = useCallback(async () => {
     await window.api.folder.close();

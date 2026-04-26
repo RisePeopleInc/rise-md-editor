@@ -14,7 +14,11 @@ interface WelcomeScreenProps {
  */
 export function WelcomeScreen({ onOpenFile, onOpenFolder }: WelcomeScreenProps) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-app">
+    /* `relative` is load-bearing: without a positioned ancestor the
+       absolute gradient div below leaks across the entire window — over
+       the sidebar, the top chrome, everything. Containing it here keeps
+       it inside the welcome surface only. */
+    <div className="relative flex h-full w-full items-center justify-center bg-app">
       {/* Subtle hero gradient — fades from the brand-tint into the page
           background. Sits behind the content, no interaction. */}
       <div

@@ -49,6 +49,15 @@ export function useThemeState(): UseThemeStateResult {
 
   const lastResolvedRef = useRef<ResolvedTheme>(state.resolved);
 
+  // Track whether the first apply has run. The very first apply MUST
+  // re-register Gruvbox even if the resolved value matches the
+  // optimistic initial state, because monaco-setup's pre-registration
+  // happens before our CSS file finishes parsing — `getComputedStyle`
+  // returns empty for `--gruvbox-*` and the fallback paints the editor
+  // bright magenta. Re-running here (after CSS is loaded; React effects
+  // run post-paint) gives Monaco the real palette.
+  const initialAppliedRef = useRef(false);
+
   const apply = useCallback((next: ThemeState) => {
     setState(next);
     document.documentElement.setAttribute('data-theme', next.resolved);
@@ -58,12 +67,13 @@ export function useThemeState(): UseThemeStateResult {
       // localStorage can throw in private/incognito profiles; not fatal.
     }
 
-    // If the resolved theme actually changed, refresh Monaco. The CSS
-    // variables Monaco reads through readPalette will now report the
-    // new theme's values, so re-registering picks them up; setTheme
-    // applies the matching theme to every existing editor.
-    if (lastResolvedRef.current !== next.resolved) {
+    const resolvedChanged = lastResolvedRef.current !== next.resolved;
+    const firstApply = !initialAppliedRef.current;
+    if (resolvedChanged || firstApply) {
       lastResolvedRef.current = next.resolved;
+      initialAppliedRef.current = true;
+      // Re-snapshot the palette from the now-loaded CSS variables and
+      // push the right theme to every existing Monaco editor.
       registerGruvboxThemes();
       monaco.editor.setTheme(
         next.resolved === 'dark' ? GRUVBOX_DARK_ID : GRUVBOX_LIGHT_ID,
