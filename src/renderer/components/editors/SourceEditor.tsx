@@ -121,20 +121,30 @@ export function SourceEditor({
 
   const handleMount: OnMount = (instance) => {
     editorRef.current = instance;
-    // Apply initial cursor/scroll FIRST so the editor lands at the
-    // restored position before the parent reads it. Settled here (rather
-    // than via a setTimeout in the parent) means we don't race Monaco's
-    // async creation; by the time onMount fires, Monaco is fully ready.
+    // Apply initial cursor/scroll on mount. We're inside Monaco's onMount
+    // callback so the editor is fully ready — no setTimeout race with the
+    // parent. Order matters:
+    //   1. setPosition — places the caret on the target line.
+    //   2. setScrollTop — restores the prior pixel offset (only meaningful
+    //      when the layout is unchanged; mode swaps re-layout with a
+    //      different viewport width).
+    //   3. revealPositionInCenter — overrides #2 if the cursor isn't
+    //      visible there; brings the caret into the centre of the
+    //      viewport. Net effect: when restoring within the same mode the
+    //      scroll snaps back, when restoring across a mode swap (where
+    //      pixel offsets don't translate) the cursor is at least visible.
     const initCur = initialCursorRef.current;
     if (initCur) {
       instance.setPosition({ lineNumber: initCur.line, column: initCur.column });
-      instance.revealPositionInCenterIfOutsideViewport({
-        lineNumber: initCur.line,
-        column: initCur.column,
-      });
     }
     if (initialScrollTopRef.current !== undefined) {
       instance.setScrollTop(initialScrollTopRef.current);
+    }
+    if (initCur) {
+      instance.revealPositionInCenter({
+        lineNumber: initCur.line,
+        column: initCur.column,
+      });
     }
     // Take focus back from whatever fired the remount (typically the
     // mode-switcher button) so the user can keep typing without an extra
