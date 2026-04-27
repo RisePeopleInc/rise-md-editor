@@ -388,6 +388,15 @@ if (!gotLock) {
     // form-control defaults) match from the first frame.
     themeStore.bootstrapNativeTheme();
 
+    // macOS dev-mode dock icon. In packaged builds the .icns baked
+    // into the .app bundle drives the dock; in dev the bundle is
+    // Electron's own (showing the default Electron mark). app.dock
+    // exists only on macOS; the !isPackaged gate avoids a wasted call
+    // in production where the path doesn't exist inside the asar.
+    if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+      app.dock.setIcon(path.join(__dirname, '../../build/icon.png'));
+    }
+
     // raise-asset:// → filesystem read, scoped to "allowed roots":
     // the open workspace folder + the dirname of the active tab's
     // saved file. Without that gate the protocol would happily serve
