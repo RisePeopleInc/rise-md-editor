@@ -132,10 +132,15 @@ function drainPendingMenuActions(): void {
 // dev shows 'rAIse' instead of 'Electron'.
 app.setName(APP_NAME);
 process.title = APP_NAME;
+// `iconPath` populates the artwork in the macOS About panel
+// (Apple → About rAIse). Without it the panel falls back to the
+// running .app bundle's icon — Electron's own logo in dev. Same
+// build/icon.png as the dock + window icons.
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion(),
   copyright: `© ${new Date().getFullYear()} Rise`,
+  iconPath: path.join(__dirname, '../../build/icon.png'),
 });
 
 function getWindow(): BrowserWindow | null {
