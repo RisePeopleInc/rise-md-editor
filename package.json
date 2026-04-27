@@ -1,5 +1,6 @@
 {
   "name": "raise-editor",
+  "productName": "rAIse",
   "version": "0.1.0",
   "description": "rAIse — a markdown editor for Rise People",
   "homepage": "https://github.com/RisePeopleInc/raise-editor",

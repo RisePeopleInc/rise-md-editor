@@ -122,7 +122,16 @@ function drainPendingMenuActions(): void {
   }
 }
 
+// `app.setName` only takes effect for the menu / About panel labels;
+// the macOS menu bar's first-item label is taken from `app.name`,
+// which we also seed via `productName` in package.json so that
+// `app.getName()` returns 'rAIse' without needing setName.
+//
+// `process.title` covers the OS-level process name visible in
+// Activity Monitor / `ps`. Belt-and-suspenders so the menu bar in
+// dev shows 'rAIse' instead of 'Electron'.
 app.setName(APP_NAME);
+process.title = APP_NAME;
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion(),
