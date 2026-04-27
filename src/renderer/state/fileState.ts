@@ -105,6 +105,17 @@ export interface FileContextValue {
   relocateTabs: (oldPath: string, newPath: string | null) => string[];
 
   withDirtyGuard: (action: () => void | Promise<void>) => Promise<boolean>;
+  /**
+   * Returns the active tab's saved on-disk path. If the tab is
+   * untitled, prompts Save As — and on success returns the new path.
+   * Returns null if there's no active tab or the user cancelled.
+   *
+   * Used by RAISE-11's image drop/paste flow: images are stored in an
+   * `assets/` folder relative to the markdown file, so the file must
+   * have a saved location before we can copy a dropped or pasted image
+   * onto disk.
+   */
+  requireSavedPath: () => Promise<string | null>;
 }
 
 const FileContext = createContext<FileContextValue | null>(null);
@@ -475,6 +486,20 @@ export function FileProvider({ children }: FileProviderProps) {
     return true;
   }, [save, writeActiveTabId]);
 
+  const requireSavedPath = useCallback(async (): Promise<string | null> => {
+    const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current);
+    if (!tab) return null;
+    if (tab.path) return tab.path;
+    // Untitled — prompt Save As. saveAs updates tabsRef synchronously
+    // when the user picks a path, so the post-await read returns the
+    // freshly-saved path. Closure-captured `tab` is stale by then; we
+    // read against the live ref to get the new path.
+    const ok = await saveAs(tab.id);
+    if (!ok) return null;
+    const fresh = tabsRef.current.find((t) => t.id === tab.id);
+    return fresh?.path ?? null;
+  }, [saveAs]);
+
   const withDirtyGuard = useCallback(
     async (action: () => void | Promise<void>): Promise<boolean> => {
       const current = tabsRef.current.find((t) => t.id === activeTabIdRef.current);
@@ -603,6 +628,7 @@ export function FileProvider({ children }: FileProviderProps) {
       refreshTabFromDisk,
       relocateTabs,
       withDirtyGuard,
+      requireSavedPath,
     }),
     [
       tabs,
@@ -631,6 +657,7 @@ export function FileProvider({ children }: FileProviderProps) {
       refreshTabFromDisk,
       relocateTabs,
       withDirtyGuard,
+      requireSavedPath,
     ],
   );
 

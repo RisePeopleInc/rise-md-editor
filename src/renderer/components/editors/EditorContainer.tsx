@@ -4,6 +4,7 @@ import { SourceEditor, type CursorPosition, type SourceEditorHandle } from './So
 import { SplitView } from './SplitView';
 import { WysiwygEditor, type WysiwygEditorHandle } from './WysiwygEditor';
 import type { EditorMode, Tab } from '../../state/fileState';
+import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 
 interface EditorContainerProps {
   tab: Tab;
@@ -14,6 +15,17 @@ interface EditorContainerProps {
   wysiwygRef: Ref<WysiwygEditorHandle>;
   /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
   monacoThemeId: string;
+  /** Image-drop handler — saves files via IPC, returns markdown to insert. */
+  onImageDrop: (files: File[]) => Promise<ImageInsertion[]>;
+  /** Image-paste handler — saves clipboard image, returns markdown to insert.
+   *  Receives a synchronous snapshot of the DataTransferItem (the live
+   *  item is invalidated when the paste handler returns). */
+  onImagePaste: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
+  /** "View full size" handler for image-click tooltip in WYSIWYG. */
+  onOpenImage: (relPath: string) => void;
+  /** WYSIWYG toolbar's image button uses this to ensure the tab is
+   *  saved before opening the file picker. */
+  requireSavedPath: () => Promise<string | null>;
 }
 
 /**
@@ -29,6 +41,10 @@ export function EditorContainer({
   sourceRef,
   wysiwygRef,
   monacoThemeId,
+  onImageDrop,
+  onImagePaste,
+  onOpenImage,
+  requireSavedPath,
 }: EditorContainerProps) {
   const mode = tab.editorMode;
 
@@ -49,6 +65,11 @@ export function EditorContainer({
             onChange={onContentChange}
             initialScrollTop={tab.wysiwygScrollPosition}
             initialCursorOffset={tab.wysiwygCursorOffset}
+            onImageDrop={onImageDrop}
+            onImagePaste={onImagePaste}
+            markdownPath={tab.path}
+            onOpenImage={onOpenImage}
+            requireSavedPath={requireSavedPath}
           />
         ) : mode === 'split' ? (
           <SplitView
@@ -59,6 +80,9 @@ export function EditorContainer({
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
             monacoThemeId={monacoThemeId}
+            onImageDrop={onImageDrop}
+            onImagePaste={onImagePaste}
+            markdownPath={tab.path}
           />
         ) : (
           <SourceEditor
@@ -69,6 +93,8 @@ export function EditorContainer({
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
             monacoThemeId={monacoThemeId}
+            onImageDrop={onImageDrop}
+            onImagePaste={onImagePaste}
           />
         )}
       </div>

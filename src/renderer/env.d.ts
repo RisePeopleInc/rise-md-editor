@@ -85,6 +85,23 @@ export interface RaiseTemplatesApi {
   dismissClaudeBanner: (rootPath: string) => void;
 }
 
+export interface SavedAsset {
+  relPath: string;
+  absPath: string;
+}
+
+export interface RaiseAssetsApi {
+  saveDroppedImage: (markdownPath: string, sourcePath: string) => Promise<SavedAsset>;
+  savePastedImage: (
+    markdownPath: string,
+    bytes: ArrayBuffer,
+    mimeType: string,
+  ) => Promise<SavedAsset>;
+  openRelative: (markdownPath: string, relPath: string) => Promise<string>;
+  /** Show a native image-file picker, copy the choice into assets/. */
+  pickAndImport: (markdownPath: string) => Promise<SavedAsset | null>;
+}
+
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 export type EditorContrast = 'hard' | 'medium' | 'soft';
@@ -152,6 +169,7 @@ export interface RaiseApi {
   folder: RaiseFolderApi;
   templates: RaiseTemplatesApi;
   theme: RaiseThemeApi;
+  assets: RaiseAssetsApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;

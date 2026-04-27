@@ -1,7 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, type MenuItemConstructorOptions } from 'electron';
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { buildMenu, type MenuDeps } from './menu';
+import * as assetOps from './assetOps';
 import * as fileOps from './fileOperations';
 import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
@@ -11,6 +13,33 @@ import * as templates from './templates';
 import * as themeStore from './themeStore';
 
 const APP_NAME = 'rAIse';
+
+// `raise-asset://` resolves markdown-relative image paths against their
+// containing file's directory and serves the bytes from disk. The
+// renderer is loaded from http://localhost in dev and file:// in
+// production — relative paths in <img src=...> would otherwise resolve
+// against the renderer's origin (broken icon). Translating to a custom
+// protocol at render time keeps the markdown stored on disk clean
+// (`assets/foo.png` stays as the saved string) while the displayed
+// <img> points at a URL Chromium will actually fetch.
+//
+// MUST run before app.whenReady() — Electron requires
+// registerSchemesAsPrivileged at startup.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'raise-asset',
+    privileges: {
+      // `secure: true` so the scheme is treated as a trusted origin
+      // (mixed-content rules don't block it); `supportFetchAPI` so any
+      // code that pre-fetches images via fetch() works; `stream` for
+      // range requests on large images.
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true,
+    },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -28,6 +57,38 @@ function resetFileState(): void {
   fileState.path = null;
   fileState.isDirty = false;
   fileState.dirtyCount = 0;
+}
+
+/**
+ * Allowed roots for raise-asset:// reads + assets:open-relative
+ * resolutions. The renderer renders images from:
+ *   - The currently-open workspace folder (Project Mode)
+ *   - The active tab's saved-file directory
+ *
+ * Non-active tabs aren't mounted in the editor, so we don't need to
+ * track their paths here — when the user switches tabs, the new
+ * active path lands via `pushFileMeta` and the set updates.
+ */
+function getAllowedRoots(): string[] {
+  const roots: string[] = [];
+  const workspace = lastFolderStore.getLastFolder();
+  if (workspace) roots.push(path.resolve(workspace));
+  if (fileState.path) roots.push(path.resolve(path.dirname(fileState.path)));
+  return roots;
+}
+
+function isPathUnderAllowedRoot(absPath: string): boolean {
+  const resolved = path.resolve(absPath);
+  for (const root of getAllowedRoots()) {
+    const rel = path.relative(root, resolved);
+    // `path.relative` returns '' for equal paths and a string starting
+    // with '..' (or an absolute path on a different drive) when the
+    // target escapes the root.
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Menu actions are queued until the renderer signals it has subscribed to
@@ -325,6 +386,37 @@ if (!gotLock) {
     // window opens, so window-chrome (titlebar tint on macOS, scrollbars,
     // form-control defaults) match from the first frame.
     themeStore.bootstrapNativeTheme();
+
+    // raise-asset:// → filesystem read, scoped to "allowed roots":
+    // the open workspace folder + the dirname of the active tab's
+    // saved file. Without that gate the protocol would happily serve
+    // any absolute fs path the renderer asked for — fine in practice
+    // (no HTML in markdown, sandboxed renderer) but a one-line
+    // hardening that backstops any future XSS.
+    //
+    // URL pathname is the absolute file path (URL-encoded); on
+    // Windows the URL form is `raise-asset:///C:/Users/.../foo.png`,
+    // so we strip the leading slash if the next character looks like
+    // a drive letter.
+    protocol.handle('raise-asset', async (request) => {
+      try {
+        const url = new URL(request.url);
+        let fsPath = decodeURIComponent(url.pathname);
+        if (/^\/[a-zA-Z]:/.test(fsPath)) {
+          fsPath = fsPath.slice(1);
+        }
+        if (!isPathUnderAllowedRoot(fsPath)) {
+          return new Response('Forbidden', { status: 403 });
+        }
+        return await net.fetch(pathToFileURL(fsPath).toString());
+      } catch (err) {
+        return new Response(
+          `raise-asset error: ${err instanceof Error ? err.message : String(err)}`,
+          { status: 500 },
+        );
+      }
+    });
+
     rebuildMenu();
     createWindow();
 
@@ -828,3 +920,75 @@ ipcMain.handle(
 nativeTheme.on('updated', () => {
   broadcastThemeUpdate();
 });
+
+// ---------------------------------------------------------------------------
+// Image assets — drag-and-drop + paste (RAISE-11)
+// ---------------------------------------------------------------------------
+
+ipcMain.handle(
+  'assets:save-dropped-image',
+  async (
+    _,
+    payload: { markdownPath: string; sourcePath: string },
+  ): Promise<assetOps.SavedAsset> =>
+    assetOps.saveDroppedImage(payload.markdownPath, payload.sourcePath),
+);
+
+ipcMain.handle(
+  'assets:save-pasted-image',
+  async (
+    _,
+    payload: { markdownPath: string; bytes: ArrayBuffer; mimeType: string },
+  ): Promise<assetOps.SavedAsset> =>
+    assetOps.savePastedImage(payload.markdownPath, payload.bytes, payload.mimeType),
+);
+
+// Resolve a markdown-relative image path against its containing file
+// and open it in the OS-default app (Preview on macOS, Photos on
+// Windows, default image viewer on Linux). The renderer doesn't have
+// node:path, and joining platform-aware paths in JS is just begging
+// for slash-vs-backslash bugs on Windows.
+//
+// Path-traversal guard: a malicious markdown file could have
+// `![pwn](../../bin/sh)`. `path.resolve` follows the `..`, and
+// `shell.openPath` would launch whatever the OS associated with the
+// resolved file. Rejecting any relPath that escapes the markdown
+// file's dirname keeps the click-to-open flow safe.
+ipcMain.handle(
+  'assets:open-relative',
+  async (
+    _,
+    payload: { markdownPath: string; relPath: string },
+  ): Promise<string> => {
+    const baseDir = path.dirname(payload.markdownPath);
+    const abs = path.resolve(baseDir, payload.relPath);
+    const rel = path.relative(baseDir, abs);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return 'Refused: path escapes the markdown file directory';
+    }
+    return shell.openPath(abs);
+  },
+);
+
+// Open a native image-file picker, then copy the chosen file into the
+// markdown's assets/ folder. Used by the WYSIWYG toolbar's image button
+// — replaces the previous window.prompt('Image URL') flow that no
+// longer works in our sandboxed renderer.
+ipcMain.handle(
+  'assets:pick-and-import',
+  async (_, markdownPath: string): Promise<assetOps.SavedAsset | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Insert Image',
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Images',
+          extensions: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'],
+        },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return assetOps.saveDroppedImage(markdownPath, result.filePaths[0]!);
+  },
+);

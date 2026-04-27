@@ -13,6 +13,8 @@ import {
   type CursorPosition,
   type SourceEditorHandle,
 } from './SourceEditor';
+import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
+import { resolveAssetUrl } from '../../state/assetUrl';
 
 interface SplitViewProps {
   sourceRef?: Ref<SourceEditorHandle>;
@@ -23,6 +25,13 @@ interface SplitViewProps {
   initialScrollTop?: number;
   /** Monaco theme id passed through to the source pane. */
   monacoThemeId: string;
+  /** Image-drop handler forwarded to the source pane. */
+  onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
+  /** Image-paste handler forwarded to the source pane. */
+  onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
+  /** Path of the markdown file — used to resolve relative image src in
+   *  the preview pane to raise-asset:// URLs. */
+  markdownPath: string | null;
 }
 
 const MIN_PERCENT = 20;
@@ -37,26 +46,56 @@ export function SplitView({
   initialCursor,
   initialScrollTop,
   monacoThemeId,
+  onImageDrop,
+  onImagePaste,
+  markdownPath,
 }: SplitViewProps) {
   const [splitPercent, setSplitPercent] = useState(DEFAULT_PERCENT);
   const containerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
+  // Stable ref to the current markdown path so the markdown-it image
+  // rule (registered once per md instance) reads the latest value
+  // without forcing an md rebuild on every keystroke.
+  const markdownPathRef = useRef(markdownPath);
+  markdownPathRef.current = markdownPath;
+
   // markdown-it: html disabled (escape any raw HTML in input — local notes
   // don't tend to need it and we'd rather not let arbitrary tags through),
   // linkify on for bare URLs, breaks off so single newlines don't become
   // <br> (matches CommonMark / Milkdown behaviour).
-  const md = useMemo(
-    () =>
-      new MarkdownIt({
-        html: false,
-        linkify: true,
-        typographer: true,
-        breaks: false,
-      }),
-    [],
-  );
-  const html = useMemo(() => md.render(content), [md, content]);
+  const md = useMemo(() => {
+    const instance = new MarkdownIt({
+      html: false,
+      linkify: true,
+      typographer: true,
+      breaks: false,
+    });
+    // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
+    // at render time. The token's `src` attribute is the literal markdown
+    // src; we mutate it before delegating to the default renderer.
+    const defaultImage = instance.renderer.rules.image;
+    instance.renderer.rules.image = (tokens, idx, options, env, self) => {
+      const token = tokens[idx]!;
+      const srcIdx = token.attrIndex('src');
+      if (srcIdx >= 0) {
+        const src = token.attrs?.[srcIdx]?.[1] ?? '';
+        const resolved = resolveAssetUrl(markdownPathRef.current, src);
+        token.attrs![srcIdx]![1] = resolved;
+      }
+      return defaultImage
+        ? defaultImage(tokens, idx, options, env, self)
+        : self.renderToken(tokens, idx, options);
+    };
+    return instance;
+  }, []);
+  // Re-render the preview HTML whenever content OR the markdown path
+  // changes — a Save As that gives the file a new dir means existing
+  // relative paths point at a different location. The image rule reads
+  // markdownPath via a ref so it doesn't appear in `md.render`'s
+  // signature; eslint can't see that, hence the disable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const html = useMemo(() => md.render(content), [md, content, markdownPath]);
 
   // Scroll-sync lock: the side that initiated the scroll bumps a flag the
   // other side checks before mirroring, otherwise a single user scroll
@@ -150,6 +189,8 @@ export function SplitView({
           initialCursor={initialCursor}
           initialScrollTop={initialScrollTop}
           monacoThemeId={monacoThemeId}
+          onImageDrop={onImageDrop}
+          onImagePaste={onImagePaste}
         />
       </div>
       <div

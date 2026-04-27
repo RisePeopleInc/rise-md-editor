@@ -1,6 +1,13 @@
 import { useImperativeHandle, useRef, type Ref } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
-import type { editor } from 'monaco-editor';
+import * as monaco from 'monaco-editor';
+import {
+  firstImageItem,
+  pickImageFiles,
+  snapshotPasteItem,
+  type ImageInsertion,
+  type PasteImageSnapshot,
+} from '../../state/imageInsert';
 
 export interface CursorPosition {
   line: number;
@@ -49,12 +56,26 @@ interface SourceEditorProps {
    * Monaco swaps to the matching variant.
    */
   monacoThemeId: string;
+  /**
+   * Image-drop callback. Called when image files are dropped onto the
+   * editor; should save them and return the markdown to insert at the
+   * drop position. Returning an empty array silently ignores the drop.
+   */
+  onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
+  /**
+   * Image-paste callback. Called when an image is on the clipboard;
+   * should save it and return the markdown to insert at the cursor.
+   * Return null to ignore. Takes a synchronous snapshot of the
+   * DataTransferItem since the item is invalidated when the paste
+   * handler returns.
+   */
+  onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
 }
 
 const MONO_STACK =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 
-const EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
+const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   wordWrap: 'on',
   minimap: { enabled: false },
   lineNumbers: 'on',
@@ -75,12 +96,21 @@ export function SourceEditor({
   initialCursor,
   initialScrollTop,
   monacoThemeId,
+  onImageDrop,
+  onImagePaste,
 }: SourceEditorProps) {
-  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   // Hold the latest callback so the editor's scroll listener (registered
   // once on mount) always invokes the current handler.
   const onScrollChangeRef = useRef(onScrollChange);
   onScrollChangeRef.current = onScrollChange;
+  // Image-handling callbacks land in refs too — the DOM drop/paste
+  // listeners are attached once on mount and need to call the current
+  // closures even after re-renders.
+  const onImageDropRef = useRef(onImageDrop);
+  onImageDropRef.current = onImageDrop;
+  const onImagePasteRef = useRef(onImagePaste);
+  onImagePasteRef.current = onImagePaste;
   // Capture mount-time initial cursor/scroll in refs so handleMount sees
   // the values that were current when SourceEditor mounted (subsequent
   // prop changes are ignored — apply-once-on-mount semantics).
@@ -159,6 +189,90 @@ export function SourceEditor({
     instance.onDidScrollChange((e) => {
       onScrollChangeRef.current?.(e.scrollTop, e.scrollHeight);
     });
+
+    // -----------------------------------------------------------------
+    // RAISE-11: image drop + paste interception in Source mode.
+    //
+    // Capture-phase listeners on Monaco's root DOM so we win against
+    // Monaco's own drop/paste handling for the image case only — when
+    // there's no image in the payload we let the events bubble through
+    // and Monaco handles plain text as usual.
+    // -----------------------------------------------------------------
+    const dom = instance.getDomNode();
+    if (dom) {
+      const insertAt = (position: monaco.Position, text: string): void => {
+        const range = new monaco.Range(
+          position.lineNumber,
+          position.column,
+          position.lineNumber,
+          position.column,
+        );
+        instance.executeEdits('image-insert', [
+          { range, text, forceMoveMarkers: true },
+        ]);
+      };
+
+      dom.addEventListener(
+        'drop',
+        (event) => {
+          const dt = (event as DragEvent).dataTransfer;
+          if (!dt) return;
+          const images = pickImageFiles(dt.files);
+          if (images.length === 0) return; // Let Monaco handle plain drops.
+          event.preventDefault();
+          event.stopPropagation();
+          const dropEvent = event as DragEvent;
+          // Resolve the drop point to a model position. Falls back to
+          // the current cursor if Monaco can't classify the click point.
+          const target = instance.getTargetAtClientPoint(
+            dropEvent.clientX,
+            dropEvent.clientY,
+          );
+          const position = target?.position ?? instance.getPosition();
+          if (!position) return;
+          void (async () => {
+            const handler = onImageDropRef.current;
+            if (!handler) return;
+            const insertions = await handler(images);
+            if (insertions.length === 0) return;
+            // Multiple drops stack on separate lines so each gets its
+            // own paragraph in the rendered markdown.
+            const text = insertions.map((i) => i.markdown).join('\n\n');
+            insertAt(position, text);
+            instance.focus();
+          })();
+        },
+        { capture: true },
+      );
+
+      dom.addEventListener(
+        'paste',
+        (event) => {
+          const clipboardData = (event as ClipboardEvent).clipboardData;
+          if (!clipboardData) return;
+          const item = firstImageItem(clipboardData.items);
+          if (!item) return; // Plain text paste — Monaco handles it.
+          // Snapshot now: DataTransferItems become "neutered" the
+          // moment the paste handler returns, so reading .type or
+          // calling getAsFile() across an `await` returns null/empty.
+          const snapshot = snapshotPasteItem(item);
+          if (!snapshot) return;
+          event.preventDefault();
+          event.stopPropagation();
+          void (async () => {
+            const handler = onImagePasteRef.current;
+            if (!handler) return;
+            const insertion = await handler(snapshot);
+            if (!insertion) return;
+            const position = instance.getPosition();
+            if (!position) return;
+            insertAt(position, insertion.markdown);
+            instance.focus();
+          })();
+        },
+        { capture: true },
+      );
+    }
   };
 
   return (
