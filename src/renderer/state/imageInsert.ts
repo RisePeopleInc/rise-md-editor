@@ -73,21 +73,46 @@ export async function processImageDrop(
 }
 
 /**
+ * Snapshot of a `DataTransferItem` taken synchronously inside the
+ * paste handler. The DataTransferItem itself is invalidated as soon
+ * as the event handler returns, so reading `.type` / `getAsFile()`
+ * across an await boundary returns empty values and we'd send an
+ * empty MIME type to main. The caller (editor's paste handler) reads
+ * both fields synchronously and hands the snapshot here.
+ */
+export interface PasteImageSnapshot {
+  blob: File;
+  mimeType: string;
+}
+
+/**
+ * Take a synchronous snapshot of an image clipboard item. Returns null
+ * if the item isn't an image or `getAsFile()` returns null.
+ */
+export function snapshotPasteItem(
+  item: DataTransferItem | null,
+): PasteImageSnapshot | null {
+  if (!item) return null;
+  const mimeType = item.type;
+  const blob = item.getAsFile();
+  if (!blob || !mimeType) return null;
+  return { blob, mimeType };
+}
+
+/**
  * Paste pipeline: read the clipboard image as bytes and write them out
  * with the canonical `pasted-image-{timestamp}.{ext}` name.
  */
 export async function processImagePaste(
   markdownPath: string,
-  item: DataTransferItem,
+  snapshot: PasteImageSnapshot,
 ): Promise<ImageInsertion | null> {
-  const blob = item.getAsFile();
-  if (!blob) return null;
   try {
-    const bytes = await blob.arrayBuffer();
+    const bytes = await snapshot.blob.arrayBuffer();
     const asset = await window.api.assets.savePastedImage(
       markdownPath,
       bytes,
-      item.type,
+      snapshot.mimeType,
     );
     // Pasted images don't have a meaningful original name — reuse the
     // generated stem (without the .png/.jpg/etc.) as alt text.

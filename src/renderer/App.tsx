@@ -19,6 +19,7 @@ import {
   processImageDrop,
   processImagePaste,
   type ImageInsertion,
+  type PasteImageSnapshot,
 } from './state/imageInsert';
 import type { MenuActionEvent, TemplateKind, TreeNode } from './env';
 
@@ -239,10 +240,10 @@ function AppContent() {
   );
 
   const handleImagePaste = useCallback(
-    async (item: DataTransferItem): Promise<ImageInsertion | null> => {
+    async (snapshot: PasteImageSnapshot): Promise<ImageInsertion | null> => {
       const path = await file.requireSavedPath();
       if (!path) return null;
-      return processImagePaste(path, item);
+      return processImagePaste(path, snapshot);
     },
     [file],
   );
@@ -768,6 +769,7 @@ function AppContent() {
               onImageDrop={handleImageDrop}
               onImagePaste={handleImagePaste}
               onOpenImage={handleOpenImage}
+              requireSavedPath={file.requireSavedPath}
             />
           ) : (
             <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />

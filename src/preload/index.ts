@@ -143,6 +143,8 @@ const assets = {
     ipcRenderer.invoke('assets:open-in-system', absPath),
   openRelative: (markdownPath: string, relPath: string): Promise<string> =>
     ipcRenderer.invoke('assets:open-relative', { markdownPath, relPath }),
+  pickAndImport: (markdownPath: string): Promise<SavedAsset | null> =>
+    ipcRenderer.invoke('assets:pick-and-import', markdownPath),
 };
 
 const templates = {

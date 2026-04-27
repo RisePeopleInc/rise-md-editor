@@ -5,7 +5,9 @@ import type { editor } from 'monaco-editor';
 import {
   firstImageItem,
   pickImageFiles,
+  snapshotPasteItem,
   type ImageInsertion,
+  type PasteImageSnapshot,
 } from '../../state/imageInsert';
 
 export interface CursorPosition {
@@ -64,9 +66,11 @@ interface SourceEditorProps {
   /**
    * Image-paste callback. Called when an image is on the clipboard;
    * should save it and return the markdown to insert at the cursor.
-   * Return null to ignore.
+   * Return null to ignore. Takes a synchronous snapshot of the
+   * DataTransferItem since the item is invalidated when the paste
+   * handler returns.
    */
-  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
+  onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
 }
 
 const MONO_STACK =
@@ -249,12 +253,17 @@ export function SourceEditor({
           if (!clipboardData) return;
           const item = firstImageItem(clipboardData.items);
           if (!item) return; // Plain text paste — Monaco handles it.
+          // Snapshot now: DataTransferItems become "neutered" the
+          // moment the paste handler returns, so reading .type or
+          // calling getAsFile() across an `await` returns null/empty.
+          const snapshot = snapshotPasteItem(item);
+          if (!snapshot) return;
           event.preventDefault();
           event.stopPropagation();
           void (async () => {
             const handler = onImagePasteRef.current;
             if (!handler) return;
-            const insertion = await handler(item);
+            const insertion = await handler(snapshot);
             if (!insertion) return;
             const position = instance.getPosition();
             if (!position) return;

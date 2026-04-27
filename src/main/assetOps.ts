@@ -49,6 +49,40 @@ function isSupportedExtension(name: string): boolean {
 }
 
 /**
+ * Sanitize a filename for the assets folder + markdown link path:
+ *   - Collapse any whitespace (including U+00A0 no-break space and
+ *     U+202F narrow no-break space — macOS Sonoma+ uses U+202F as
+ *     the AM/PM separator in screenshot filenames) to a single `-`.
+ *   - Strip characters that need escaping in markdown link paths
+ *     (parentheses, brackets, angle brackets) so we don't have to
+ *     wrap the path in `<>` or URL-encode.
+ *   - Collapse runs of `-` into one and trim leading/trailing dashes.
+ *
+ * Original case + the dot-separated extension are preserved so
+ * `Screenshot 2026-04-23 at 10.12.48 AM.png` becomes
+ * `Screenshot-2026-04-23-at-10.12.48-AM.png`.
+ */
+function sanitizeFilename(name: string): string {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  const cleaned = stem
+    // JS `\s` matches every Unicode whitespace category, including
+    // U+00A0 (no-break space) and U+202F (narrow no-break space —
+    // macOS Sonoma+ uses this as the AM/PM separator in screenshot
+    // filenames, which would otherwise sneak into our markdown).
+    .replace(/\s+/g, '-')
+    // Markdown link / URL-unfriendly punctuation.
+    .replace(/[\\/<>()[\]"'`]/g, '')
+    // Squeeze runs of dashes.
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  // If the user dropped a file named "   .png", we'd end up with an
+  // empty stem — fall back to "image" so the result is still a valid
+  // filename.
+  return (cleaned || 'image') + ext;
+}
+
+/**
  * Find an unused filename in `parentDir` by appending `-1`, `-2`, ...
  * before the extension. `screenshot.png` collides → `screenshot-1.png`,
  * `screenshot-2.png`, etc. The trim cap keeps the loop bounded if
@@ -105,7 +139,11 @@ export async function saveDroppedImage(
   }
   const assetsDir = path.join(path.dirname(markdownPath), 'assets');
   await fs.mkdir(assetsDir, { recursive: true });
-  const targetName = await ensureUniqueName(assetsDir, sourceName);
+  // Sanitize before collision-checking — `Screenshot 2026-04-23 at
+  // 10.12.48 AM.png` becomes `Screenshot-2026-04-23-at-10.12.48-AM.png`,
+  // and only THEN does ensureUniqueName append `-1`, `-2`, ... if there
+  // happens to be a collision with the cleaned name.
+  const targetName = await ensureUniqueName(assetsDir, sanitizeFilename(sourceName));
   const absPath = path.join(assetsDir, targetName);
   await fs.copyFile(sourcePath, absPath);
   return { relPath: `assets/${targetName}`, absPath };

@@ -30,7 +30,9 @@ import { Toolbar } from './Toolbar';
 import {
   firstImageItem,
   pickImageFiles,
+  snapshotPasteItem,
   type ImageInsertion,
+  type PasteImageSnapshot,
 } from '../../state/imageInsert';
 
 export interface WysiwygEditorHandle {
@@ -61,12 +63,14 @@ interface WysiwygEditorProps {
    * Image-paste callback. Should save the clipboard image and return
    * the markdown insertion (or null) to dispatch at the cursor.
    */
-  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
+  onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
   /** Path of the markdown file currently in the editor — used to
    *  resolve image relPaths against the right base for image clicks. */
   markdownPath: string | null;
   /** "View full size" handler for an image clicked in WYSIWYG. */
   onOpenImage?: (relPath: string) => void;
+  /** Used by the toolbar's image button (file picker → assets/ copy). */
+  requireSavedPath?: () => Promise<string | null>;
 }
 
 // Match a YAML frontmatter block at the very start of the document. The
@@ -107,7 +111,7 @@ interface MilkdownBodyProps {
   initialCursorOffset?: number;
   onMarkdownChange: (markdown: string) => void;
   onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
-  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
+  onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
 }
 
 function MilkdownBody({
@@ -220,11 +224,16 @@ function MilkdownBody({
             const items = (event as ClipboardEvent).clipboardData?.items ?? null;
             const imageItem = firstImageItem(items);
             if (!imageItem) return false;
+            // Synchronous snapshot — the DataTransferItem is invalidated
+            // when this handler returns, so a later read of `.type` or
+            // `getAsFile()` across an await would yield empty values.
+            const snapshot = snapshotPasteItem(imageItem);
+            if (!snapshot) return false;
             event.preventDefault();
             void (async () => {
               const handler = onImagePasteRef.current;
               if (!handler) return;
-              const insertion = await handler(imageItem);
+              const insertion = await handler(snapshot);
               if (!insertion) return;
               const editor = editorInstanceRef.current;
               if (!editor) return;
@@ -319,6 +328,7 @@ export function WysiwygEditor({
   onImagePaste,
   markdownPath,
   onOpenImage,
+  requireSavedPath,
 }: WysiwygEditorProps) {
   // Split once at mount; the parent keys this component by tab id + load
   // epoch, so a tab switch or re-open of the same file fully remounts and
@@ -429,7 +439,7 @@ export function WysiwygEditor({
   return (
     <MilkdownProvider>
       <div className="flex h-full w-full flex-col bg-app">
-        <Toolbar />
+        <Toolbar requireSavedPath={requireSavedPath} />
         <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <div className="mx-auto max-w-[720px] px-6 py-8">
             {frontmatter !== null && (

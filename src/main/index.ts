@@ -873,3 +873,26 @@ ipcMain.handle(
     return shell.openPath(abs);
   },
 );
+
+// Open a native image-file picker, then copy the chosen file into the
+// markdown's assets/ folder. Used by the WYSIWYG toolbar's image button
+// — replaces the previous window.prompt('Image URL') flow that no
+// longer works in our sandboxed renderer.
+ipcMain.handle(
+  'assets:pick-and-import',
+  async (_, markdownPath: string): Promise<assetOps.SavedAsset | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Insert Image',
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Images',
+          extensions: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'],
+        },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return assetOps.saveDroppedImage(markdownPath, result.filePaths[0]!);
+  },
+);

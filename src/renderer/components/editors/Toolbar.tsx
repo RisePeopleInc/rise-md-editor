@@ -56,7 +56,16 @@ function Divider() {
   return <span aria-hidden className="mx-1 h-4 w-px bg-stroke" />;
 }
 
-export function Toolbar() {
+interface ToolbarProps {
+  /**
+   * Resolves the active tab's saved markdown path, prompting Save As
+   * for untitled tabs. Used by the image button — assets/ has no
+   * anchor without a saved file location.
+   */
+  requireSavedPath?: () => Promise<string | null>;
+}
+
+export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
   const [loading, get] = useInstance();
   const [activeMarks, setActiveMarks] = useState<Record<MarkName, boolean>>({
     strong: false,
@@ -167,13 +176,17 @@ export function Toolbar() {
     run(toggleLinkCommand, { href: url });
   }, [loading, run]);
 
-  const handleImage = useCallback(() => {
+  const handleImage = useCallback(async () => {
     if (loading) return;
-    const url = window.prompt('Image URL');
-    if (!url) return;
-    const alt = window.prompt('Alt text (optional)') ?? '';
-    run(insertImageCommand, { src: url, alt });
-  }, [loading, run]);
+    if (!requireSavedPath) return;
+    const markdownPath = await requireSavedPath();
+    if (!markdownPath) return; // User cancelled the Save-As prompt.
+    const asset = await window.api.assets.pickAndImport(markdownPath);
+    if (!asset) return; // User cancelled the file picker.
+    const stem = asset.relPath.split('/').pop() ?? '';
+    const alt = stem.replace(/\.[^.]+$/, '');
+    run(insertImageCommand, { src: asset.relPath, alt });
+  }, [loading, run, requireSavedPath]);
 
   const handleTable = useCallback(() => {
     run(insertTableCommand, { row: 3, col: 3 });

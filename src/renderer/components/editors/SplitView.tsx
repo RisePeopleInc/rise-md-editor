@@ -13,7 +13,7 @@ import {
   type CursorPosition,
   type SourceEditorHandle,
 } from './SourceEditor';
-import type { ImageInsertion } from '../../state/imageInsert';
+import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 
 interface SplitViewProps {
   sourceRef?: Ref<SourceEditorHandle>;
@@ -27,7 +27,7 @@ interface SplitViewProps {
   /** Image-drop handler forwarded to the source pane. */
   onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
   /** Image-paste handler forwarded to the source pane. */
-  onImagePaste?: (item: DataTransferItem) => Promise<ImageInsertion | null>;
+  onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
 }
 
 const MIN_PERCENT = 20;
