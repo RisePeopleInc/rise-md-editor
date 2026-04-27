@@ -90,18 +90,38 @@ mac:
   # signing entirely — useful for CI smoke builds without secrets.
   # Without that env var, the build will fail with "no identity found".
   #
-  # For full "open without warning" UX on macOS 10.15+ the signed
-  # .app also needs to be notarized; that's tracked separately
-  # (notarize: false here, requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
-  # + APPLE_TEAM_ID env vars to flip on).
-  #
   # https://www.electron.build/code-signing
   identity: 'Rise People Inc (TJFLUA3UJ3)'
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  notarize: false
+  # Notarization.
+  #
+  # Without notarization, signed-but-unnotarized apps still trigger
+  # Gatekeeper's "Apple could not verify rAIse is free of malware"
+  # dialog on first launch (Catalina+). With notarization, Apple's
+  # notary service scans the bundle, returns a ticket, and
+  # electron-builder staples it to the DMG so the dialog becomes
+  # "macOS verified that this app is free of malware" with an Open
+  # button — clean install UX.
+  #
+  # Required env vars on the build host:
+  #   APPLE_ID                   — Apple ID enrolled in the Developer Program
+  #                                (techpurchasing@risepeople.com for Rise)
+  #   APPLE_APP_SPECIFIC_PASSWORD — generated at appleid.apple.com → Sign-In
+  #                                and Security → App-Specific Passwords.
+  #                                Stored in 1Password — NEVER in dotfiles.
+  #   APPLE_TEAM_ID              — TJFLUA3UJ3 (matches the signing cert)
+  #
+  # If any are missing electron-builder will warn and skip notarization
+  # (build still produces a signed-but-unnotarized DMG — handy for
+  # local smoke tests, but those builds will trigger the Gatekeeper
+  # malware dialog on end-user machines).
+  #
+  # https://www.electron.build/configuration/mac#MacConfiguration-notarize
+  notarize:
+    teamId: TJFLUA3UJ3
 
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}

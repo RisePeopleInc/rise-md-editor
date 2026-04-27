@@ -6,7 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-_No changes since 0.1.1._
+_No changes since 0.1.2._
+
+## [0.1.2] — 2026-04-27
+
+Follow-up to v0.1.1 — finishes the macOS install UX by enabling notarization. No feature changes.
+
+### Changed
+
+- **macOS builds are now notarized** by Apple's notary service in addition to being code-signed. ([RAISE-24](https://risepeople.atlassian.net/browse/RAISE-24))
+  - First launch on a clean Mac now shows _"macOS verified that this app is free of malware"_ with an **Open** button, instead of v0.1.1's misleading _"could not verify ... may harm your Mac"_ dialog with only Move-to-Trash. (Signing alone wasn't enough on macOS Catalina+ — Gatekeeper specifically checks for a stapled notarization ticket.)
+  - The DMG container is now signed too. v0.1.1 shipped with an unsigned DMG containing a signed `.app`; both layers are signed in v0.1.2.
+  - Build hosts now need `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` env vars to produce a notarized build. Without them, builds still succeed but skip notarization (useful for local smoke tests).
+
+### Notes
+
+- Existing v0.1.1 installs will see the auto-update banner within ~5 seconds of next launch and can install v0.1.2 from there. The publisher identity is unchanged so Squirrel auto-update accepts the upgrade.
 
 ## [0.1.1] — 2026-04-27
 
@@ -48,6 +63,7 @@ Initial dogfood-ready release. Eleven build stories (RAISE-2 through RAISE-12) s
 - Fonts (Source Serif Pro + Open Sans) load from Google Fonts at app launch. Bundling the woff2 files locally is tracked under [RAISE-16](https://risepeople.atlassian.net/browse/RAISE-16).
 - No automated tests yet. Manual test plans live in each PR's description; vitest setup is tracked under [RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14).
 
-[Unreleased]: https://github.com/RisePeopleInc/raise-editor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/RisePeopleInc/raise-editor/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/RisePeopleInc/raise-editor/releases/tag/v0.1.2
 [0.1.1]: https://github.com/RisePeopleInc/raise-editor/releases/tag/v0.1.1
 [0.1.0]: https://github.com/RisePeopleInc/raise-editor/releases/tag/v0.1.0
