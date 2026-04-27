@@ -77,11 +77,13 @@ mac:
       arch: universal
   # Code signing.
   #
-  # `identity` is the Common Name of the Developer ID Application
-  # certificate. On a build host that has this cert + the matching
-  # private key in its Keychain (see README "Code signing setup"),
-  # electron-builder finds the identity by name and signs the .app
-  # bundle.
+  # `identity` here is the human-readable name portion of the
+  # Developer ID Application certificate's Common Name. electron-builder
+  # automatically prepends "Developer ID Application:" — including the
+  # prefix here causes the build to fail with "Please remove prefix...".
+  # On a build host that has this cert + the matching private key in
+  # its Keychain (see README "Code signing setup"), electron-builder
+  # finds the identity by name and signs the .app bundle.
   #
   # If the cert isn't in the Keychain, set
   # `CSC_IDENTITY_AUTO_DISCOVERY=false` in the environment to skip
@@ -94,7 +96,7 @@ mac:
   # + APPLE_TEAM_ID env vars to flip on).
   #
   # https://www.electron.build/code-signing
-  identity: 'Developer ID Application: Rise People Inc (TJFLUA3UJ3)'
+  identity: 'Rise People Inc (TJFLUA3UJ3)'
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
