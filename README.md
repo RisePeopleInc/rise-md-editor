@@ -82,15 +82,15 @@ Same shape — set `CSC_LINK` / `CSC_KEY_PASSWORD` with a code-signing cert (`.p
 
 ### App icon
 
-`build/icon.png` is the placeholder — Gruvbox blue rounded square with "rAIse" in white serif. The design source is `build/icon.svg`. To regenerate the PNG from the SVG:
+The Rise mark (orange double-ring) on a white rounded square. Source is `build/icon.svg`; the rendered bitmap at `build/icon.png` is what electron-builder reads.
+
+To regenerate the PNG after editing the SVG:
 
 ```sh
-npx --yes @resvg/resvg-js-cli build/icon.svg build/icon.png -w 1024
+npx --yes @resvg/resvg-js-cli --fit-width 1024 build/icon.svg build/icon.png
 ```
 
-Any tool that produces 1024×1024 PNG works. Electron-builder generates the platform-specific `.icns` / `.ico` from the PNG at build time — no manual export needed.
-
-The real Rise mark replaces the placeholder under [RAISE-15](https://risepeople.atlassian.net/browse/RAISE-15) — drop the new artwork into `build/icon.png` (and optionally `icon.icns` / `icon.ico` for hand-tuned low-res variants). No path changes required.
+Any tool that produces a 1024×1024 PNG works. Electron-builder generates the platform-specific `.icns` / `.ico` from `icon.png` at build time — no manual export needed. To swap the design entirely, replace `icon.svg` and re-run the command above.
 
 ## Auto-update
 

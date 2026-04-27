@@ -28,7 +28,7 @@ Initial dogfood-ready release. Eleven build stories (RAISE-2 through RAISE-12) s
 
 ### Notes
 
-- The app icon in this release is a placeholder (Gruvbox-blue rounded square with "rAIse" in white). Real Rise mark lands under [RAISE-15](https://risepeople.atlassian.net/browse/RAISE-15).
+- The app icon uses the canonical Rise mark (orange double-ring from `@risepeopleinc/rcl`'s asset bundle) on a white rounded-square background. [RAISE-15](https://risepeople.atlassian.net/browse/RAISE-15) — the original icon-assets ticket — can close as a duplicate.
 - macOS builds in this release are unsigned — fine for internal dogfooding, not for external distribution. See `README.md` for the code-signing setup.
 - Fonts (Source Serif Pro + Open Sans) load from Google Fonts at app launch. Bundling the woff2 files locally is tracked under [RAISE-16](https://risepeople.atlassian.net/browse/RAISE-16).
 - No automated tests yet. Manual test plans live in each PR's description; vitest setup is tracked under [RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14).

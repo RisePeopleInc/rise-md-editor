@@ -54,16 +54,12 @@ fileAssociations:
     role: Editor
 
 # ---------------------------------------------------------------------------
-# Icons live in build/. The current artwork is a placeholder per
-# RAISE-12; see build/icon.svg for the design intent. Electron-builder
-# generates platform-specific formats (.icns, .ico) from build/icon.png
-# automatically — only the .png needs to be present.
-#
-# When the real Rise mark arrives (RAISE-15), drop:
-#   - build/icon.png  (1024×1024 master, replaces the placeholder)
-#   - optionally build/icon.icns and build/icon.ico for hand-tuned
-#     low-resolution variants
-# No path changes required here.
+# Icons live in build/. icon.svg is the design source (Rise mark on a
+# white rounded square); icon.png is the 1024×1024 rendered bitmap that
+# electron-builder reads to auto-generate .icns / .ico at build time.
+# To update the design, edit icon.svg then re-run the resvg-js CLI
+# documented in README.md — only icon.png needs to be on disk for the
+# build to consume.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
