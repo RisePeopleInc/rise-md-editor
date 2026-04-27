@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, nativeImage, shell } from 'electron';
 import path from 'node:path';
 
 export type MenuAction =
@@ -377,19 +377,28 @@ export function buildMenu(deps: MenuDeps): Menu {
         {
           label: 'About',
           click: () => {
-            if (isMac) {
+            // In packaged macOS builds, the native About panel reads
+            // its icon + identity from the .app's Info.plist + .icns
+            // — that's the right look. In dev (unpackaged) the .app
+            // is Electron's, so showAboutPanel would show Electron's
+            // logo. Fall back to a custom dialog with our PNG so
+            // dev still looks correct.
+            if (isMac && app.isPackaged) {
               app.showAboutPanel();
-            } else {
-              const win = deps.getWindow();
-              const opts = {
-                type: 'info' as const,
-                title: 'About rAIse',
-                message: 'rAIse',
-                detail: `Version ${app.getVersion()}\n\nAn AI-powered editor.`,
-              };
-              if (win) dialog.showMessageBox(win, opts);
-              else dialog.showMessageBox(opts);
+              send(deps, 'about');
+              return;
             }
+            const win = deps.getWindow();
+            const iconPath = path.join(__dirname, '../../build/icon.png');
+            const opts = {
+              type: 'info' as const,
+              title: 'About rAIse',
+              message: 'rAIse',
+              detail: `Version ${app.getVersion()}\n\nA markdown editor for Rise People.\n\n© ${new Date().getFullYear()} Rise People`,
+              icon: nativeImage.createFromPath(iconPath),
+            };
+            if (win) dialog.showMessageBox(win, opts);
+            else dialog.showMessageBox(opts);
             send(deps, 'about');
           },
         },

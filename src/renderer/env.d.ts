@@ -90,6 +90,27 @@ export interface SavedAsset {
   absPath: string;
 }
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateState {
+  status: UpdateStatus;
+  version?: string;
+  error?: string;
+}
+
+export interface RaiseUpdateApi {
+  getState: () => Promise<UpdateState>;
+  onStateChange: (callback: (state: UpdateState) => void) => () => void;
+  install: () => void;
+}
+
 export interface RaiseAssetsApi {
   saveDroppedImage: (markdownPath: string, sourcePath: string) => Promise<SavedAsset>;
   savePastedImage: (
@@ -170,6 +191,7 @@ export interface RaiseApi {
   templates: RaiseTemplatesApi;
   theme: RaiseThemeApi;
   assets: RaiseAssetsApi;
+  update: RaiseUpdateApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;

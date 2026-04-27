@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildMenu, type MenuDeps } from './menu';
 import * as assetOps from './assetOps';
+import { initAutoUpdater } from './autoUpdater';
 import * as fileOps from './fileOperations';
 import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
@@ -121,11 +122,25 @@ function drainPendingMenuActions(): void {
   }
 }
 
+// `app.setName` only takes effect for the menu / About panel labels;
+// the macOS menu bar's first-item label is taken from `app.name`,
+// which we also seed via `productName` in package.json so that
+// `app.getName()` returns 'rAIse' without needing setName.
+//
+// `process.title` covers the OS-level process name visible in
+// Activity Monitor / `ps`. Belt-and-suspenders so the menu bar in
+// dev shows 'rAIse' instead of 'Electron'.
 app.setName(APP_NAME);
+process.title = APP_NAME;
+// `iconPath` populates the artwork in the macOS About panel
+// (Apple → About rAIse). Without it the panel falls back to the
+// running .app bundle's icon — Electron's own logo in dev. Same
+// build/icon.png as the dock + window icons.
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: app.getVersion(),
   copyright: `© ${new Date().getFullYear()} Rise`,
+  iconPath: path.join(__dirname, '../../build/icon.png'),
 });
 
 function getWindow(): BrowserWindow | null {
@@ -387,6 +402,15 @@ if (!gotLock) {
     // form-control defaults) match from the first frame.
     themeStore.bootstrapNativeTheme();
 
+    // macOS dev-mode dock icon. In packaged builds the .icns baked
+    // into the .app bundle drives the dock; in dev the bundle is
+    // Electron's own (showing the default Electron mark). app.dock
+    // exists only on macOS; the !isPackaged gate avoids a wasted call
+    // in production where the path doesn't exist inside the asar.
+    if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+      app.dock.setIcon(path.join(__dirname, '../../build/icon.png'));
+    }
+
     // raise-asset:// → filesystem read, scoped to "allowed roots":
     // the open workspace folder + the dirname of the active tab's
     // saved file. Without that gate the protocol would happily serve
@@ -419,6 +443,10 @@ if (!gotLock) {
 
     rebuildMenu();
     createWindow();
+
+    // RAISE-12: kick off the auto-update check. Safe in dev — the
+    // module short-circuits when `app.isPackaged` is false.
+    initAutoUpdater(() => mainWindow);
 
     // Win/Linux file-association launches deliver the path through argv
     // (macOS uses app.on('open-file') instead — handled below).

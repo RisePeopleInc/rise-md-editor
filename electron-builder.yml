@@ -1,22 +1,47 @@
-appId: com.rise.raise-editor
+# RAISE-12: production build configuration.
+#
+# Most cross-platform metadata is consolidated here so the platform
+# targets only differ where they have to (icons, file associations,
+# code-signing setup). Every change here should keep `npm run dev`
+# working — it doesn't read this file but does share `out/` with the
+# electron-builder pipeline.
+
+appId: com.risepeople.raise-editor
 productName: rAIse
+copyright: © 2026 Rise People
+
 directories:
   buildResources: build
-  output: release
+  output: dist
+
 files:
   - out/**/*
   - package.json
   - '!**/*.{md,map}'
+
 asar: true
 
-# We're not wired up to an autoupdate channel yet. Without this, recent
-# electron-builder versions throw `Cannot read properties of null (reading
-# 'channel')` while trying to write update metadata after the build.
-publish: null
+# ---------------------------------------------------------------------------
+# Auto-update via GitHub Releases.
+#
+# `electron-updater` reads `publish` to know where to look for new
+# release artifacts. The `latest-{platform}.yml` files that
+# electron-builder generates alongside each installer are uploaded to
+# the release; the updater fetches them on launch and compares versions.
+#
+# Public repo means no auth required for downloads. For private repos
+# the updater needs a GH_TOKEN at runtime.
+# ---------------------------------------------------------------------------
+publish:
+  provider: github
+  owner: RisePeopleInc
+  repo: raise-editor
 
-# Tell the OS that rAIse owns these extensions: enables drag-onto-dock,
-# Finder "Open With", and double-click-to-launch. Files arrive via
-# app.on('open-file') on macOS and process.argv on Windows / Linux.
+# ---------------------------------------------------------------------------
+# File associations — registers rAIse as a handler for .md / .markdown /
+# .txt on all platforms. Drag onto the dock, right-click → Open With,
+# and double-click-from-Finder all flow through.
+# ---------------------------------------------------------------------------
 fileAssociations:
   - ext: md
     name: Markdown Document
@@ -28,23 +53,89 @@ fileAssociations:
     name: Text Document
     role: Editor
 
-# Icons live in build/. Replace build/icon.png (and add build/icon.icns,
-# build/icon.ico if you want platform-specific masters) when the real
-# artwork arrives — the paths below are the only thing pointing at them.
+# ---------------------------------------------------------------------------
+# Icons live in build/. icon.svg is the design source (Rise mark on a
+# white rounded square); icon.png is the 1024×1024 rendered bitmap that
+# electron-builder reads to auto-generate .icns / .ico at build time.
+# To update the design, edit icon.svg then re-run the resvg-js CLI
+# documented in README.md — only icon.png needs to be on disk for the
+# build to consume.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------
 mac:
   icon: build/icon.png
-  category: public.app-category.developer-tools
+  category: public.app-category.productivity
+  # Universal binary — runs natively on both Intel and Apple Silicon
+  # from a single .dmg. Larger file, but only one artifact to ship.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+  # Code signing.
+  #
+  # `identity: null` disables signing for placeholder / CI-without-secrets
+  # builds. The resulting .dmg is unsigned and Gatekeeper-quarantined on
+  # download — fine for internal dogfooding, NOT acceptable for public
+  # release.
+  #
+  # To enable real signing, the build host needs:
+  #   CSC_LINK                       — base64 of the .p12 cert OR a path
+  #   CSC_KEY_PASSWORD               — the cert's export password
+  # And for notarization (required for downloads on macOS 10.15+):
+  #   APPLE_ID                       — apple.com email of the Developer ID owner
+  #   APPLE_APP_SPECIFIC_PASSWORD    — generated at appleid.apple.com
+  #   APPLE_TEAM_ID                  — 10-char team ID from developer.apple.com
+  # Then change `identity` to the cert's Common Name (e.g.
+  # "Developer ID Application: Rise People (XXXXXXXXXX)").
+  # https://www.electron.build/code-signing
+  identity: null
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# ---------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------
 win:
   icon: build/icon.png
   target:
-    - nsis
-    - zip
+    - target: nsis
+      arch: x64
+    - target: zip
+      arch: x64
+  # Code signing.
+  #
+  # Set CSC_LINK / CSC_KEY_PASSWORD with a code-signing cert (.pfx).
+  # SmartScreen will quarantine unsigned installers on first download
+  # for new users.
+  #   https://www.electron.build/code-signing#windows
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+# ---------------------------------------------------------------------------
+# Linux
+# ---------------------------------------------------------------------------
 linux:
   icon: build/icon.png
-  category: Development
+  category: Office
   target:
-    - AppImage
-    - deb
+    - target: AppImage
+      arch: x64
+    - target: deb
+      arch: x64
+
+appImage:
+  artifactName: ${productName}-${version}.${ext}

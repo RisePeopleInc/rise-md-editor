@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  rAIse app icon. Uses the Rise mark from
+  @risepeopleinc/rcl/dist/collection/assets/platform/rise-logo.svg
+  the canonical orange (#FFA31D) double ring logo. Scaled from the
+  source's 24x24 viewBox to fill the centre of a 1024x1024 icon
+  with a white rounded square background.
+
+  Maths: 24 x 32 = 768 (75 percent of 1024).
+  Centring offset = (1024 minus 768) divided by 2 = 128.
+  The 180 radius corners match macOS squircle convention.
+
+  To regenerate build/icon.png from this SVG (see README — the
+  resvg-js CLI takes a fit-width flag).
+
+  Electron-builder generates the platform-specific .icns / .ico from
+  the resulting icon.png at build time, no manual export needed.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1024 1024"
+     width="1024" height="1024">
+  <rect x="0" y="0" width="1024" height="1024" rx="180" ry="180" fill="#ffffff" />
+  <g transform="translate(128, 128) scale(32)">
+    <path fill-rule="evenodd" clip-rule="evenodd"
+          d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20Z"
+          fill="#FFA31D" />
+    <path opacity="0.5" fill-rule="evenodd" clip-rule="evenodd"
+          d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24ZM12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17Z"
+          fill="#FFA31D" />
+  </g>
+</svg>
