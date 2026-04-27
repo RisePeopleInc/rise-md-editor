@@ -197,22 +197,40 @@ function MilkdownBody({
           nodeViews: {
             ...prev.nodeViews,
             image: (node) => {
-              const src = (node.attrs as { src?: string }).src ?? '';
-              const alt = (node.attrs as { alt?: string }).alt ?? '';
-              const title = (node.attrs as { title?: string | null }).title ?? '';
               const dom = document.createElement('img');
-              // Stash the original (relative) src so the click-tooltip's
-              // "View full size" can resolve via main's IPC. Without
-              // this we'd lose the markdown-relative path.
-              dom.setAttribute('data-asset-src', src);
-              dom.src = resolveAssetUrl(markdownPathRef.current, src);
-              dom.alt = alt;
-              if (title) dom.title = title;
               // Reasonable inline rendering — matches the WYSIWYG's
               // 720px content width without overflowing.
               dom.style.maxWidth = '100%';
               dom.style.height = 'auto';
-              return { dom };
+
+              const applyAttrs = (n: typeof node): void => {
+                const src = (n.attrs as { src?: string }).src ?? '';
+                const alt = (n.attrs as { alt?: string }).alt ?? '';
+                const title = (n.attrs as { title?: string | null }).title ?? '';
+                // Stash the original (relative) src so the click-tooltip's
+                // "View full size" can resolve via main's IPC. Without
+                // this we'd lose the markdown-relative path.
+                dom.setAttribute('data-asset-src', src);
+                dom.src = resolveAssetUrl(markdownPathRef.current, src);
+                dom.alt = alt;
+                if (title) dom.title = title;
+                else dom.removeAttribute('title');
+              };
+              applyAttrs(node);
+
+              return {
+                dom,
+                // ProseMirror calls update on attribute changes (e.g.
+                // undo/redo of an alt-text edit). Returning true tells
+                // ProseMirror we handled it and the existing DOM can be
+                // reused — without this it'd destroy + recreate the
+                // NodeView per change.
+                update(newNode) {
+                  if (newNode.type.name !== 'image') return false;
+                  applyAttrs(newNode);
+                  return true;
+                },
+              };
             },
           },
           handleDrop(view, event) {

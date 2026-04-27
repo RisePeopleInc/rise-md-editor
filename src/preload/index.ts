@@ -139,8 +139,6 @@ const assets = {
     mimeType: string,
   ): Promise<SavedAsset> =>
     ipcRenderer.invoke('assets:save-pasted-image', { markdownPath, bytes, mimeType }),
-  openInSystem: (absPath: string): Promise<string> =>
-    ipcRenderer.invoke('assets:open-in-system', absPath),
   openRelative: (markdownPath: string, relPath: string): Promise<string> =>
     ipcRenderer.invoke('assets:open-relative', { markdownPath, relPath }),
   pickAndImport: (markdownPath: string): Promise<SavedAsset | null> =>

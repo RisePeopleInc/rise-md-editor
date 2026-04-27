@@ -59,6 +59,38 @@ function resetFileState(): void {
   fileState.dirtyCount = 0;
 }
 
+/**
+ * Allowed roots for raise-asset:// reads + assets:open-relative
+ * resolutions. The renderer renders images from:
+ *   - The currently-open workspace folder (Project Mode)
+ *   - The active tab's saved-file directory
+ *
+ * Non-active tabs aren't mounted in the editor, so we don't need to
+ * track their paths here — when the user switches tabs, the new
+ * active path lands via `pushFileMeta` and the set updates.
+ */
+function getAllowedRoots(): string[] {
+  const roots: string[] = [];
+  const workspace = lastFolderStore.getLastFolder();
+  if (workspace) roots.push(path.resolve(workspace));
+  if (fileState.path) roots.push(path.resolve(path.dirname(fileState.path)));
+  return roots;
+}
+
+function isPathUnderAllowedRoot(absPath: string): boolean {
+  const resolved = path.resolve(absPath);
+  for (const root of getAllowedRoots()) {
+    const rel = path.relative(root, resolved);
+    // `path.relative` returns '' for equal paths and a string starting
+    // with '..' (or an absolute path on a different drive) when the
+    // target escapes the root.
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Menu actions are queued until the renderer signals it has subscribed to
 // menu:action — that lets us safely re-open a closed window from the menu
 // (e.g. macOS File→New after Cmd+W) and replay the click once React mounts.
@@ -355,16 +387,26 @@ if (!gotLock) {
     // form-control defaults) match from the first frame.
     themeStore.bootstrapNativeTheme();
 
-    // raise-asset:// → filesystem read. URL pathname is the absolute
-    // file path (URL-encoded); on Windows the URL form is
-    // `raise-asset:///C:/Users/.../foo.png`, so we strip the leading
-    // slash if the next character looks like a drive letter.
+    // raise-asset:// → filesystem read, scoped to "allowed roots":
+    // the open workspace folder + the dirname of the active tab's
+    // saved file. Without that gate the protocol would happily serve
+    // any absolute fs path the renderer asked for — fine in practice
+    // (no HTML in markdown, sandboxed renderer) but a one-line
+    // hardening that backstops any future XSS.
+    //
+    // URL pathname is the absolute file path (URL-encoded); on
+    // Windows the URL form is `raise-asset:///C:/Users/.../foo.png`,
+    // so we strip the leading slash if the next character looks like
+    // a drive letter.
     protocol.handle('raise-asset', async (request) => {
       try {
         const url = new URL(request.url);
         let fsPath = decodeURIComponent(url.pathname);
         if (/^\/[a-zA-Z]:/.test(fsPath)) {
           fsPath = fsPath.slice(1);
+        }
+        if (!isPathUnderAllowedRoot(fsPath)) {
+          return new Response('Forbidden', { status: 403 });
         }
         return await net.fetch(pathToFileURL(fsPath).toString());
       } catch (err) {
@@ -901,24 +943,29 @@ ipcMain.handle(
     assetOps.savePastedImage(payload.markdownPath, payload.bytes, payload.mimeType),
 );
 
-// Open an image in the OS-default application (Preview on macOS, Photos
-// on Windows, default image viewer on Linux). Returns an empty string on
-// success or the OS error message on failure.
-ipcMain.handle('assets:open-in-system', async (_, absPath: string): Promise<string> => {
-  return shell.openPath(absPath);
-});
-
 // Resolve a markdown-relative image path against its containing file
-// and open it. The renderer doesn't have node:path, and joining
-// platform-aware paths in JS is just begging for slash-vs-backslash
-// bugs on Windows.
+// and open it in the OS-default app (Preview on macOS, Photos on
+// Windows, default image viewer on Linux). The renderer doesn't have
+// node:path, and joining platform-aware paths in JS is just begging
+// for slash-vs-backslash bugs on Windows.
+//
+// Path-traversal guard: a malicious markdown file could have
+// `![pwn](../../bin/sh)`. `path.resolve` follows the `..`, and
+// `shell.openPath` would launch whatever the OS associated with the
+// resolved file. Rejecting any relPath that escapes the markdown
+// file's dirname keeps the click-to-open flow safe.
 ipcMain.handle(
   'assets:open-relative',
   async (
     _,
     payload: { markdownPath: string; relPath: string },
   ): Promise<string> => {
-    const abs = path.resolve(path.dirname(payload.markdownPath), payload.relPath);
+    const baseDir = path.dirname(payload.markdownPath);
+    const abs = path.resolve(baseDir, payload.relPath);
+    const rel = path.relative(baseDir, abs);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return 'Refused: path escapes the markdown file directory';
+    }
     return shell.openPath(abs);
   },
 );

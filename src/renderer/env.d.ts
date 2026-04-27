@@ -97,7 +97,6 @@ export interface RaiseAssetsApi {
     bytes: ArrayBuffer,
     mimeType: string,
   ) => Promise<SavedAsset>;
-  openInSystem: (absPath: string) => Promise<string>;
   openRelative: (markdownPath: string, relPath: string) => Promise<string>;
   /** Show a native image-file picker, copy the choice into assets/. */
   pickAndImport: (markdownPath: string) => Promise<SavedAsset | null>;

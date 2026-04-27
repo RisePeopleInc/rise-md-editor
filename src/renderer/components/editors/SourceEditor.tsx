@@ -1,7 +1,6 @@
 import { useImperativeHandle, useRef, type Ref } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
-import * as monacoNs from 'monaco-editor';
-import type { editor } from 'monaco-editor';
+import * as monaco from 'monaco-editor';
 import {
   firstImageItem,
   pickImageFiles,
@@ -76,7 +75,7 @@ interface SourceEditorProps {
 const MONO_STACK =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 
-const EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
+const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   wordWrap: 'on',
   minimap: { enabled: false },
   lineNumbers: 'on',
@@ -100,7 +99,7 @@ export function SourceEditor({
   onImageDrop,
   onImagePaste,
 }: SourceEditorProps) {
-  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   // Hold the latest callback so the editor's scroll listener (registered
   // once on mount) always invokes the current handler.
   const onScrollChangeRef = useRef(onScrollChange);
@@ -201,8 +200,8 @@ export function SourceEditor({
     // -----------------------------------------------------------------
     const dom = instance.getDomNode();
     if (dom) {
-      const insertAt = (position: monacoNs.Position, text: string): void => {
-        const range = new monacoNs.Range(
+      const insertAt = (position: monaco.Position, text: string): void => {
+        const range = new monaco.Range(
           position.lineNumber,
           position.column,
           position.lineNumber,
