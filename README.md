@@ -102,15 +102,34 @@ CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac
 
 The resulting DMG is unsigned and Gatekeeper-quarantined on download — fine for smoke testing, not for distribution.
 
-#### Notarization (still TODO)
+#### Notarization
 
-Signing alone gives Gatekeeper a *"verified developer"* dialog (one-time *"Open Anyway"* via System Settings → Privacy & Security on first launch). For a fully clean *"app opens without warning"* experience, the signed `.app` also needs to be notarized by Apple. That requires:
+On macOS Catalina (10.15) and later, code signing alone is **not enough** — Gatekeeper specifically checks for an Apple-issued *notarization ticket* and shows the same `"could not verify rAIse is free of malware"` dialog for both unsigned and signed-but-unnotarized apps. Notarization uploads the signed bundle to Apple's notary service; Apple scans it for malware and returns a ticket which `electron-builder` staples to the DMG. After that, first launch on a clean Mac shows `"macOS verified that this app is free of malware"` with a real **Open** button.
 
-- `APPLE_ID` — Apple ID email of the cert owner
-- `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords*
-- `APPLE_TEAM_ID` — `TJFLUA3UJ3` (visible in the Apple Developer dashboard or the cert's CN)
+Three env vars need to be present in the build host's environment:
 
-Set the three vars and flip `mac.notarize` to `true` in `electron-builder.yml`. Tracked as a follow-up.
+```sh
+export APPLE_ID='techpurchasing@risepeople.com'
+export APPLE_APP_SPECIFIC_PASSWORD='xxxx-xxxx-xxxx-xxxx'
+export APPLE_TEAM_ID='TJFLUA3UJ3'
+npm run build:mac
+```
+
+- `APPLE_ID` — the Apple ID enrolled in the Apple Developer Program (`techpurchasing@risepeople.com` for Rise).
+- `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords* → "+", label e.g. `raise-editor-notarization`. The 16-char password is shown **once** at creation; record it in 1Password immediately. **Don't** put it in `~/.zshrc` or any committed file — set it inline for the build, or source it from a password manager / `op read` / `direnv` envrc that's `.gitignore`d.
+- `APPLE_TEAM_ID` — `TJFLUA3UJ3` (Rise's developer team), already declared in `electron-builder.yml`'s `mac.notarize.teamId`. The env var is what Apple's notary CLI uses to authenticate the upload.
+
+`mac.notarize.teamId` is set in `electron-builder.yml`. If any of the three env vars are missing, electron-builder logs a warning and skips notarization; the build still produces a signed-but-unnotarized DMG, which is useful for local smoke tests but **will trigger the Gatekeeper malware dialog on end-user machines**. Don't ship those.
+
+Notarization adds 5–15 minutes to the build (Apple's scan time); `electron-builder` polls and staples automatically. To verify after the build:
+
+```sh
+spctl --assess --type execute --verbose=4 dist/mac-universal/rAIse.app
+# Expect: "accepted" with "source=Notarized Developer ID"
+
+xcrun stapler validate dist/rAIse-*-universal.dmg
+# Expect: "The validate action worked!"
+```
 
 ### Code signing setup (Windows)
 
@@ -149,6 +168,17 @@ The Developer ID cert + private key give anyone who has them the ability to publ
 
 - One Developer ID Application cert covers every app under that team. Don't generate a per-app cert; it's redundant and multiplies the rotation surface.
 - Don't share the `.p12` with people outside the dev team. Each new release operator should either share access to a single CI's secret store or be added to the Apple Developer team and generate their own CSR + cert from the same team.
+
+**Notarization credentials (separate from the signing cert)**
+
+The notarization flow uses an Apple ID + app-specific password — a separate secret from the signing cert's `.p12`. They're both required to ship a clean macOS build, and they have independent lifecycles.
+
+- The **app-specific password** is created at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords*. Apple shows it once; if you lose it you generate a new one and revoke the old.
+- Store it in 1Password under an entry like *"rAIse — Apple notary app-specific password"* with the Apple ID email and Team ID alongside. **Never** in dotfiles, **never** committed.
+- Up to ten app-specific passwords per Apple ID. Revoke the entry whenever someone with access to it leaves the team.
+- Rotation: no fixed expiry on app-specific passwords, but plan to rotate annually or whenever the password manager flags it.
+- For CI: store as repo secrets (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) and inject at build time. Don't write them to disk on the runner.
+- The Apple ID itself (`techpurchasing@risepeople.com`) needs 2FA enabled — Apple requires it for app-specific password creation. The 2FA device is the bottleneck for generating new passwords; document who has it.
 
 ### App icon
 
