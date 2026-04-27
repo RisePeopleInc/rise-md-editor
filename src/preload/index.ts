@@ -86,6 +86,39 @@ export type TemplateCreateResult =
   | { status: 'exists'; path: string }
   | { status: 'untitled'; content: string };
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateState {
+  status: UpdateStatus;
+  version?: string;
+  error?: string;
+}
+
+const update = {
+  /** Read main's most recent UpdateState — used by the hook on first mount. */
+  getState: (): Promise<UpdateState> => ipcRenderer.invoke('update:get-state'),
+  /** Subscribe to state transitions pushed from main. */
+  onStateChange: (callback: (state: UpdateState) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, state: UpdateState): void =>
+      callback(state);
+    ipcRenderer.on('update:state', handler);
+    return () => {
+      ipcRenderer.off('update:state', handler);
+    };
+  },
+  /** User clicked "Restart to update" — main calls quitAndInstall. */
+  install: (): void => {
+    ipcRenderer.send('update:install');
+  },
+};
+
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 export type EditorContrast = 'hard' | 'medium' | 'soft';
@@ -254,6 +287,7 @@ const api = {
   templates,
   theme,
   assets,
+  update,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

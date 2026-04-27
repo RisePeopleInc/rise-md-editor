@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildMenu, type MenuDeps } from './menu';
 import * as assetOps from './assetOps';
+import { initAutoUpdater } from './autoUpdater';
 import * as fileOps from './fileOperations';
 import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
@@ -419,6 +420,10 @@ if (!gotLock) {
 
     rebuildMenu();
     createWindow();
+
+    // RAISE-12: kick off the auto-update check. Safe in dev — the
+    // module short-circuits when `app.isPackaged` is false.
+    initAutoUpdater(() => mainWindow);
 
     // Win/Linux file-association launches deliver the path through argv
     // (macOS uses app.on('open-file') instead — handled below).

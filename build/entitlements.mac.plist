@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RAISE-12: macOS hardened-runtime entitlements.
+
+  hardenedRuntime: true (in electron-builder.yml) opts the app into the
+  Hardened Runtime, which is required for notarization. Hardened Runtime
+  blocks several capabilities by default; we re-enable the ones Electron
+  needs:
+
+    com.apple.security.cs.allow-jit            — Chromium V8 JIT
+    com.apple.security.cs.allow-unsigned-…     — load Electron's helper
+                                                 frameworks (signed by us
+                                                 but with Electron's bundle id)
+    com.apple.security.cs.disable-library-…    — load native modules at
+                                                 runtime (chokidar, etc.)
+
+  When real code-signing identity is configured, this file is the one
+  the .app's resource bundle ships against. No code references it
+  directly — electron-builder injects via codesign.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- File-association handling — required for "Open With" + drag-onto-dock
+       to invoke the app with a path argument. -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

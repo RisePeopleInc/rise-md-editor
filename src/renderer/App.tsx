@@ -4,6 +4,7 @@ import { StatusBar } from './components/StatusBar';
 import { TabBar } from './components/TabBar';
 import { WorkspaceBanner } from './components/WorkspaceBanner';
 import { TemplateHintBanner } from './components/TemplateHintBanner';
+import { UpdateBanner } from './components/UpdateBanner';
 import { EditorContainer } from './components/editors/EditorContainer';
 import {
   type CursorPosition,
@@ -15,6 +16,7 @@ import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
 import { useSidebarState, isOpenable } from './state/sidebarState';
 import { useThemeState } from './state/themeState';
+import { useUpdateState } from './state/updateState';
 import {
   processImageDrop,
   processImagePaste,
@@ -52,6 +54,12 @@ function AppContent() {
   const file = useFileState();
   const sidebar = useSidebarState();
   const theme = useThemeState();
+  const update = useUpdateState();
+  // Per-session "I clicked Later" flag for the update banner. Doesn't
+  // persist across launches — if the user dismisses now, the banner
+  // re-appears next launch (the update is still ready to install on
+  // disk, autoUpdater re-fires `update-downloaded` from cache).
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
@@ -732,6 +740,14 @@ function AppContent() {
         </Sidebar>
       )}
       <div className="flex min-h-0 flex-1 flex-col">
+        {!updateBannerDismissed && (
+          <UpdateBanner
+            status={update.status}
+            version={update.version}
+            onInstall={update.install}
+            onDismiss={() => setUpdateBannerDismissed(true)}
+          />
+        )}
         {showMissingClaudeBanner && (
           <WorkspaceBanner
             message="This workspace doesn't have a CLAUDE.md file. Would you like to create one from a template?"

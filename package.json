@@ -1,19 +1,30 @@
 {
   "name": "raise-editor",
   "version": "0.1.0",
-  "description": "rAIse — an AI-powered editor",
+  "description": "rAIse — a markdown editor for Rise People",
+  "homepage": "https://github.com/RisePeopleInc/raise-editor",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RisePeopleInc/raise-editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RisePeopleInc/raise-editor/issues"
+  },
+  "license": "UNLICENSED",
   "private": true,
   "main": "out/main/index.js",
-  "author": "Rise",
+  "author": "Rise People",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:win": "electron-vite build && electron-builder --win",
     "build:linux": "electron-vite build && electron-builder --linux",
+    "build:all": "electron-vite build && electron-builder --mac --win --linux",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
@@ -32,6 +43,7 @@
     "@monaco-editor/react": "^4.7.0",
     "chokidar": "^3.6.0",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3",
     "markdown-it": "^14.1.1",
     "monaco-editor": "^0.55.1",
     "react": "^19.0.0",
