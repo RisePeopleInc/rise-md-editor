@@ -6,7 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-_No changes since 0.1.0._
+_No changes since 0.1.1._
+
+## [0.1.1] — 2026-04-27
+
+Tiny follow-up to v0.1.0 — code signing for macOS only, no feature changes.
+
+### Changed
+
+- **macOS builds are now code-signed** with the Rise People Inc Developer ID Application certificate. ([RAISE-23](https://risepeople.atlassian.net/browse/RAISE-23))
+  - On first launch users still see Gatekeeper's "verified developer" dialog (one-time *"Open Anyway"* via System Settings → Privacy & Security) because the build isn't notarized yet — but the dialog now says *"Apple verified Rise People Inc"* instead of *"could not verify rAIse"*. Notarization is tracked as a follow-up.
+  - `electron-builder.yml`'s `mac.identity` is now hardcoded; build hosts without the cert in their Keychain need `CSC_IDENTITY_AUTO_DISCOVERY=false` in the environment to skip signing for unsigned smoke builds.
+
+### Notes
+
+- Existing v0.1.0 installs will see the auto-update banner within ~5 seconds of next launch and can install v0.1.1 from there.
+- Windows + Linux artifacts unchanged — still need to be built on their respective hosts and uploaded to the same release.
 
 ## [0.1.0] — 2026-04-27
 
@@ -33,5 +48,6 @@ Initial dogfood-ready release. Eleven build stories (RAISE-2 through RAISE-12) s
 - Fonts (Source Serif Pro + Open Sans) load from Google Fonts at app launch. Bundling the woff2 files locally is tracked under [RAISE-16](https://risepeople.atlassian.net/browse/RAISE-16).
 - No automated tests yet. Manual test plans live in each PR's description; vitest setup is tracked under [RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14).
 
-[Unreleased]: https://github.com/RisePeopleInc/raise-editor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/RisePeopleInc/raise-editor/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/RisePeopleInc/raise-editor/releases/tag/v0.1.1
 [0.1.0]: https://github.com/RisePeopleInc/raise-editor/releases/tag/v0.1.0

@@ -8,3 +8,9 @@ dist
 .cache
 .env
 .env.local
+
+# Claude Code local state — per-machine working directories, scheduled
+# task locks, etc. If we ever start sharing settings (slash commands,
+# subagents) via .claude/settings.json or similar, those entries can be
+# tracked explicitly with `!.claude/settings.json`-style negations.
+.claude/
