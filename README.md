@@ -60,25 +60,95 @@ npm run build:linux   # → dist/rAIse-{version}.AppImage + .deb
 npm run build:all     # all three (only useful on a CI host with the toolchains)
 ```
 
-### macOS code signing
+### Code signing setup (macOS)
 
-Out of the box `npm run build:mac` produces an **unsigned** `.dmg` — fine for internal dogfooding, **not** acceptable for distribution outside the company (Gatekeeper will quarantine it on download). To enable signing + notarization:
+The current cert is `Developer ID Application: Rise People Inc (TJFLUA3UJ3)`, hardcoded in `electron-builder.yml`. To set up a build host that can produce a signed DMG:
 
-1. **Acquire a `Developer ID Application` certificate** from the Apple Developer portal.
-2. **Export it as `.p12`** with a password you control.
-3. **Set environment variables on the build host**:
-   - `CSC_LINK` — base64 of the `.p12`, or an absolute path to it
-   - `CSC_KEY_PASSWORD` — the export password
-   - `APPLE_ID` — Apple ID email of the cert owner (for notarization)
-   - `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com
-   - `APPLE_TEAM_ID` — 10-char team identifier
-4. **Update `electron-builder.yml`**: change `mac.identity` from `null` to the certificate's Common Name (e.g. `"Developer ID Application: Rise People (ABCDE12345)"`) and flip `mac.notarize` to `true`.
+1. **Generate a Certificate Signing Request (CSR)** in Keychain Access:
+   - Keychain Access → Certificate Assistant → *Request a Certificate from a Certificate Authority…*
+   - Save to disk; this also generates a private key in your Login keychain.
+2. **Submit the CSR to Apple** at https://developer.apple.com/account/resources/certificates → *Create a Certificate* → *Developer ID Application*. Apple returns a `.cer` file (Apple-signed copy of your public key).
+3. **Import the cert into your Login keychain**:
+   ```sh
+   security import path/to/developerID_application.cer \
+     -k ~/Library/Keychains/login.keychain-db
+   ```
+4. **Install the Apple G2 intermediate** — without it, the chain doesn't validate and `security find-identity` reports `0 valid identities`:
+   ```sh
+   curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+     -o /tmp/DeveloperIDG2CA.cer
+   security import /tmp/DeveloperIDG2CA.cer \
+     -k ~/Library/Keychains/login.keychain-db
+   ```
+5. **Verify** the identity is now usable:
+   ```sh
+   security find-identity -v -p codesigning
+   #  1) 245C2A28A7F9670315A4B01F1D8F7ED00ABF8DD3 "Developer ID Application: Rise People Inc (TJFLUA3UJ3)"
+   #     1 valid identities found
+   ```
+6. `npm run build:mac` now produces a signed `.dmg`. Verify with:
+   ```sh
+   codesign -dvv dist/mac-universal/rAIse.app | head -10
+   # Should print: "Authority=Developer ID Application: Rise People Inc..."
+   ```
 
-See https://www.electron.build/code-signing for the full reference.
+#### Building unsigned (CI without secrets)
 
-### Windows code signing
+If the host doesn't have the cert (e.g. PR check on a runner without secrets), set `CSC_IDENTITY_AUTO_DISCOVERY=false` and the build skips signing:
 
-Same shape — set `CSC_LINK` / `CSC_KEY_PASSWORD` with a code-signing cert (`.pfx`). SmartScreen Defender quarantines unsigned installers on first download for new users.
+```sh
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac
+```
+
+The resulting DMG is unsigned and Gatekeeper-quarantined on download — fine for smoke testing, not for distribution.
+
+#### Notarization (still TODO)
+
+Signing alone gives Gatekeeper a *"verified developer"* dialog (one-time *"Open Anyway"* via System Settings → Privacy & Security on first launch). For a fully clean *"app opens without warning"* experience, the signed `.app` also needs to be notarized by Apple. That requires:
+
+- `APPLE_ID` — Apple ID email of the cert owner
+- `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords*
+- `APPLE_TEAM_ID` — `TJFLUA3UJ3` (visible in the Apple Developer dashboard or the cert's CN)
+
+Set the three vars and flip `mac.notarize` to `true` in `electron-builder.yml`. Tracked as a follow-up.
+
+### Code signing setup (Windows)
+
+Same shape — needs a code-signing `.pfx` from a Windows cert vendor. Set:
+
+- `CSC_LINK` — base64 of the `.pfx`, or an absolute path to it
+- `CSC_KEY_PASSWORD` — the cert's export password
+
+Then `npm run build:win` signs the NSIS installer. SmartScreen Defender quarantines unsigned installers on first download for new users.
+
+### Cert management — responsible practices
+
+The Developer ID cert + private key give anyone who has them the ability to publish software as Rise People. Treat them like a production secret.
+
+**Storage**
+
+- The **private key** lives in your Login keychain, paired with the imported `.cer`. macOS keeps it encrypted at rest by your login password.
+- For backup or to move to another build host, **export as `.p12`** from Keychain Access (right-click the identity → *Export…* → choose `.p12` → set a strong password). Store the `.p12` and its password in a password manager (1Password, Bitwarden) — **never** commit them to git, **never** Slack them, **never** email them.
+- The `.cer` (downloaded from Apple) is the public half and is safe to share; only the `.p12` / Login keychain entry is sensitive.
+
+**CI handling**
+
+- Don't ship the `.p12` or its password in the repo. Use repo secrets:
+  - `CSC_LINK` — base64-encoded `.p12` (`base64 -i cert.p12 | pbcopy`)
+  - `CSC_KEY_PASSWORD` — the export password
+- electron-builder picks these up automatically when building on a host that doesn't have the cert in its Keychain.
+- Rotate the secrets if anyone with access to them leaves the team.
+
+**Rotation + revocation**
+
+- The cert expires after **5 years** from the issue date. Mark a calendar reminder ~3 months before expiry to generate a new one.
+- If you suspect the private key is compromised (laptop stolen, leaked `.p12`, etc.), **revoke immediately** at https://developer.apple.com/account/resources/certificates → select the cert → *Revoke*. Apple invalidates every artifact signed with it; users with affected installs see a Gatekeeper failure on next launch and need to reinstall.
+- Generate a new cert from a fresh CSR. Old apps signed with the revoked cert won't auto-update — the new release needs to be installed manually by users (or pushed via your MDM).
+
+**Single-cert hygiene**
+
+- One Developer ID Application cert covers every app under that team. Don't generate a per-app cert; it's redundant and multiplies the rotation surface.
+- Don't share the `.p12` with people outside the dev team. Each new release operator should either share access to a single CI's secret store or be added to the Apple Developer team and generate their own CSR + cert from the same team.
 
 ### App icon
 

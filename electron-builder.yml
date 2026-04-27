@@ -77,22 +77,24 @@ mac:
       arch: universal
   # Code signing.
   #
-  # `identity: null` disables signing for placeholder / CI-without-secrets
-  # builds. The resulting .dmg is unsigned and Gatekeeper-quarantined on
-  # download — fine for internal dogfooding, NOT acceptable for public
-  # release.
+  # `identity` is the Common Name of the Developer ID Application
+  # certificate. On a build host that has this cert + the matching
+  # private key in its Keychain (see README "Code signing setup"),
+  # electron-builder finds the identity by name and signs the .app
+  # bundle.
   #
-  # To enable real signing, the build host needs:
-  #   CSC_LINK                       — base64 of the .p12 cert OR a path
-  #   CSC_KEY_PASSWORD               — the cert's export password
-  # And for notarization (required for downloads on macOS 10.15+):
-  #   APPLE_ID                       — apple.com email of the Developer ID owner
-  #   APPLE_APP_SPECIFIC_PASSWORD    — generated at appleid.apple.com
-  #   APPLE_TEAM_ID                  — 10-char team ID from developer.apple.com
-  # Then change `identity` to the cert's Common Name (e.g.
-  # "Developer ID Application: Rise People (XXXXXXXXXX)").
+  # If the cert isn't in the Keychain, set
+  # `CSC_IDENTITY_AUTO_DISCOVERY=false` in the environment to skip
+  # signing entirely — useful for CI smoke builds without secrets.
+  # Without that env var, the build will fail with "no identity found".
+  #
+  # For full "open without warning" UX on macOS 10.15+ the signed
+  # .app also needs to be notarized; that's tracked separately
+  # (notarize: false here, requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
+  # + APPLE_TEAM_ID env vars to flip on).
+  #
   # https://www.electron.build/code-signing
-  identity: null
+  identity: 'Developer ID Application: Rise People Inc (TJFLUA3UJ3)'
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
