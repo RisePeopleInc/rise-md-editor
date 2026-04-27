@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, type MenuItemConstructorOptions } from 'electron';
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { buildMenu, type MenuDeps } from './menu';
 import * as assetOps from './assetOps';
 import * as fileOps from './fileOperations';
@@ -12,6 +13,33 @@ import * as templates from './templates';
 import * as themeStore from './themeStore';
 
 const APP_NAME = 'rAIse';
+
+// `raise-asset://` resolves markdown-relative image paths against their
+// containing file's directory and serves the bytes from disk. The
+// renderer is loaded from http://localhost in dev and file:// in
+// production — relative paths in <img src=...> would otherwise resolve
+// against the renderer's origin (broken icon). Translating to a custom
+// protocol at render time keeps the markdown stored on disk clean
+// (`assets/foo.png` stays as the saved string) while the displayed
+// <img> points at a URL Chromium will actually fetch.
+//
+// MUST run before app.whenReady() — Electron requires
+// registerSchemesAsPrivileged at startup.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'raise-asset',
+    privileges: {
+      // `secure: true` so the scheme is treated as a trusted origin
+      // (mixed-content rules don't block it); `supportFetchAPI` so any
+      // code that pre-fetches images via fetch() works; `stream` for
+      // range requests on large images.
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true,
+    },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -326,6 +354,27 @@ if (!gotLock) {
     // window opens, so window-chrome (titlebar tint on macOS, scrollbars,
     // form-control defaults) match from the first frame.
     themeStore.bootstrapNativeTheme();
+
+    // raise-asset:// → filesystem read. URL pathname is the absolute
+    // file path (URL-encoded); on Windows the URL form is
+    // `raise-asset:///C:/Users/.../foo.png`, so we strip the leading
+    // slash if the next character looks like a drive letter.
+    protocol.handle('raise-asset', async (request) => {
+      try {
+        const url = new URL(request.url);
+        let fsPath = decodeURIComponent(url.pathname);
+        if (/^\/[a-zA-Z]:/.test(fsPath)) {
+          fsPath = fsPath.slice(1);
+        }
+        return await net.fetch(pathToFileURL(fsPath).toString());
+      } catch (err) {
+        return new Response(
+          `raise-asset error: ${err instanceof Error ? err.message : String(err)}`,
+          { status: 500 },
+        );
+      }
+    });
+
     rebuildMenu();
     createWindow();
 

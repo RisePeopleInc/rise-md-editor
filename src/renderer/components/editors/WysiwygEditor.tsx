@@ -34,6 +34,7 @@ import {
   type ImageInsertion,
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
+import { resolveAssetUrl } from '../../state/assetUrl';
 
 export interface WysiwygEditorHandle {
   triggerUndo: () => void;
@@ -112,6 +113,8 @@ interface MilkdownBodyProps {
   onMarkdownChange: (markdown: string) => void;
   onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
   onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
+  /** Used by the image NodeView to resolve relative src → raise-asset:// URL. */
+  markdownPath: string | null;
 }
 
 function MilkdownBody({
@@ -122,6 +125,7 @@ function MilkdownBody({
   onMarkdownChange,
   onImageDrop,
   onImagePaste,
+  markdownPath,
 }: MilkdownBodyProps) {
   // Hold the latest callback in a ref so the editor's listener (registered
   // once on mount) always invokes the current handler, even if the parent
@@ -147,6 +151,11 @@ function MilkdownBody({
   // creation finishes; we mirror into a ref so the handler can use it
   // without a re-render dependency.
   const editorInstanceRef = useRef<Editor | null>(null);
+  // Same pattern for markdownPath — the image NodeView is registered
+  // once at editor creation, so it reads the current value through a
+  // ref instead of capturing the prop.
+  const markdownPathRef = useRef(markdownPath);
+  markdownPathRef.current = markdownPath;
 
   useEditor((root) =>
     Editor.make()
@@ -178,6 +187,34 @@ function MilkdownBody({
         // ProseMirror we handled it.
         ctx.update(editorViewOptionsCtx, (prev) => ({
           ...prev,
+          // RAISE-11: image NodeView. The default toDOM produces
+          // `<img src="assets/foo.png">`, which Chromium tries to
+          // resolve against the renderer's origin (file:// or
+          // localhost) — broken icon. We rewrite to a
+          // raise-asset:// URL at render time only; the stored src
+          // attribute on the node stays as the original markdown
+          // path so toMarkdown serializes it back correctly.
+          nodeViews: {
+            ...prev.nodeViews,
+            image: (node) => {
+              const src = (node.attrs as { src?: string }).src ?? '';
+              const alt = (node.attrs as { alt?: string }).alt ?? '';
+              const title = (node.attrs as { title?: string | null }).title ?? '';
+              const dom = document.createElement('img');
+              // Stash the original (relative) src so the click-tooltip's
+              // "View full size" can resolve via main's IPC. Without
+              // this we'd lose the markdown-relative path.
+              dom.setAttribute('data-asset-src', src);
+              dom.src = resolveAssetUrl(markdownPathRef.current, src);
+              dom.alt = alt;
+              if (title) dom.title = title;
+              // Reasonable inline rendering — matches the WYSIWYG's
+              // 720px content width without overflowing.
+              dom.style.maxWidth = '100%';
+              dom.style.height = 'auto';
+              return { dom };
+            },
+          },
           handleDrop(view, event) {
             const dt = (event as DragEvent).dataTransfer;
             if (!dt) return false;
@@ -403,11 +440,17 @@ export function WysiwygEditor({
       if (!target) return;
       if (target.closest('[data-image-tooltip]')) return; // tooltip clicks
       if (target.tagName === 'IMG' && container.contains(target)) {
-        const src = target.getAttribute('src') ?? '';
-        const filename = src.split('/').pop() || src;
+        // The NodeView writes the original markdown src to
+        // `data-asset-src` while the rendered `src` is a
+        // raise-asset:// URL — for the "View full size" handler we
+        // want the original (relative) path so main can resolve it
+        // against the markdown file's directory.
+        const original =
+          target.getAttribute('data-asset-src') ?? target.getAttribute('src') ?? '';
+        const filename = original.split('/').pop() || original;
         const rect = target.getBoundingClientRect();
         setImageTooltip({
-          relPath: src,
+          relPath: original,
           filename,
           x: rect.left,
           y: rect.bottom + 6,
@@ -461,6 +504,7 @@ export function WysiwygEditor({
                 onMarkdownChange={handleBodyChange}
                 onImageDrop={onImageDrop}
                 onImagePaste={onImagePaste}
+                markdownPath={markdownPath}
               />
             </div>
           </div>

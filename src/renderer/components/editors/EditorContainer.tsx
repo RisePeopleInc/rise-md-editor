@@ -82,6 +82,7 @@ export function EditorContainer({
             monacoThemeId={monacoThemeId}
             onImageDrop={onImageDrop}
             onImagePaste={onImagePaste}
+            markdownPath={tab.path}
           />
         ) : (
           <SourceEditor
