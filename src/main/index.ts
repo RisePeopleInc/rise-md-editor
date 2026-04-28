@@ -468,14 +468,25 @@ if (!gotLock) {
 // prompt doesn't pollute the recents list with files that were never opened.
 ipcMain.handle('files:open', async () => {
   if (!mainWindow) return null;
-  return fileOps.openFile(mainWindow);
+  const result = await fileOps.openFile(mainWindow);
+  // RAISE-25: suppress the chokidar `change` that fires when rAIse first
+  // reads an externally-created file in the watched folder.
+  if (result) markRecentlyTouched(result.path);
+  return result;
 });
 
-ipcMain.handle('files:open-path', async (_, filePath: string) => fileOps.openPath(filePath));
+ipcMain.handle('files:open-path', async (_, filePath: string) => {
+  const result = await fileOps.openPath(filePath);
+  // RAISE-25: same suppression as `files:open`, covers drag-and-drop,
+  // file-tree clicks, dock open-file events, and recents-menu re-opens
+  // — all of which land here from the renderer.
+  markRecentlyTouched(filePath);
+  return result;
+});
 
 ipcMain.handle('files:save', async (_, filePath: string, content: string) => {
   await fileOps.saveFile(filePath, content);
-  markRecentlyWritten(filePath);
+  markRecentlyTouched(filePath);
 });
 
 ipcMain.handle(
@@ -483,7 +494,7 @@ ipcMain.handle(
   async (_, content: string, suggestedName?: string) => {
     if (!mainWindow) return null;
     const result = await fileOps.saveFileAs(mainWindow, content, suggestedName);
-    if (result) markRecentlyWritten(result.path);
+    if (result) markRecentlyTouched(result.path);
     return result;
   },
 );
@@ -576,19 +587,26 @@ app.on('open-file', (event, filePath) => {
 // Project Mode: file-tree sidebar + folder watch
 // ---------------------------------------------------------------------------
 
-// Saves we initiated land in chokidar as `change` events too. Mark each
-// outgoing write so the watcher's onFileChanged can ignore it for a short
-// window — otherwise every save would prompt "this file changed on disk,
-// reload?" and the user would think the editor was haunted.
-const recentlyWritten = new Map<string, ReturnType<typeof setTimeout>>();
-const RECENT_WRITE_TTL_MS = 1500;
+// Any I/O rAIse initiates — saves and opens — can land in chokidar as a
+// `change` event. Mark each touched file so the watcher's onFileChanged
+// can ignore it for a short window. Without this, two unrelated bugs
+// surface:
+//
+//   1. Every Save would prompt "this file changed on disk, reload?" right
+//      after writing — the user would think the editor was haunted.
+//   2. Opening a file that was created outside rAIse (chokidar saw it
+//      appear in the watched folder) fires a spurious `change` for it
+//      moments after `openPath` returns, triggering the same false
+//      "reload?" prompt on first open. ([RAISE-25](https://risepeople.atlassian.net/browse/RAISE-25))
+const recentlyTouched = new Map<string, ReturnType<typeof setTimeout>>();
+const RECENT_TOUCH_TTL_MS = 1500;
 
-function markRecentlyWritten(filePath: string): void {
-  const existing = recentlyWritten.get(filePath);
+function markRecentlyTouched(filePath: string): void {
+  const existing = recentlyTouched.get(filePath);
   if (existing) clearTimeout(existing);
-  recentlyWritten.set(
+  recentlyTouched.set(
     filePath,
-    setTimeout(() => recentlyWritten.delete(filePath), RECENT_WRITE_TTL_MS),
+    setTimeout(() => recentlyTouched.delete(filePath), RECENT_TOUCH_TTL_MS),
   );
 }
 
@@ -605,13 +623,15 @@ folderWatcher.setListener({
     rebuildMenu();
   },
   onFileChanged: (filePath) => {
-    if (recentlyWritten.has(filePath)) {
+    if (recentlyTouched.has(filePath)) {
       // Refresh the TTL — slow disks (network mounts, FUSE, large files)
-      // can land chokidar `change` events well after the original write,
-      // and a fixed window risks firing a phantom "reload?" prompt for a
-      // save the user initiated themselves. Extending on each suppressed
-      // event keeps the suppression alive until writes go quiet.
-      markRecentlyWritten(filePath);
+      // can land chokidar `change` events well after rAIse's own I/O,
+      // and a fixed window risks firing a phantom "reload?" prompt for
+      // a save or open the user initiated themselves. Extending on each
+      // suppressed event keeps the suppression alive until I/O goes
+      // quiet, at which point a real external change fires the prompt
+      // ~RECENT_TOUCH_TTL_MS later.
+      markRecentlyTouched(filePath);
       return;
     }
     folderWatcher.notifyRenderer(mainWindow, { type: 'file', path: filePath });
@@ -839,7 +859,7 @@ ipcMain.handle(
         // that as a distinct status so the renderer can just open the
         // existing CLAUDE.md instead of overwriting it.
         await fs.writeFile(target, content, { encoding: 'utf-8', flag: 'wx' });
-        markRecentlyWritten(target);
+        markRecentlyTouched(target);
         return { status: 'created', path: target, content };
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
@@ -855,7 +875,7 @@ ipcMain.handle(
     const name = await findFreshSkillName(parent);
     const target = path.join(parent, name);
     await fs.writeFile(target, content, { encoding: 'utf-8', flag: 'wx' });
-    markRecentlyWritten(target);
+    markRecentlyTouched(target);
     return { status: 'created', path: target, content };
   },
 );

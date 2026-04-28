@@ -739,7 +739,18 @@ function AppContent() {
           )}
         </Sidebar>
       )}
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/*
+       * `min-w-0` is the load-bearing fix for [RAISE-26](https://risepeople.atlassian.net/browse/RAISE-26).
+       * This div is a row-flex child of the outer Sidebar+editor row at line
+       * 706. Without `min-w-0`, the default `min-width: auto` on flex items
+       * means it refuses to shrink below the intrinsic content width of its
+       * descendants. In split mode that's the longest line in Monaco's
+       * source view, which can be far wider than the window — causing this
+       * column to grow past the row, and the WYSIWYG pane inside SplitView
+       * gets pushed off the right edge of the screen. Capping inside
+       * SplitView alone wasn't enough; the chain above it has to shrink too.
+       */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {!updateBannerDismissed && (
           <UpdateBanner
             status={update.status}
@@ -772,7 +783,7 @@ function AppContent() {
             }}
           />
         )}
-        <main className="min-h-0 flex-1">
+        <main className="min-h-0 min-w-0 flex-1">
           {file.activeTab ? (
             <EditorContainer
               tab={file.activeTab}

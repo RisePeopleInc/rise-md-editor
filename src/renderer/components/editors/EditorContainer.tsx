@@ -53,7 +53,7 @@ export function EditorContainer({
       <div className="flex h-9 shrink-0 items-center justify-end border-b border-stroke bg-app px-2">
         <ModeSwitcher mode={mode} onChange={onModeChange} />
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1">
         {mode === 'wysiwyg' ? (
           // Re-key on tab id + load epoch so a tab switch OR a re-open of
           // the same file (loadFile bumps loadEpoch) fully remounts Milkdown
