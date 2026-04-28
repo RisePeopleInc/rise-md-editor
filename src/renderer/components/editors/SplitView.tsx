@@ -179,7 +179,21 @@ export function SplitView({
 
   return (
     <div ref={containerRef} className="flex h-full w-full bg-app">
-      <div className="min-h-0" style={{ width: `${splitPercent}%` }}>
+      {/*
+       * `min-w-0` is load-bearing: flex items default to `min-width: auto`,
+       * which means a flex child won't shrink below its intrinsic content
+       * width. Monaco lays out to fill its parent, so a long line in the
+       * markdown source would push this wrapper wider than `splitPercent`%
+       * and overflow the WYSIWYG pane off the right of the window — exactly
+       * the regression in [RAISE-26](https://risepeople.atlassian.net/browse/RAISE-26).
+       * `min-w-0` lets the explicit `width` percentage actually take effect;
+       * `overflow-hidden` ensures Monaco's own horizontal scrollbar handles
+       * long lines instead of the parent layout.
+       */}
+      <div
+        className="min-h-0 min-w-0 overflow-hidden"
+        style={{ width: `${splitPercent}%` }}
+      >
         <SourceEditor
           ref={sourceRef}
           content={content}
@@ -200,10 +214,14 @@ export function SplitView({
         onMouseDown={handleDragStart}
         className="w-1 shrink-0 cursor-col-resize bg-stroke hover:bg-elevated active:bg-interaction"
       />
+      {/*
+       * `min-w-0` here too — same flex floor applies if Milkdown ever
+       * produces wide content (long unbroken code blocks, very wide tables).
+       */}
       <div
         ref={previewRef}
         onScroll={handlePreviewScroll}
-        className="raise-prose min-h-0 flex-1 overflow-auto px-6 py-8"
+        className="raise-prose min-h-0 min-w-0 flex-1 overflow-auto px-6 py-8"
         style={{ width: `${100 - splitPercent}%` }}
         // markdown-it is configured with html:false so user-inline HTML is
         // escaped before reaching the DOM; safe to inject the rendered HTML.
