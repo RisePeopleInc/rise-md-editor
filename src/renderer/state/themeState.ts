@@ -5,6 +5,7 @@ import type {
   ResolvedTheme,
   ThemePreference,
   ThemeState,
+  WordWrap,
 } from '../env';
 import {
   gruvboxThemeId,
@@ -50,6 +51,10 @@ interface UseThemeStateResult {
   cycleEditorPreference: () => Promise<void>;
   /** Set the editor contrast (hard / medium / soft). */
   setEditorContrast: (contrast: EditorContrast) => Promise<void>;
+  /** Set the source-editor word-wrap mode ('on' | 'off'). */
+  setEditorWordWrap: (wrap: WordWrap) => Promise<void>;
+  /** Toggle the source-editor word-wrap mode. */
+  toggleEditorWordWrap: () => Promise<void>;
 }
 
 /**
@@ -72,7 +77,7 @@ export function useThemeState(): UseThemeStateResult {
     const resolved: ResolvedTheme = attr === 'dark' ? 'dark' : 'light';
     return {
       app: { preference: 'system', resolved },
-      editor: { preference: 'system', contrast: 'soft', resolved },
+      editor: { preference: 'system', contrast: 'soft', resolved, wordWrap: 'on' },
     };
   });
 
@@ -158,6 +163,19 @@ export function useThemeState(): UseThemeStateResult {
     [apply],
   );
 
+  const setEditorWordWrap = useCallback(
+    async (wrap: WordWrap) => {
+      const next = await window.api.theme.setEditor({ wordWrap: wrap });
+      apply(next);
+    },
+    [apply],
+  );
+
+  const toggleEditorWordWrap = useCallback(async () => {
+    const current = state.editor.wordWrap;
+    await setEditorWordWrap(current === 'on' ? 'off' : 'on');
+  }, [state.editor.wordWrap, setEditorWordWrap]);
+
   const monacoThemeId = gruvboxThemeId(
     state.editor.contrast,
     state.editor.resolved,
@@ -172,5 +190,7 @@ export function useThemeState(): UseThemeStateResult {
     setEditorPreference,
     cycleEditorPreference,
     setEditorContrast,
+    setEditorWordWrap,
+    toggleEditorWordWrap,
   };
 }

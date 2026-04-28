@@ -1,4 +1,4 @@
-import { useImperativeHandle, useRef, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import {
@@ -8,6 +8,7 @@ import {
   type ImageInsertion,
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
+import type { WordWrap } from '../../env';
 
 export interface CursorPosition {
   line: number;
@@ -57,6 +58,12 @@ interface SourceEditorProps {
    */
   monacoThemeId: string;
   /**
+   * Word-wrap mode. Reactive — toggling `View → Word Wrap` updates this
+   * prop and a `useEffect` calls `editor.updateOptions({ wordWrap })`,
+   * preserving cursor + scroll position rather than remounting.
+   */
+  wordWrap: WordWrap;
+  /**
    * Image-drop callback. Called when image files are dropped onto the
    * editor; should save them and return the markdown to insert at the
    * drop position. Returning an empty array silently ignores the drop.
@@ -75,8 +82,10 @@ interface SourceEditorProps {
 const MONO_STACK =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 
-const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
-  wordWrap: 'on',
+// `wordWrap` lives outside this constant because it's user-controllable
+// (View → Word Wrap, persisted per RAISE-27); see `optionsForWordWrap`
+// below and the live-update effect in the component body.
+const BASE_EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   minimap: { enabled: false },
   lineNumbers: 'on',
   fontSize: 14,
@@ -96,10 +105,31 @@ export function SourceEditor({
   initialCursor,
   initialScrollTop,
   monacoThemeId,
+  wordWrap,
   onImageDrop,
   onImagePaste,
 }: SourceEditorProps) {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // Build the `options` object once per wordWrap value rather than on
+  // every render — `@monaco-editor/react` re-applies on referential
+  // change, so a stable identity matters for both perf and avoiding
+  // gratuitous internal recomputation in Monaco. The live-update effect
+  // below also calls `updateOptions` so the editor reflects toggles
+  // even when the prop change happens after initial mount (which is
+  // the common case — the user opens a file, then toggles wrap).
+  const editorOptions = useMemo<monaco.editor.IStandaloneEditorConstructionOptions>(
+    () => ({ ...BASE_EDITOR_OPTIONS, wordWrap }),
+    [wordWrap],
+  );
+
+  // Live-update Monaco when the wordWrap prop changes. Without this,
+  // Monaco only sees the initial `options` and ignores subsequent
+  // changes that don't trigger a remount. `updateOptions` preserves
+  // cursor + scroll position — the user shouldn't lose their place
+  // just because they toggled wrap.
+  useEffect(() => {
+    editorRef.current?.updateOptions({ wordWrap });
+  }, [wordWrap]);
   // Hold the latest callback so the editor's scroll listener (registered
   // once on mount) always invokes the current handler.
   const onScrollChangeRef = useRef(onScrollChange);
@@ -287,7 +317,7 @@ export function SourceEditor({
       value={content}
       onChange={(value) => onChange(value ?? '')}
       onMount={handleMount}
-      options={EDITOR_OPTIONS}
+      options={editorOptions}
     />
   );
 }

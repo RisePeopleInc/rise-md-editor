@@ -187,6 +187,7 @@ const menuDeps: MenuDeps = {
   getThemePreference: () => themeStore.getThemePreference(),
   getEditorThemePreference: () => themeStore.getEditorThemePreference(),
   getEditorContrast: () => themeStore.getEditorContrast(),
+  getWordWrap: () => themeStore.getWordWrap(),
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -913,6 +914,7 @@ function snapshotThemeState() {
       preference: themeStore.getEditorThemePreference(),
       contrast: themeStore.getEditorContrast(),
       resolved: themeStore.getResolvedEditorTheme(),
+      wordWrap: themeStore.getWordWrap(),
     },
   };
 }
@@ -943,11 +945,16 @@ ipcMain.handle(
     payload: {
       preference?: themeStore.ThemePreference;
       contrast?: themeStore.EditorContrast;
+      wordWrap?: themeStore.WordWrap;
     },
   ) => {
     // No-op short-circuit when the caller passed nothing — avoids a
     // pointless menu rebuild + broadcast.
-    if (payload.preference === undefined && payload.contrast === undefined) {
+    if (
+      payload.preference === undefined &&
+      payload.contrast === undefined &&
+      payload.wordWrap === undefined
+    ) {
       return snapshotThemeState();
     }
     if (payload.preference !== undefined) {
@@ -955,6 +962,9 @@ ipcMain.handle(
     }
     if (payload.contrast !== undefined) {
       themeStore.setEditorContrast(payload.contrast);
+    }
+    if (payload.wordWrap !== undefined) {
+      themeStore.setWordWrap(payload.wordWrap);
     }
     broadcastThemeUpdate();
     return snapshotThemeState();
