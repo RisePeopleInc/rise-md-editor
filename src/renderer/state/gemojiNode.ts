@@ -1,5 +1,6 @@
 import { $inputRule, $nodeSchema, $remark } from '@milkdown/utils';
 import { InputRule } from '@milkdown/prose/inputrules';
+import { TextSelection } from '@milkdown/prose/state';
 import type { Node as MdastNode, Parent as MdastParent, Text as MdastText } from 'mdast';
 import { nameToEmoji } from 'gemoji';
 import { SKIP, visit } from 'unist-util-visit';
@@ -126,18 +127,12 @@ export const remarkGemojiPlugin = $remark('remarkGemoji', () => remarkGemojiSpli
 export const gemojiSchema = $nodeSchema('gemoji', () => ({
   inline: true,
   group: 'inline',
-  selectable: true,
+  // Selectable=false: clicking the emoji shouldn't enter "node
+  // selection" mode (image-style behaviour where the node gets a
+  // selection halo). For an inline glyph the more natural feel is
+  // that clicks place the caret next to it, like clicking on text.
+  selectable: false,
   atom: true,
-  // `defining: true` + `isolating: true` mirror the image schema in
-  // @milkdown/preset-commonmark. They tell ProseMirror this is a
-  // self-contained inline unit — improves caret anchoring around the
-  // node so the visual cursor doesn't jump to a phantom position
-  // after insertion (smoke-test bug on RAISE-34: cursor appeared on
-  // the next line after typing `:warning:`, but typed text still
-  // landed adjacent to the emoji on the same line — classic
-  // contentEditable inline-atom selection drift).
-  defining: true,
-  isolating: true,
   marks: '',
   attrs: {
     name: { default: '', validate: 'string' },
@@ -231,11 +226,15 @@ export const gemojiInputRule = $inputRule((ctx) =>
     }
     if (backticks % 2 === 1) return null;
 
-    return state.tr.replaceWith(
-      start,
-      end,
-      gemojiSchema.type(ctx).create({ name }),
-    );
+    const node = gemojiSchema.type(ctx).create({ name });
+    const tr = state.tr.replaceWith(start, end, node);
+    // Place the caret immediately after the inserted atom. By
+    // default `replaceWith` lets ProseMirror infer the post-insertion
+    // selection, which can land on a NodeSelection over the new
+    // atom rather than a text caret beside it — small thing, but
+    // explicit positioning eliminates a class of "weird state after
+    // input rule fires" surprises.
+    return tr.setSelection(TextSelection.create(tr.doc, start + node.nodeSize));
   }),
 );
 

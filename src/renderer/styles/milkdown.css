@@ -250,23 +250,28 @@
 /*
  * Emoji shortcode nodes (RAISE-34). The WYSIWYG editor renders each
  * `:warning:`-style shortcode as <span data-gemoji="warning">⚠️</span>
- * (an inline atom node). Without explicit styling, the span inherits
- * the prose container's text styling, which can produce visible
- * spacing differences against the same content rendered by the
- * preview pane (where markdown-it-emoji emits the bare emoji
- * character into a text run).
+ * (an inline atom node, with contentEditable=false on the wrapper
+ * so the caret can't anchor inside the glyph).
  *
- * `display: inline` (the default) keeps it on the same line as
- * surrounding text. Resetting `line-height: inherit` and `vertical-align: baseline`
- * would be no-ops for an inline element, but worth being explicit
- * because some emoji glyphs are taller than the surrounding text
- * and otherwise nudge the line-box height upwards on lines that
- * contain them.
+ * `display: inline-block` is load-bearing here — `inline` (the
+ * span default) leaves the browser's contentEditable engine to
+ * decide where to place the visual caret around the atom, and on
+ * Chromium that decision can land the caret on the wrong line-box
+ * after typing through an input rule. `inline-block` makes the
+ * span a discrete glyph that the browser places between two
+ * resolvable text positions; the caret snaps cleanly to either
+ * side. `vertical-align: baseline` keeps it on the same baseline
+ * as surrounding text. `line-height: 1` prevents tall emoji
+ * glyphs from pushing the line-box height upward and reflowing
+ * adjacent text — also keeps the WYSIWYG line spacing consistent
+ * with the preview pane (markdown-it-emoji emits a bare emoji
+ * char into a text run, so the preview's line-height is just the
+ * normal paragraph value).
  */
 .raise-prose span[data-gemoji] {
-  display: inline;
-  line-height: inherit;
+  display: inline-block;
   vertical-align: baseline;
+  line-height: 1;
 }
 
 /* Links */
