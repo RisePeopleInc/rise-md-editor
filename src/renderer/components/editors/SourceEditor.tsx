@@ -26,6 +26,13 @@ export interface SourceEditorHandle {
   triggerReplace: () => void;
   triggerUndo: () => void;
   triggerRedo: () => void;
+  /**
+   * Select the entire document. `webContents.selectAll()` (the role used
+   * by Electron context menus) doesn't reach Monaco's internal selection
+   * model, so we expose a Monaco-specific path for the context-menu's
+   * Select All item.
+   */
+  selectAll: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
   zoomReset: () => void;
@@ -166,6 +173,11 @@ export function SourceEditor({
       triggerReplace: () => runAction('editor.action.startFindReplaceAction'),
       triggerUndo: () => editorRef.current?.trigger('menu', 'undo', null),
       triggerRedo: () => editorRef.current?.trigger('menu', 'redo', null),
+      // Monaco's selectAll command — used from the right-click context
+      // menu (RAISE-28). `webContents.selectAll()` (the role used by
+      // Electron menus) doesn't reach Monaco's internal selection model,
+      // so we trigger Monaco's own action here.
+      selectAll: () => runAction('editor.action.selectAll'),
       zoomIn: () => runAction('editor.action.fontZoomIn'),
       zoomOut: () => runAction('editor.action.fontZoomOut'),
       zoomReset: () => runAction('editor.action.fontZoomReset'),

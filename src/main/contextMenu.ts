@@ -73,22 +73,44 @@ export function showEditorContextMenu(
     case 'preview': {
       // Preview is read-only rendered HTML. Copy makes sense only if
       // the user has selected text; Select All is always useful.
+      //
+      // The preview pane is a div with `dangerouslySetInnerHTML`, not
+      // a contenteditable surface. `role: 'selectAll'` calls
+      // `webContents.selectAll()` which has nothing to scope to and
+      // ends up selecting the entire renderer document — including
+      // the sidebar, mode switcher, etc. We dispatch a custom action
+      // and the renderer scopes the selection to the preview node
+      // via `Range.selectNodeContents`.
       if (hasSel) items.push({ role: 'copy' });
       if (items.length > 0) items.push({ type: 'separator' });
-      items.push({ role: 'selectAll' });
+      items.push({
+        label: 'Select All',
+        click: () => dispatch('context-preview-select-all'),
+      });
+      break;
+    }
+    case 'source': {
+      // Source mode runs Monaco. `role: 'selectAll'` doesn't reach
+      // Monaco's internal selection model — its content is rendered
+      // via custom DOM, and `webContents.selectAll()` either no-ops
+      // or selects nothing useful. Dispatch a custom action and call
+      // Monaco's own selectAll command from the renderer.
+      if (hasSel) items.push({ role: 'cut' }, { role: 'copy' });
+      if (canPaste) items.push({ role: 'paste' });
+      if (items.length > 0) items.push({ type: 'separator' });
+      items.push({
+        label: 'Select All',
+        click: () => dispatch('context-source-select-all'),
+      });
       break;
     }
     case 'wysiwyg':
-    case 'source':
     case 'frontmatter': {
-      // Editing surfaces: cut/copy gated on selection, paste gated on
-      // clipboard contents, select-all + Copy as Markdown always.
-      if (hasSel) {
-        items.push({ role: 'cut' }, { role: 'copy' });
-      }
-      if (canPaste) {
-        items.push({ role: 'paste' });
-      }
+      // Both surfaces are real editable DOM (contenteditable for
+      // Milkdown, native textarea for the YAML frontmatter), so the
+      // built-in `role: 'selectAll'` works as expected.
+      if (hasSel) items.push({ role: 'cut' }, { role: 'copy' });
+      if (canPaste) items.push({ role: 'paste' });
       if (items.length > 0) items.push({ type: 'separator' });
       items.push({ role: 'selectAll' });
       break;

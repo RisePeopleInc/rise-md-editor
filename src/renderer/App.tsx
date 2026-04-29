@@ -632,6 +632,29 @@ function AppContent() {
           // we just route the action.
           void wysiwygRef.current?.copyAsMarkdown();
           break;
+        case 'context-source-select-all':
+          // RAISE-28: dispatched from the Source-mode context menu.
+          // Routes to Monaco's own `editor.action.selectAll` —
+          // `webContents.selectAll()` (the role used by Electron menus)
+          // doesn't reach Monaco's internal selection.
+          editorRef.current?.selectAll();
+          break;
+        case 'context-preview-select-all': {
+          // RAISE-28: dispatched from the preview-pane context menu.
+          // Programmatic selection scoped to the preview node — looking
+          // it up by data attribute rather than `.raise-prose` because
+          // the latter is also used by the WYSIWYG body, and we want
+          // to be unambiguous about which surface we're selecting.
+          const preview = document.querySelector('[data-raise-preview-pane]');
+          if (preview) {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(preview);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
+          break;
+        }
         default:
           break;
       }

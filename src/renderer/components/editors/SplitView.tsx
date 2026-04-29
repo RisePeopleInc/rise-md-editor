@@ -252,6 +252,11 @@ export function SplitView({
         onScroll={handlePreviewScroll}
         className="raise-prose min-h-0 min-w-0 flex-1 overflow-auto px-6 py-8"
         style={{ width: `${100 - splitPercent}%` }}
+        // RAISE-28: identity attribute used by App.tsx's
+        // `context-preview-select-all` handler to scope a programmatic
+        // text selection to this node — `webContents.selectAll()` would
+        // otherwise select the entire renderer document.
+        data-raise-preview-pane
         // markdown-it is configured with html:false so user-inline HTML is
         // escaped before reaching the DOM; safe to inject the rendered HTML.
         dangerouslySetInnerHTML={{ __html: html }}
