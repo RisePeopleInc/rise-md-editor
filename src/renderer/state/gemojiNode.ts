@@ -127,12 +127,16 @@ export const remarkGemojiPlugin = $remark('remarkGemoji', () => remarkGemojiSpli
 export const gemojiSchema = $nodeSchema('gemoji', () => ({
   inline: true,
   group: 'inline',
-  // Selectable=false: clicking the emoji shouldn't enter "node
-  // selection" mode (image-style behaviour where the node gets a
-  // selection halo). For an inline glyph the more natural feel is
-  // that clicks place the caret next to it, like clicking on text.
-  selectable: false,
+  // Mirror the image schema in @milkdown/preset-commonmark — image is
+  // also an inline atom and renders cleanly without caret-positioning
+  // bugs. The combination matters: `selectable: true` lets the node
+  // act as a single unit for cursor purposes, `defining: true` +
+  // `isolating: true` tell ProseMirror this is a self-contained
+  // inline node with its own boundaries.
+  selectable: true,
   atom: true,
+  defining: true,
+  isolating: true,
   marks: '',
   attrs: {
     name: { default: '', validate: 'string' },
@@ -152,15 +156,29 @@ export const gemojiSchema = $nodeSchema('gemoji', () => ({
   ],
   toDOM: (node) => {
     const name = (node.attrs as { name?: string }).name ?? '';
+    const emoji = nameToEmoji[name] ?? `:${name}:`;
+    // Critical: emit an *empty* element with no text child. The image
+    // schema renders as `["img", {...}]` (self-closing, no content)
+    // and that's why image insertion never trips the contentEditable
+    // caret-rendering bug. A `["span", {...}, "⚠️"]` shape — span
+    // wrapping a text node — gives Chromium an ambiguous caret
+    // anchor (is the caret before / after the span, or inside the
+    // text node it wraps?), and the visual caret lands on the wrong
+    // line-box after an input-rule insertion.
+    //
+    // The emoji glyph is rendered via a CSS `::before` pseudo-element
+    // reading `data-emoji-char` (see milkdown.css). Pseudo-elements
+    // can't host a caret, so there's no ambiguity. The DOM that ships
+    // is `<span data-gemoji="warning" data-emoji-char="⚠️" aria-label=":warning:"></span>`.
     return [
       'span',
       {
         'data-gemoji': name,
+        'data-emoji-char': emoji,
         // Surface the shortcode to assistive tech alongside the emoji
         // so screen-readers can announce both forms ("warning emoji").
         'aria-label': `:${name}:`,
       },
-      nameToEmoji[name] ?? `:${name}:`,
     ];
   },
   parseMarkdown: {

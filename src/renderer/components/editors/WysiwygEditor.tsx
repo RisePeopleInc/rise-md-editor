@@ -38,7 +38,6 @@ import {
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
 import { gemojiPlugins } from '../../state/gemojiNode';
-import { nameToEmoji } from 'gemoji';
 
 export interface WysiwygEditorHandle {
   triggerUndo: () => void;
@@ -324,28 +323,11 @@ function MilkdownBody({
                 },
               };
             },
-            // RAISE-34: gemoji NodeView. The schema's toDOM produces
-            // the same DOM, but routing through a NodeView lets us
-            // set `contentEditable = 'false'` on the wrapper —
-            // critical for caret rendering. Without it, Chromium's
-            // contentEditable engine sometimes places the visual
-            // cursor on the next line after the atom node, even
-            // though ProseMirror's logical position is correctly
-            // immediately after the atom (the next typed character
-            // lands adjacent to the emoji, confirming the position
-            // is right; only the rendered caret is wrong). Marking
-            // the wrapper non-editable removes the wrapper as a
-            // candidate caret position and the visual caret snaps
-            // to the inline position next to the glyph.
-            gemoji: (node) => {
-              const dom = document.createElement('span');
-              const name = (node.attrs as { name?: string }).name ?? '';
-              dom.setAttribute('data-gemoji', name);
-              dom.setAttribute('aria-label', `:${name}:`);
-              dom.contentEditable = 'false';
-              dom.textContent = nameToEmoji[name] ?? `:${name}:`;
-              return { dom };
-            },
+            // RAISE-34: gemoji has no NodeView — its schema toDOM emits
+            // an empty span and the emoji glyph is drawn via a CSS
+            // `::before` pseudo-element reading `data-emoji-char`. See
+            // the schema in src/renderer/state/gemojiNode.ts and the
+            // matching CSS in milkdown.css.
           },
           handleDrop(view, event) {
             const dt = (event as DragEvent).dataTransfer;

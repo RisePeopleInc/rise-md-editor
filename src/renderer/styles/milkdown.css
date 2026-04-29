@@ -248,30 +248,42 @@
 }
 
 /*
- * Emoji shortcode nodes (RAISE-34). The WYSIWYG editor renders each
- * `:warning:`-style shortcode as <span data-gemoji="warning">⚠️</span>
- * (an inline atom node, with contentEditable=false on the wrapper
- * so the caret can't anchor inside the glyph).
+ * Emoji shortcode nodes (RAISE-34). The WYSIWYG editor's gemoji
+ * schema emits an *empty* `<span data-gemoji="warning" data-emoji-char="⚠️">`
+ * for each shortcode — no text child inside the span. The emoji
+ * glyph is drawn here, in a CSS `::before` pseudo-element reading
+ * `data-emoji-char`.
  *
- * `display: inline-block` is load-bearing here — `inline` (the
- * span default) leaves the browser's contentEditable engine to
- * decide where to place the visual caret around the atom, and on
- * Chromium that decision can land the caret on the wrong line-box
- * after typing through an input rule. `inline-block` makes the
- * span a discrete glyph that the browser places between two
- * resolvable text positions; the caret snaps cleanly to either
- * side. `vertical-align: baseline` keeps it on the same baseline
- * as surrounding text. `line-height: 1` prevents tall emoji
- * glyphs from pushing the line-box height upward and reflowing
- * adjacent text — also keeps the WYSIWYG line spacing consistent
- * with the preview pane (markdown-it-emoji emits a bare emoji
- * char into a text run, so the preview's line-height is just the
- * normal paragraph value).
+ * Why pseudo-element rendering rather than the obvious thing
+ * (text inside the span):
+ *
+ * Image is the only existing inline atom in Milkdown's
+ * preset-commonmark and its toDOM is `["img", {...}]` — a
+ * self-closing element with no text child. Image insertion never
+ * trips the caret-jump bug we hit. A span wrapping a text node
+ * (`["span", {...}, "⚠️"]`) gives Chromium's contentEditable engine
+ * an ambiguous caret anchor (before / after / inside-the-text-node?)
+ * and the visual caret lands on the wrong line-box after typing
+ * through an input rule. Pseudo-elements can't host a caret, so
+ * there's no ambiguity — the caret snaps cleanly to either side
+ * of the span as if it were a self-closing element.
+ *
+ * `display: inline` (the span default), `vertical-align: baseline`,
+ * `line-height: inherit` keep the rendered glyph from disturbing
+ * line metrics. The preview pane (markdown-it-emoji) emits the
+ * emoji directly into a text run; matching the metrics here keeps
+ * spacing consistent across the two surfaces.
  */
 .raise-prose span[data-gemoji] {
-  display: inline-block;
+  /* User-select disabled — selecting an emoji glyph by drag isn't
+   * meaningful for an atom; click-drag in surrounding text should
+   * just skip past it. */
+  user-select: all;
   vertical-align: baseline;
-  line-height: 1;
+  line-height: inherit;
+}
+.raise-prose span[data-gemoji]::before {
+  content: attr(data-emoji-char);
 }
 
 /* Links */
