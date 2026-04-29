@@ -207,19 +207,45 @@ export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
 
   // RAISE-29: task list toggle. The GFM preset doesn't ship a
   // `wrapInTaskListCommand` — only an input rule that fires when
-  // typing `[ ] `. To toggle from a button: ensure we're in a
-  // bullet list (wrap if not), then flip the containing
-  // `list_item`'s `checked` attribute between `null` (regular
-  // bullet) and `false` (unchecked task). Toggling an existing
-  // task back to a regular bullet just sets `checked` to `null`.
+  // typing `[ ] `. To toggle from a button:
+  //   - If the cursor is already inside a `list_item`, just flip the
+  //     containing item's `checked` attribute between `null` (regular
+  //     bullet) and `false` (unchecked task).
+  //   - Otherwise (cursor in a paragraph), wrap in a bullet list
+  //     first via `wrapInBulletListCommand`, then mark the resulting
+  //     list_item as a task.
+  //
+  // The "already in a list?" pre-check is important: ProseMirror's
+  // `wrapInBulletListCommand` is a *toggle* — calling it inside an
+  // existing bullet list unwraps the surrounding list. Without the
+  // check, clicking ☑ on an existing bullet would unwrap it (back
+  // to a paragraph) and *then* the list_item lookup below would
+  // find no ancestor, leaving the user with a paragraph and no
+  // task. Skipping the wrap when already in a list_item turns the
+  // button into a clean "convert this bullet to/from a task".
   const handleTaskList = useCallback(() => {
     if (loading) return;
     const editor = get();
     if (!editor) return;
-    // Step 1: make sure we're in a bullet list. wrapInBulletListCommand
-    // wraps a paragraph and is a no-op when already inside one.
-    editor.action(callCommand(wrapInBulletListCommand.key));
-    // Step 2: flip the list_item's `checked` attribute.
+
+    // Step 1: detect if we're already inside a list_item.
+    let alreadyInListItem = false;
+    editor.action((ctx) => {
+      const { $from } = ctx.get(editorViewCtx).state.selection;
+      for (let depth = $from.depth; depth > 0; depth--) {
+        if ($from.node(depth).type.name === 'list_item') {
+          alreadyInListItem = true;
+          return;
+        }
+      }
+    });
+
+    // Step 2: if not in a list, wrap into a bullet list first.
+    if (!alreadyInListItem) {
+      editor.action(callCommand(wrapInBulletListCommand.key));
+    }
+
+    // Step 3: flip the list_item's `checked` attribute.
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       const state = view.state;
