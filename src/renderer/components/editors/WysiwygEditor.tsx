@@ -37,6 +37,7 @@ import {
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
+import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 
 export interface WysiwygEditorHandle {
@@ -174,15 +175,25 @@ function MilkdownBody({
         ctx.set(defaultValueCtx, initial);
         ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prev) => {
           if (markdown === prev) return;
-          // RAISE-34: serialize-side substitution. The editor's model
-          // stores emoji as plain Unicode characters (so caret /
-          // selection / line-layout all behave like normal text);
-          // here we convert each emoji back to its `:name:` shortcode
-          // form before propagating to the parent's onChange. The
-          // pair (parse-side `remarkGemojiSubstitute` + this
-          // serialize-side `emojiToShortcodes`) gives us bit-for-bit
-          // round-trip preservation of `:name:` in source.
-          onChangeRef.current(emojiToShortcodes(markdown));
+          // Two-stage serialize-side post-process. Both functions are
+          // pure string -> string and idempotent; the order doesn't
+          // matter functionally, but we run the cheaper one (empty-
+          // paragraph-marker strip) first so emojiToShortcodes works
+          // on a slightly smaller string.
+          //
+          // RAISE-37: `stripEmptyParagraphMarkers` drops Milkdown's
+          // empty-paragraph round-trip marker (`<br />` lines that
+          // paragraph.toMarkdown emits for empty middle paragraphs;
+          // the paired remark plugin strips them on parse, but our
+          // listener observes the raw serializer output before that
+          // could happen, so they leak to disk).
+          //
+          // RAISE-34: `emojiToShortcodes` is the inverse of the
+          // parse-side `remarkGemojiSubstitute`; converts emoji
+          // characters back to `:name:` so source preserves the
+          // shortcode form.
+          const processed = emojiToShortcodes(stripEmptyParagraphMarkers(markdown));
+          onChangeRef.current(processed);
         });
         // Once Milkdown finishes its initial mount, jump the caret to the
         // captured ProseMirror offset (clamped). This is the WYSIWYG
