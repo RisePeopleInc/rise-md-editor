@@ -44,15 +44,29 @@ export interface ShowEditorContextMenuPayload {
 
 /**
  * True when the system clipboard has content that Paste could meaningfully
- * insert. Used to hide the Paste menu item when there's nothing to paste —
- * showing it disabled or as a no-op is user-hostile noise. Checked
- * synchronously in main from `electron.clipboard`.
+ * insert *for the given surface*. Used to hide the Paste menu item when
+ * there's nothing the surface can do with the clipboard — a Paste that
+ * silently no-ops is user-hostile noise. Checked synchronously in main
+ * from `electron.clipboard`.
+ *
+ * Mode-aware because the surfaces differ in what they accept:
+ *
+ * - WYSIWYG: text *and* images. Milkdown's `handlePaste` route in
+ *   WysiwygEditor.tsx accepts `image/*` and inserts a markdown image
+ *   reference for it, so an image-only clipboard is a valid Paste.
+ * - Source / frontmatter: text only. Monaco and the YAML textarea
+ *   can't ingest an image; an image-only clipboard means Paste would
+ *   no-op.
+ *
+ * (Preview mode never offers Paste in the first place — it's read-only.)
  */
-function clipboardHasPasteableContent(): boolean {
+function clipboardHasPasteableContent(mode: EditorContextMode): boolean {
   const formats = clipboard.availableFormats();
-  return formats.some(
-    (f) => f === 'text/plain' || f === 'text/html' || f.startsWith('image/'),
-  );
+  const hasText = formats.some((f) => f === 'text/plain' || f === 'text/html');
+  if (mode === 'wysiwyg') {
+    return hasText || formats.some((f) => f.startsWith('image/'));
+  }
+  return hasText;
 }
 
 export function showEditorContextMenu(
@@ -62,7 +76,7 @@ export function showEditorContextMenu(
 ): void {
   const items: MenuItemConstructorOptions[] = [];
   const hasSel = payload.hasSelection;
-  const canPaste = clipboardHasPasteableContent();
+  const canPaste = clipboardHasPasteableContent(payload.mode);
 
   // The menu surfaces only the items that would do something useful in
   // the current state. Items that would be greyed out or silently no-op
