@@ -458,9 +458,13 @@ function MilkdownBody({
       .use(tooltipPlugin)
       .use(slashPlugin)
       // RAISE-34: emoji-shortcode rendering with source round-trip.
-      // Bundles the remark plugin (splits `:name:` text into typed
-      // mdast nodes), the gemoji schema (round-trips between mdast
-      // and ProseMirror), and the input rule (typing-trigger).
+      // Bundles the parse-side remark plugin (`:name:` -> emoji
+      // substitution in mdast text nodes) and the type-side input
+      // rule (replaces `:name:` with the emoji character on the
+      // closing colon). Serialize-side conversion lives in the
+      // markdownUpdated listener above, via emojiToShortcodes —
+      // the model carries plain text throughout, so there's no
+      // schema or NodeView for emoji.
       .use(gemojiPlugins),
   );
 

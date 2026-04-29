@@ -39,7 +39,9 @@ import { visit } from 'unist-util-visit';
  *    emoji character that has a primary name in `gemoji.emojiToName`
  *    with `:name:`. This is the inverse of `remarkGemojiSubstitute`,
  *    so a `:warning:` shortcode round-trips bit-for-bit through any
- *    number of edit cycles.
+ *    number of edit cycles. Code blocks and inline code spans are
+ *    skipped (the substitution operates on text segments only),
+ *    mirroring the parse-side mdast type filtering.
  *
  * Earlier rounds of this feature tried to preserve the shortcode
  * form via a custom mdast `gemoji` node + a ProseMirror inline atom
@@ -98,14 +100,24 @@ export const remarkGemojiPlugin = $remark('remarkGemoji', () => remarkGemojiSubs
  * doesn't get converted — it stays as literal text the user can
  * keep typing into without surprises.
  *
- * Suppresses inside an unclosed inline-code span: typing `` `:warning: ``
- * (without the closing backtick yet) shouldn't convert the emoji,
- * because the user's intent is `` `:warning:` `` (literal inline code).
- * Milkdown's commonmark inline-code mark is only applied AFTER the
- * closing backtick is typed, so when our rule fires there's no mark
- * to inspect — instead we count backticks in the current text block
- * before the cursor; odd count means there's an open `` ` `` we
- * haven't closed yet, so we're mid-typing-code-span and bail.
+ * Suppresses two flavours of "user is inside an inline code span":
+ *
+ *   1. **Closed code span, edited mid-content.** The user has an
+ *      existing `` `code` `` and inserts `:warning:` inside. The
+ *      `code` mark is applied to the position; we read it from the
+ *      resolved position's marks and bail.
+ *
+ *   2. **Unclosed code span, mid-typing.** The user has typed
+ *      `` `code with :warning: `` but not the closing backtick yet.
+ *      Milkdown's commonmark applies the `code` mark only after
+ *      the closing backtick, so at this moment there's no mark to
+ *      inspect. Instead we count unescaped backticks in the
+ *      current text block before the cursor; odd count means
+ *      there's an open `` ` `` and we bail.
+ *
+ * Together the two checks cover both shapes — without either, an
+ * input rule fired inside a code context would silently corrupt
+ * the user's literal `:name:`.
  */
 export const gemojiInputRule = $inputRule(
   () =>
@@ -116,6 +128,15 @@ export const gemojiInputRule = $inputRule(
       if (emoji == null) return null;
 
       const $start = state.doc.resolve(start);
+
+      // Check (1): closed inline-code span with the `code` mark
+      // already applied at the matched position.
+      const codeMark = state.schema.marks.code;
+      if (codeMark && codeMark.isInSet($start.marks())) return null;
+
+      // Check (2): unclosed code span — count unescaped backticks
+      // in the current textblock before the cursor; odd count
+      // means an open `` ` `` is pending.
       const blockStart = $start.start();
       const textBefore = state.doc.textBetween(blockStart, start);
       let backticks = 0;
@@ -157,10 +178,59 @@ const ALL_EMOJI_RE = new RegExp(
 );
 
 /**
+ * Match a code region the serialize-side substitution must skip:
+ *
+ *   - fenced code block: ``` (or ~~~) at line start, content,
+ *     matching closing fence at line start
+ *   - inline code: ` … ` or `` … `` (one or two backticks)
+ *
+ * Anchored with `m` flag so `^` / `$` mean line start / end.
+ * Order matters: fenced fences are matched before inline
+ * backticks so the latter doesn't slice into a fence body.
+ *
+ * Pragmatic and not 100% commonmark-correct (doesn't handle
+ * indented code blocks, or arbitrary backtick run lengths beyond
+ * 1 / 2 / 3+), but covers the realistic shapes well enough that
+ * an emoji glyph deliberately placed inside a code block stays
+ * verbatim on save.
+ */
+const CODE_REGION_RE = /^```[\s\S]*?^```$|^~~~[\s\S]*?^~~~$|``[^`\n]+``|`[^`\n]+`/gm;
+
+function substituteEmojiInRange(text: string): string {
+  ALL_EMOJI_RE.lastIndex = 0;
+  return text.replace(ALL_EMOJI_RE, (match) => {
+    const name = emojiToName[match];
+    return name != null ? `:${name}:` : match;
+  });
+}
+
+/**
+ * Single-slot memoization. The serialize-side post-process runs in
+ * the `markdownUpdated` listener, which fires per keystroke; for
+ * any single edit the function gets a unique input, but spurious
+ * duplicate notifications (or upstream re-emits) hit the cache.
+ *
+ * One slot is enough — Milkdown's listener already short-circuits
+ * `markdown === prev` before calling us, so the typical sequence
+ * is "increasingly different inputs over time" with the most
+ * recent input being the hot one to repeat-process.
+ */
+let lastIn: string | null = null;
+let lastOut: string | null = null;
+
+/**
  * Inverse of `remarkGemojiSubstitute`: walk a serialized markdown
  * string and replace every gemoji character with its primary
  * `:name:` shortcode. Used at the WYSIWYG editor's serialize-side
  * boundary so the source on disk preserves the shortcode form.
+ *
+ * Code-region awareness: emoji characters inside fenced code blocks
+ * (``` or ~~~) and inline code (` or ``) are passed through
+ * verbatim, mirroring the parse-side asymmetry where mdast `code` /
+ * `inlineCode` nodes aren't visited as `text`. The rest of the
+ * markdown is split into [text, code, text, code, …] segments by
+ * `CODE_REGION_RE` and the substitution runs only on the text
+ * segments.
  *
  * Caveat: `gemoji.emojiToName` returns one *primary* name per
  * emoji. If a file used a non-primary alias (`:woman_running:`
@@ -169,28 +239,45 @@ const ALL_EMOJI_RE = new RegExp(
  * IS the primary (`:warning:`, `:fire:`, `:tada:`, `:cat:`, …)
  * the source is preserved bit-for-bit.
  *
- * Caveat 2: this operates on the raw markdown string, not on a
- * parsed mdast tree, so an emoji character that lives inside a
- * fenced code block will also be converted to its shortcode form.
- * The realistic scenario for that — a code block containing a
- * literal emoji rather than text — is rare enough that we accept
- * the trade-off; doing it AST-aware would require splitting the
- * substitution back into a remark stringify-only plugin, which
- * Milkdown's shared parse/stringify remark instance makes
- * non-trivial.
+ * Performance:
  *
- * Fast-path: if the input string doesn't match `ALL_EMOJI_RE` at
- * all, return it unchanged. The regex test is much cheaper than
- * `String.prototype.replace` over the whole document for files
- * that don't contain emoji.
+ *   - Fast-path: if the input contains no emoji at all (cheap
+ *     `.test()` against the alternation regex), return unchanged.
+ *   - Memoization: a single-slot cache short-circuits when the
+ *     same input is processed twice in a row. The listener
+ *     already filters `markdown === prev`, but spurious duplicate
+ *     emits or upstream re-emits hit the cache.
+ *   - Otherwise: O(N) scan for code regions + O(N) substitution
+ *     in the non-code segments. Negligible for typical doc sizes
+ *     (sub-millisecond on a few hundred KB).
  */
 export function emojiToShortcodes(markdown: string): string {
   if (!markdown) return markdown;
+  if (markdown === lastIn && lastOut !== null) return lastOut;
   ALL_EMOJI_RE.lastIndex = 0;
-  if (!ALL_EMOJI_RE.test(markdown)) return markdown;
-  ALL_EMOJI_RE.lastIndex = 0;
-  return markdown.replace(ALL_EMOJI_RE, (match) => {
-    const name = emojiToName[match];
-    return name != null ? `:${name}:` : match;
-  });
+  if (!ALL_EMOJI_RE.test(markdown)) {
+    lastIn = markdown;
+    lastOut = markdown;
+    return markdown;
+  }
+
+  let result = '';
+  let cursor = 0;
+  CODE_REGION_RE.lastIndex = 0;
+  let codeMatch: RegExpExecArray | null;
+  while ((codeMatch = CODE_REGION_RE.exec(markdown)) !== null) {
+    if (codeMatch.index > cursor) {
+      result += substituteEmojiInRange(markdown.slice(cursor, codeMatch.index));
+    }
+    // Code region — passed through unchanged so emoji glyphs stay
+    // verbatim inside code blocks / inline code.
+    result += codeMatch[0];
+    cursor = codeMatch.index + codeMatch[0].length;
+  }
+  if (cursor < markdown.length) {
+    result += substituteEmojiInRange(markdown.slice(cursor));
+  }
+  lastIn = markdown;
+  lastOut = result;
+  return result;
 }
