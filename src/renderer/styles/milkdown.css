@@ -181,15 +181,23 @@
  *     </li>
  */
 
-/* Layout: no list marker (checkbox replaces it), items shift left so
- * the checkbox aligns with where the disc / decimal would be in a
- * plain list, and flex-align checkbox + content with a small gap. */
+/* Layout: hide the list marker (checkbox replaces it). Don't apply a
+ * negative margin to pull task items left — that would cancel the
+ * parent `<ul>`'s padding at every level of nesting and collapse all
+ * tasks to the same x-position regardless of depth. The natural
+ * `<ul>`-driven indentation gives proper nested behaviour at the
+ * cost of a slight horizontal offset between plain bullets (disc at
+ * ~1rem, outside `list-style-position`) and task checkboxes (input
+ * at the 1.5rem padding edge). Acceptable trade-off; clean nesting
+ * is more important than pixel-perfect bullet/checkbox alignment. */
 .raise-prose li[data-item-type="task"],
 .raise-prose li.task-list-item {
   list-style: none;
-  margin-left: -1.5rem;
-  padding-left: 0;
 }
+/* WYSIWYG only: flex-align the input + content div so they sit on the
+ * same line and the content wraps cleanly to the right of the
+ * checkbox. The preview structure (`<li><p><label><input>text</label></p>`)
+ * already lays out inline via the natural `<p>` / `<label>` flow. */
 .raise-prose li[data-item-type="task"] {
   display: flex;
   align-items: baseline;
