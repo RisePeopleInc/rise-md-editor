@@ -155,6 +155,64 @@
 .raise-prose li > ul,
 .raise-prose li > ol { margin-top: 0.25em; }
 
+/*
+ * Task lists (RAISE-29). Two surfaces produce different DOM:
+ *
+ *   WYSIWYG (Milkdown's GFM preset, with our list_item NodeView in
+ *   WysiwygEditor.tsx):
+ *     <li data-item-type="task" data-checked="true|false">
+ *       <input type="checkbox" class="raise-task-checkbox" />
+ *       <div>content</div>
+ *     </li>
+ *
+ *   Preview (markdown-it-task-lists, with `label: true`):
+ *     <li class="task-list-item">
+ *       <input type="checkbox" class="task-list-item-checkbox" disabled (checked) />
+ *       <label class="task-list-item-label">content</label>
+ *     </li>
+ *
+ * Rules below cover both. Task list items get no list marker (the
+ * checkbox is the marker), the items align cleanly, and completed
+ * items render with muted text + strikethrough so checked-off
+ * todos are scan-past-able at a glance.
+ */
+.raise-prose li[data-item-type="task"],
+.raise-prose li.task-list-item {
+  list-style: none;
+  /* Pull the item back so the checkbox sits flush with where the
+   * disc / decimal marker would be in a regular list. */
+  margin-left: -1.5rem;
+  padding-left: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+}
+
+/* The checkbox itself — both the WYSIWYG NodeView's and the
+ * preview's `markdown-it-task-lists` checkbox. */
+.raise-prose li[data-item-type="task"] > input[type="checkbox"],
+.raise-prose li.task-list-item > input[type="checkbox"] {
+  /* Slight nudge: align with the text baseline rather than the
+   * default top-aligned input. */
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.raise-prose li.task-list-item > input[type="checkbox"]:disabled {
+  /* Preview pane checkboxes are disabled (read-only). Don't grey
+   * them out further than the browser already does — they should
+   * still read as a real checkbox visually. */
+  cursor: default;
+}
+
+/* Completed-item styling: muted text + strikethrough on the content,
+ * not on the checkbox itself. */
+.raise-prose li[data-item-type="task"][data-checked="true"] > div,
+.raise-prose li.task-list-item:has(> input[type="checkbox"]:checked) > label {
+  color: var(--rise-text-muted);
+  text-decoration: line-through;
+}
+
 /* Horizontal rule */
 .raise-prose hr {
   border: 0;

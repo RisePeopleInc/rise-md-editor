@@ -240,6 +240,84 @@ function MilkdownBody({
                 },
               };
             },
+            // RAISE-29: list-item NodeView. The GFM preset extends the
+            // listItem schema with a `checked: boolean | null` attribute —
+            // `null` for normal list items, `true` / `false` for GFM
+            // task-list items. The schema's default `toDOM` emits
+            // `<li data-item-type="task" data-checked="...">content</li>`
+            // with no checkbox UI and no click handler — that's left to
+            // the consumer.
+            //
+            // We render an actual `<input type="checkbox">` that toggles
+            // via `setNodeAttribute` so the markdown source flips
+            // between `[ ]` and `[x]` on click. For non-task items
+            // (checked == null) we fall back to a plain `<li>` with
+            // ProseMirror's default styling — same shape as the
+            // schema's baseSchema toDOM.
+            list_item: (node, view, getPos) => {
+              const li = document.createElement('li');
+              const content = document.createElement('div');
+              li.appendChild(content);
+
+              const isTask = node.attrs.checked != null;
+              let checkbox: HTMLInputElement | null = null;
+
+              if (isTask) {
+                checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.contentEditable = 'false';
+                // Without this, ProseMirror treats the checkbox as a
+                // selectable node and a click moves the caret instead
+                // of firing the toggle.
+                checkbox.classList.add('raise-task-checkbox');
+                checkbox.addEventListener('click', (e) => {
+                  e.preventDefault();
+                  if (typeof getPos !== 'function') return;
+                  const pos = getPos();
+                  if (pos == null) return;
+                  const current = view.state.doc.nodeAt(pos);
+                  if (!current) return;
+                  view.dispatch(
+                    view.state.tr.setNodeAttribute(
+                      pos,
+                      'checked',
+                      !(current.attrs as { checked?: boolean }).checked,
+                    ),
+                  );
+                });
+                li.insertBefore(checkbox, content);
+              }
+
+              const applyAttrs = (n: typeof node): void => {
+                const checked =
+                  (n.attrs as { checked?: boolean | null }).checked ?? null;
+                if (checked == null) {
+                  li.removeAttribute('data-item-type');
+                  li.removeAttribute('data-checked');
+                } else {
+                  li.dataset.itemType = 'task';
+                  li.dataset.checked = String(checked);
+                  if (checkbox) checkbox.checked = checked === true;
+                }
+              };
+              applyAttrs(node);
+
+              return {
+                dom: li,
+                contentDOM: content,
+                update(newNode) {
+                  if (newNode.type.name !== 'list_item') return false;
+                  // Don't try to transition a NodeView between task ↔
+                  // non-task in place — let ProseMirror remount us with
+                  // the right shape (with or without the checkbox).
+                  const newIsTask =
+                    (newNode.attrs as { checked?: boolean | null }).checked != null;
+                  if (newIsTask !== isTask) return false;
+                  applyAttrs(newNode);
+                  return true;
+                },
+              };
+            },
           },
           handleDrop(view, event) {
             const dt = (event as DragEvent).dataTransfer;

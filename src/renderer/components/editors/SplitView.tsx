@@ -8,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import MarkdownIt from 'markdown-it';
+import markdownItTaskLists from 'markdown-it-task-lists';
 import {
   SourceEditor,
   type CursorPosition,
@@ -75,6 +76,15 @@ export function SplitView({
       typographer: true,
       breaks: false,
     });
+    // RAISE-29: render `* [ ]` / `* [x]` GFM task lists as checkboxes
+    // in the preview. Disabled (read-only) because the preview pane
+    // is not editable — the user toggles via WYSIWYG or by editing
+    // source. `label: true` wraps the item text in a <label> for
+    // each checkbox, which improves accessibility (screen readers
+    // announce the label as the input's name) and gives us a clean
+    // CSS hook (`li.task-list-item:has(input:checked) label`) for
+    // the completed-item greying.
+    instance.use(markdownItTaskLists, { enabled: false, label: true });
     // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
     // at render time. The token's `src` attribute is the literal markdown
     // src; we mutate it before delegating to the default renderer.
