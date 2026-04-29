@@ -323,11 +323,16 @@ function MilkdownBody({
                 },
               };
             },
-            // RAISE-34: gemoji has no NodeView — its schema toDOM emits
-            // an empty span and the emoji glyph is drawn via a CSS
-            // `::before` pseudo-element reading `data-emoji-char`. See
-            // the schema in src/renderer/state/gemojiNode.ts and the
-            // matching CSS in milkdown.css.
+            // RAISE-34: gemoji has no NodeView. Its schema toDOM emits
+            //   `<span data-gemoji="..." contenteditable="false">⚠️</span>`
+            // and the explicit `contenteditable="false"` attribute is
+            // the load-bearing bit — it makes Chromium's contentEditable
+            // engine treat the inline atom as opaque (caret can't enter,
+            // positions either side land on the right line-box). Without
+            // it, an inline `<span>` is a transparent text container to
+            // the engine and the visual caret lands on the next line
+            // after an input-rule insertion even though the logical
+            // selection is correct. See gemojiNode.ts.
           },
           handleDrop(view, event) {
             const dt = (event as DragEvent).dataTransfer;

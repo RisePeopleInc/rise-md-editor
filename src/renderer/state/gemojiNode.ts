@@ -157,28 +157,36 @@ export const gemojiSchema = $nodeSchema('gemoji', () => ({
   toDOM: (node) => {
     const name = (node.attrs as { name?: string }).name ?? '';
     const emoji = nameToEmoji[name] ?? `:${name}:`;
-    // Critical: emit an *empty* element with no text child. The image
-    // schema renders as `["img", {...}]` (self-closing, no content)
-    // and that's why image insertion never trips the contentEditable
-    // caret-rendering bug. A `["span", {...}, "⚠️"]` shape — span
-    // wrapping a text node — gives Chromium an ambiguous caret
-    // anchor (is the caret before / after the span, or inside the
-    // text node it wraps?), and the visual caret lands on the wrong
-    // line-box after an input-rule insertion.
+    // Render the glyph as actual text content inside a span marked
+    // `contenteditable="false"`. That attribute is the load-bearing
+    // bit: it tells Chromium's contentEditable engine to treat the
+    // element as an opaque, atomic region — caret cannot enter, and
+    // positions immediately before / after resolve to clean line-box
+    // anchors (the same way they do for replaced elements like
+    // `<img>`). Without `contenteditable="false"`, an inline `<span>`
+    // is just a transparent inline container to the engine, and the
+    // visual caret after an input-rule-inserted atom lands on the
+    // next line even though the logical selection is correct.
     //
-    // The emoji glyph is rendered via a CSS `::before` pseudo-element
-    // reading `data-emoji-char` (see milkdown.css). Pseudo-elements
-    // can't host a caret, so there's no ambiguity. The DOM that ships
-    // is `<span data-gemoji="warning" data-emoji-char="⚠️" aria-label=":warning:"></span>`.
+    // The DOM that ships is roughly
+    //   `<span data-gemoji="warning" aria-label=":warning:" contenteditable="false">⚠️</span>`
+    //
+    // The same `toDOM` is used by ProseMirror's default rendering
+    // path AND by the WYSIWYG NodeView (which mirrors the same
+    // shape). The preview pane (markdown-it-emoji) emits the emoji
+    // straight into a text run; both end up rendering the glyph in
+    // the parent's text flow with inherited line-height, so spacing
+    // matches across surfaces.
     return [
       'span',
       {
         'data-gemoji': name,
-        'data-emoji-char': emoji,
         // Surface the shortcode to assistive tech alongside the emoji
         // so screen-readers can announce both forms ("warning emoji").
         'aria-label': `:${name}:`,
+        contenteditable: 'false',
       },
+      emoji,
     ];
   },
   parseMarkdown: {
