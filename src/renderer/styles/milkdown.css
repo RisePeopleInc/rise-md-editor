@@ -247,33 +247,6 @@
   margin: 1.5em 0;
 }
 
-/*
- * Emoji shortcode nodes (RAISE-34). The WYSIWYG schema renders each
- * gemoji as an `<img>` whose `src` is a `data:image/svg+xml` URL
- * containing the emoji glyph as SVG `<text>`. <img> is a replaced
- * element, which lets the contentEditable engine treat the node
- * boundary as a hard caret stop (same as ProseMirror's image
- * schema, which is known-good).
- *
- * Sizing: 1em width × 1em height keeps the visual glyph the same
- * size as a plain emoji character in the preview pane, and avoids
- * stretching the line-height. Vertical-align: middle pulls the
- * glyph centre roughly onto the text x-height, which matches how
- * an inline emoji glyph sits in a text run on macOS / Windows /
- * Linux.
- */
-.raise-prose img[data-gemoji] {
-  display: inline;
-  width: 1em;
-  height: 1em;
-  vertical-align: middle;
-  margin: 0;
-  /* SVG-data-URL renders crisply at any zoom; explicitly disable
-   * the user-agent's image rendering smoothing so the glyph keeps
-   * the system emoji font's hinting. */
-  image-rendering: auto;
-}
-
 /* Links */
 .raise-prose a {
   color: var(--rise-interaction);
