@@ -173,11 +173,19 @@ export function SourceEditor({
       triggerReplace: () => runAction('editor.action.startFindReplaceAction'),
       triggerUndo: () => editorRef.current?.trigger('menu', 'undo', null),
       triggerRedo: () => editorRef.current?.trigger('menu', 'redo', null),
-      // Monaco's selectAll command — used from the right-click context
-      // menu (RAISE-28). `webContents.selectAll()` (the role used by
-      // Electron menus) doesn't reach Monaco's internal selection model,
-      // so we trigger Monaco's own action here.
-      selectAll: () => runAction('editor.action.selectAll'),
+      // Monaco's selectAll for the right-click context menu (RAISE-28).
+      // We can't go through `runAction('editor.action.selectAll')` —
+      // that command is registered as a global `MultiCommand` rather
+      // than an `EditorAction`, so `editor.getAction(...)` returns
+      // undefined and the call silently no-ops. Setting the selection
+      // to the model's full range is direct and equivalent in effect.
+      selectAll: () => {
+        const ed = editorRef.current;
+        const model = ed?.getModel();
+        if (!ed || !model) return;
+        ed.setSelection(model.getFullModelRange());
+        ed.focus();
+      },
       zoomIn: () => runAction('editor.action.fontZoomIn'),
       zoomOut: () => runAction('editor.action.fontZoomOut'),
       zoomReset: () => runAction('editor.action.fontZoomReset'),
