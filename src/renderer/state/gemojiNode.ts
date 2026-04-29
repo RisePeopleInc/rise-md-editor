@@ -1,53 +1,60 @@
 import { $inputRule, $remark } from '@milkdown/utils';
 import { InputRule } from '@milkdown/prose/inputrules';
 import type { Node as MdastNode, Text as MdastText } from 'mdast';
-import { nameToEmoji } from 'gemoji';
+import { emojiToName, nameToEmoji } from 'gemoji';
 import { visit } from 'unist-util-visit';
 
 /**
  * GitHub-style emoji shortcodes for the WYSIWYG editor ([RAISE-34](https://risepeople.atlassian.net/browse/RAISE-34)).
  *
- * Design: a shortcode is just a typing aid for the underlying emoji
- * character. `:cat:` is treated as a more-typeable spelling of `🐱`,
- * and the substitution is one-way — once converted, the source ends
- * up with the emoji character.
+ * Design: shortcodes (`:cat:`) are the canonical *source* form on
+ * disk; emoji characters (`🐱`) are the *display* form inside the
+ * WYSIWYG editor. The substitution happens at the editor's I/O
+ * boundary so that:
  *
- * Two substitution paths, both producing the same result (a plain
- * text node containing the emoji glyph, no custom schema involved):
+ *   - source files use shortcodes (compatible with markdown from
+ *     other editors that emit them — Obsidian, Bear, IntelliJ, etc.)
+ *   - inside the editor model the emoji is a plain Unicode character
+ *     in a text node — no custom schema, no inline atom, no NodeView,
+ *     no contentEditable special-casing, so the caret behaves like
+ *     it does for any other character
  *
- * 1. **Parse time**, via a tiny remark plugin (`remarkGemojiSubstitute`):
- *    walks mdast `text` nodes when a markdown source is loaded into
- *    the editor and replaces every `:name:` whose name resolves to a
- *    known gemoji with the emoji character. Code blocks (`code`) and
- *    inline code (`inlineCode`) are separate mdast types and aren't
- *    visited as `text`, so shortcodes inside them are correctly left
- *    alone.
+ * Three substitution sites, two directions:
  *
- * 2. **Type time**, via a ProseMirror input rule (`gemojiInputRule`):
+ * 1. **Parse-side** (`remarkGemojiSubstitute`): walks mdast `text`
+ *    nodes when a markdown source is loaded and replaces every
+ *    `:name:` whose name resolves to a known gemoji with the emoji
+ *    character. Code blocks (`code`) and inline code (`inlineCode`)
+ *    are separate mdast types and aren't visited as `text`, so
+ *    shortcodes inside them are left alone.
+ *
+ * 2. **Type-side** (`gemojiInputRule`): the ProseMirror input rule
  *    fires when the user types the closing `:` of a valid shortcode
- *    in the WYSIWYG editor and replaces the typed text with the
- *    emoji character.
+ *    in WYSIWYG and replaces the typed text with the emoji
+ *    character.
  *
- * Round-trip note: there's no preservation of the `:name:` form. A
- * file containing `:warning:` in source, after any edit + save in
- * WYSIWYG, will have `⚠️` in source. This matches how Slack, GitHub,
- * Discord and most chat systems handle emoji shortcodes — the
- * shortcode is an input convenience, the emoji character is the
- * canonical storage form.
+ * 3. **Serialize-side** (`emojiToShortcodes`): a string-level
+ *    post-process called from the WYSIWYG editor's `markdownUpdated`
+ *    listener that walks the serialized markdown and replaces every
+ *    emoji character that has a primary name in `gemoji.emojiToName`
+ *    with `:name:`. This is the inverse of `remarkGemojiSubstitute`,
+ *    so a `:warning:` shortcode round-trips bit-for-bit through any
+ *    number of edit cycles.
  *
  * Earlier rounds of this feature tried to preserve the shortcode
  * form via a custom mdast `gemoji` node + a ProseMirror inline atom
  * schema. That approach repeatedly hit Chromium contentEditable
  * caret-rendering bugs that no combination of toDOM shape, NodeView,
  * `contenteditable="false"`, CSS pseudo-element rendering, or
- * trailing-break suppression could fix. Dropping the custom node
- * eliminates the whole class of problems by construction: an emoji
- * is just a Unicode character in a text run, same as any other.
+ * trailing-break suppression could fix. The breakthrough was
+ * realising emoji are just Unicode characters — pushing the
+ * substitution out to the I/O boundary keeps the model dead-simple
+ * (plain text) while still preserving the source on disk.
  *
  * The preview pane (markdown-it-emoji from RAISE-30) does the same
- * substitution on its own pipeline, so both surfaces render the
- * emoji identically — and now with identical DOM shape (plain text
- * runs in both).
+ * `:name:` → emoji substitution on its own pipeline, so both
+ * surfaces render the emoji identically and now have identical DOM
+ * shape (plain text runs in both).
  */
 
 // All 1913 gemoji names match this character class. Using a tight
@@ -132,3 +139,58 @@ export const gemojiInputRule = $inputRule(
  * one shot.
  */
 export const gemojiPlugins = [remarkGemojiPlugin, gemojiInputRule];
+
+/**
+ * Build a regex that matches any emoji character in the gemoji
+ * table. Sorted longest-first so multi-codepoint emoji (e.g. ⚠️ =
+ * U+26A0 + U+FE0F) match before any single-codepoint variant of
+ * the same glyph. Module-scoped so the regex is built once at
+ * import time, not per `emojiToShortcodes` call.
+ */
+const EMOJI_KEYS = Object.keys(emojiToName)
+  .slice()
+  .sort((a, b) => b.length - a.length);
+const REGEX_META = /[.*+?^${}()|[\]\\]/g;
+const ALL_EMOJI_RE = new RegExp(
+  EMOJI_KEYS.map((emoji) => emoji.replace(REGEX_META, '\\$&')).join('|'),
+  'g',
+);
+
+/**
+ * Inverse of `remarkGemojiSubstitute`: walk a serialized markdown
+ * string and replace every gemoji character with its primary
+ * `:name:` shortcode. Used at the WYSIWYG editor's serialize-side
+ * boundary so the source on disk preserves the shortcode form.
+ *
+ * Caveat: `gemoji.emojiToName` returns one *primary* name per
+ * emoji. If a file used a non-primary alias (`:woman_running:`
+ * where the primary is `:running_woman:`), the round-trip will
+ * normalise to the primary. For the common case where the alias
+ * IS the primary (`:warning:`, `:fire:`, `:tada:`, `:cat:`, …)
+ * the source is preserved bit-for-bit.
+ *
+ * Caveat 2: this operates on the raw markdown string, not on a
+ * parsed mdast tree, so an emoji character that lives inside a
+ * fenced code block will also be converted to its shortcode form.
+ * The realistic scenario for that — a code block containing a
+ * literal emoji rather than text — is rare enough that we accept
+ * the trade-off; doing it AST-aware would require splitting the
+ * substitution back into a remark stringify-only plugin, which
+ * Milkdown's shared parse/stringify remark instance makes
+ * non-trivial.
+ *
+ * Fast-path: if the input string doesn't match `ALL_EMOJI_RE` at
+ * all, return it unchanged. The regex test is much cheaper than
+ * `String.prototype.replace` over the whole document for files
+ * that don't contain emoji.
+ */
+export function emojiToShortcodes(markdown: string): string {
+  if (!markdown) return markdown;
+  ALL_EMOJI_RE.lastIndex = 0;
+  if (!ALL_EMOJI_RE.test(markdown)) return markdown;
+  ALL_EMOJI_RE.lastIndex = 0;
+  return markdown.replace(ALL_EMOJI_RE, (match) => {
+    const name = emojiToName[match];
+    return name != null ? `:${name}:` : match;
+  });
+}
