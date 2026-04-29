@@ -1,4 +1,9 @@
-import { BrowserWindow, Menu, MenuItemConstructorOptions } from 'electron';
+import {
+  BrowserWindow,
+  clipboard,
+  Menu,
+  MenuItemConstructorOptions,
+} from 'electron';
 import type { MenuAction } from './menu';
 
 /**
@@ -37,50 +42,63 @@ export interface ShowEditorContextMenuPayload {
   hasSelection: boolean;
 }
 
+/**
+ * True when the system clipboard has content that Paste could meaningfully
+ * insert. Used to hide the Paste menu item when there's nothing to paste —
+ * showing it disabled or as a no-op is user-hostile noise. Checked
+ * synchronously in main from `electron.clipboard`.
+ */
+function clipboardHasPasteableContent(): boolean {
+  const formats = clipboard.availableFormats();
+  return formats.some(
+    (f) => f === 'text/plain' || f === 'text/html' || f.startsWith('image/'),
+  );
+}
+
 export function showEditorContextMenu(
   window: BrowserWindow,
   payload: ShowEditorContextMenuPayload,
   dispatch: (action: MenuAction) => void,
 ): void {
   const items: MenuItemConstructorOptions[] = [];
+  const hasSel = payload.hasSelection;
+  const canPaste = clipboardHasPasteableContent();
 
-  if (payload.mode === 'preview') {
-    // Preview is rendered HTML — no editing surface, so Cut and Paste
-    // make no sense. Keep Copy + Select All so the user can still
-    // grab text out of the preview.
-    items.push(
-      { role: 'copy', enabled: payload.hasSelection },
-      { type: 'separator' },
-      { role: 'selectAll' },
-    );
-  } else {
-    // wysiwyg + source + frontmatter share Cut / Copy / Paste / Select All.
-    //
-    // Note: we do NOT pass `enabled: payload.hasSelection` to Cut/Copy.
-    // That was the original wiring, but it broke on the very first
-    // right-click in a session because the menu pops before the editor
-    // surface has gained focus, hasSelection arrives `false`, and
-    // Electron's role-bound items end up disabled (Paste / Select All
-    // included, due to focus targeting). The renderer side now focuses
-    // the editor view before requesting the menu, so leaving these
-    // always-enabled lets Electron handle the no-target case via the
-    // role itself (clicking Cut with nothing selected is a no-op, not
-    // a UX regression).
-    items.push(
-      { role: 'cut' },
-      { role: 'copy' },
-      { role: 'paste' },
-      { type: 'separator' },
-      { role: 'selectAll' },
-    );
+  // The menu surfaces only the items that would do something useful in
+  // the current state. Items that would be greyed out or silently no-op
+  // (e.g. Cut / Copy with no selection, Paste with empty clipboard) are
+  // hidden entirely — a shorter context menu is friendlier than a list
+  // of disabled items the user has to scan past.
+  switch (payload.mode) {
+    case 'preview': {
+      // Preview is read-only rendered HTML. Copy makes sense only if
+      // the user has selected text; Select All is always useful.
+      if (hasSel) items.push({ role: 'copy' });
+      if (items.length > 0) items.push({ type: 'separator' });
+      items.push({ role: 'selectAll' });
+      break;
+    }
+    case 'wysiwyg':
+    case 'source':
+    case 'frontmatter': {
+      // Editing surfaces: cut/copy gated on selection, paste gated on
+      // clipboard contents, select-all + Copy as Markdown always.
+      if (hasSel) {
+        items.push({ role: 'cut' }, { role: 'copy' });
+      }
+      if (canPaste) {
+        items.push({ role: 'paste' });
+      }
+      if (items.length > 0) items.push({ type: 'separator' });
+      items.push({ role: 'selectAll' });
+      break;
+    }
   }
 
   if (payload.mode === 'wysiwyg') {
-    // Copy as Markdown — serializes the current selection (or the
-    // entire doc, if nothing's selected) back to its source form via
-    // Milkdown's serializerCtx, then writes the string to the
-    // clipboard. Implemented in the renderer because that's where the
-    // Milkdown editor instance lives.
+    // Copy as Markdown is always available in WYSIWYG. With no
+    // selection it falls back to copying the entire doc — useful
+    // shortcut for "give me this document as markdown".
     items.push(
       { type: 'separator' },
       {
