@@ -604,6 +604,12 @@ function AppContent() {
         case 'toggle-word-wrap':
           void theme.toggleEditorWordWrap();
           break;
+        case 'context-copy-as-markdown':
+          // RAISE-28: dispatched from the WYSIWYG context menu. The
+          // WysiwygEditor handle owns the Milkdown serializer access;
+          // we just route the action.
+          void wysiwygRef.current?.copyAsMarkdown();
+          break;
         default:
           break;
       }

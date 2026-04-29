@@ -181,6 +181,30 @@ export function SplitView({
     // drive the preview when the user actually scrolls.
   }, [html]);
 
+  // RAISE-28: right-click in the preview pane gets a Copy / Select All
+  // menu (no Cut / Paste — preview is read-only). Copy here yields the
+  // rendered text, which is the right default; "Copy as Markdown" from
+  // preview would require an HTML→markdown reverse-mapping that's a
+  // separate, much larger feature, deliberately out of scope for this
+  // ticket.
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const handleContextMenu = (e: MouseEvent): void => {
+      e.preventDefault();
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+      void window.api.contextMenu.showEditor({
+        mode: 'preview',
+        hasSelection,
+      });
+    };
+    preview.addEventListener('contextmenu', handleContextMenu);
+    return () => {
+      preview.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, []);
+
   return (
     <div ref={containerRef} className="flex h-full w-full bg-app">
       {/*

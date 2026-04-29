@@ -13,6 +13,7 @@ import {
   defaultValueCtx,
   editorViewCtx,
   editorViewOptionsCtx,
+  serializerCtx,
 } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { commonmark, insertImageCommand } from '@milkdown/preset-commonmark';
@@ -45,6 +46,12 @@ export interface WysiwygEditorHandle {
   getCursorOffset: () => number;
   /** Move the caret. Clamped to the current doc size. */
   setCursorOffset: (offset: number) => void;
+  /**
+   * RAISE-28: serialize the current selection to markdown and write
+   * to the system clipboard. With no selection, copies the entire
+   * doc. Resolves once the clipboard write completes.
+   */
+  copyAsMarkdown: () => Promise<void>;
 }
 
 interface WysiwygEditorProps {
@@ -366,6 +373,37 @@ function MilkdownBody({
           view.focus();
         });
       },
+      copyAsMarkdown: async () => {
+        const editor = get();
+        if (!editor) return;
+        let markdown = '';
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const serializer = ctx.get(serializerCtx);
+          const { from, to } = view.state.selection;
+          // ProseMirror's `Node.cut(from, to)` returns a node of the same
+          // type (here: doc) with content trimmed to the selected range,
+          // preserving any wrapping nodes (lists, blockquotes, etc.). The
+          // serializer expects a doc-level node, so this is the right
+          // shape regardless of selection size — and falls back cleanly
+          // to the entire doc when from === to (collapsed cursor).
+          const target =
+            from === to ? view.state.doc : view.state.doc.cut(from, to);
+          markdown = serializer(target);
+        });
+        if (!markdown) return;
+        try {
+          await navigator.clipboard.writeText(markdown);
+        } catch (err) {
+          // Clipboard write can fail under headless / no-permission
+          // contexts. Surface via the same dialog channel as other
+          // user-visible errors rather than swallowing silently.
+          window.api.showError(
+            'Could not copy as Markdown',
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      },
     }),
     [get, scrollContainerRef],
   );
@@ -449,6 +487,38 @@ export function WysiwygEditor({
     x: number;
     y: number;
   } | null>(null);
+
+  // RAISE-28: right-click context menu. Capture the current selection
+  // state at click time and ask main to pop the native menu. The
+  // browser fires `contextmenu` *after* it would normally update the
+  // selection, so reading window.getSelection() here matches what the
+  // user sees — including the case where right-click on unselected
+  // text leaves an empty selection (we then offer Copy as Markdown
+  // for the whole doc).
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleContextMenu = (e: MouseEvent): void => {
+      // Only handle clicks inside the editor body — the parent
+      // container also wraps the YAML frontmatter textarea, which
+      // gets a useful native menu of its own and shouldn't be
+      // overridden.
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('.raise-frontmatter')) return;
+      e.preventDefault();
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+      void window.api.contextMenu.showEditor({
+        mode: 'wysiwyg',
+        hasSelection,
+      });
+    };
+    container.addEventListener('contextmenu', handleContextMenu);
+    return () => {
+      container.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, []);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
