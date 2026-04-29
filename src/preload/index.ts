@@ -34,6 +34,9 @@ export type MenuActionType =
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'
   | 'toggle-word-wrap'
+  | 'context-copy-as-markdown'
+  | 'context-source-select-all'
+  | 'context-preview-select-all'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -282,6 +285,26 @@ const folder = {
   },
 };
 
+/**
+ * RAISE-28: editor-surface context menus. The renderer fires a
+ * `contextmenu` DOM event, captures the relevant state (mode +
+ * selection presence), and asks main to pop the native menu at the
+ * cursor position. Most items use Electron `role`s (cut/copy/paste/
+ * select-all); only `Copy as Markdown` (WYSIWYG only) routes back
+ * through `menu:action` for the renderer to execute.
+ */
+export type EditorContextMode =
+  | 'wysiwyg'
+  | 'source'
+  | 'preview'
+  | 'frontmatter';
+const contextMenu = {
+  showEditor: (payload: {
+    mode: EditorContextMode;
+    hasSelection: boolean;
+  }): Promise<void> => ipcRenderer.invoke('context-menu:show-editor', payload),
+};
+
 const api = {
   // 'darwin' | 'win32' | 'linux' | etc. Lets the renderer branch on
   // macOS without parsing navigator.userAgent.
@@ -306,6 +329,7 @@ const api = {
   theme,
   assets,
   update,
+  contextMenu,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

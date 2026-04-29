@@ -181,6 +181,30 @@ export function SplitView({
     // drive the preview when the user actually scrolls.
   }, [html]);
 
+  // RAISE-28: right-click in the preview pane gets a Copy / Select All
+  // menu (no Cut / Paste — preview is read-only). Copy here yields the
+  // rendered text, which is the right default; "Copy as Markdown" from
+  // preview would require an HTML→markdown reverse-mapping that's a
+  // separate, much larger feature, deliberately out of scope for this
+  // ticket.
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const handleContextMenu = (e: MouseEvent): void => {
+      e.preventDefault();
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+      void window.api.contextMenu.showEditor({
+        mode: 'preview',
+        hasSelection,
+      });
+    };
+    preview.addEventListener('contextmenu', handleContextMenu);
+    return () => {
+      preview.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, []);
+
   return (
     <div ref={containerRef} className="flex h-full w-full bg-app">
       {/*
@@ -228,6 +252,11 @@ export function SplitView({
         onScroll={handlePreviewScroll}
         className="raise-prose min-h-0 min-w-0 flex-1 overflow-auto px-6 py-8"
         style={{ width: `${100 - splitPercent}%` }}
+        // RAISE-28: identity attribute used by App.tsx's
+        // `context-preview-select-all` handler to scope a programmatic
+        // text selection to this node — `webContents.selectAll()` would
+        // otherwise select the entire renderer document.
+        data-raise-preview-pane
         // markdown-it is configured with html:false so user-inline HTML is
         // escaped before reaching the DOM; safe to inject the rendered HTML.
         dangerouslySetInnerHTML={{ __html: html }}

@@ -35,6 +35,9 @@ export type MenuAction =
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'
   | 'toggle-word-wrap'
+  | 'context-copy-as-markdown'
+  | 'context-source-select-all'
+  | 'context-preview-select-all'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -213,6 +216,17 @@ export function buildMenu(deps: MenuDeps): Menu {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
+        {
+          // Mirror of the WYSIWYG context-menu item. No-op when the
+          // active tab isn't in WYSIWYG mode — the renderer's
+          // wysiwygRef is nullable in that case and the handler
+          // bails out cleanly. Cmd+Shift+C is taken (CLAUDE.md), so
+          // no accelerator here for now; users who use this often
+          // can be wired up via the context menu or a future
+          // user-defined accelerator.
+          label: 'Copy as Markdown',
+          click: () => send(deps, 'context-copy-as-markdown'),
+        },
         { type: 'separator' },
         {
           label: 'Find',

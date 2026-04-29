@@ -183,6 +183,19 @@ export interface RaiseFolderApi {
   onFileChanged: (callback: (filePath: string) => void) => () => void;
 }
 
+/** RAISE-28: editor-surface context-menu requests (right-click). */
+export type EditorContextMode =
+  | 'wysiwyg'
+  | 'source'
+  | 'preview'
+  | 'frontmatter';
+export interface RaiseContextMenuApi {
+  showEditor: (payload: {
+    mode: EditorContextMode;
+    hasSelection: boolean;
+  }) => Promise<void>;
+}
+
 export interface RaiseApi {
   platform: NodeJS.Platform;
   openFolder: () => Promise<string | null>;
@@ -197,6 +210,7 @@ export interface RaiseApi {
   theme: RaiseThemeApi;
   assets: RaiseAssetsApi;
   update: RaiseUpdateApi;
+  contextMenu: RaiseContextMenuApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;

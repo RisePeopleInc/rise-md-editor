@@ -529,13 +529,35 @@ function AppContent() {
           handlePrevTab();
           break;
         case 'undo':
-          if (isWysiwyg) wysiwygRef.current?.triggerUndo();
-          else editorRef.current?.triggerUndo();
+        case 'redo': {
+          // RAISE-28: the YAML frontmatter textarea has its own native
+          // undo stack. Without this branch, Cmd+Z when the textarea
+          // is focused routes to Milkdown's history (because we're in
+          // WYSIWYG mode), which leaves the textarea's recent edits
+          // (e.g., a paste) un-undone.
+          //
+          // Targeting only the frontmatter textarea by its unique
+          // class — a broader `instanceof HTMLTextAreaElement` check
+          // would also match Monaco's internal hidden IME textarea
+          // (`.monaco-editor .inputarea`) and break Monaco undo.
+          const active = document.activeElement;
+          if (active?.classList.contains('raise-frontmatter')) {
+            // execCommand is deprecated in the spec but still works in
+            // Chromium for `<textarea>` / `<input>` undo + redo. No
+            // modern alternative exists for synthetic-event undo on
+            // these elements.
+            document.execCommand(event.type === 'undo' ? 'undo' : 'redo');
+            break;
+          }
+          if (event.type === 'undo') {
+            if (isWysiwyg) wysiwygRef.current?.triggerUndo();
+            else editorRef.current?.triggerUndo();
+          } else {
+            if (isWysiwyg) wysiwygRef.current?.triggerRedo();
+            else editorRef.current?.triggerRedo();
+          }
           break;
-        case 'redo':
-          if (isWysiwyg) wysiwygRef.current?.triggerRedo();
-          else editorRef.current?.triggerRedo();
-          break;
+        }
         case 'find':
           // Milkdown ships no built-in find UI; only the Monaco-backed modes
           // (Source / Split) get find / replace today.
@@ -604,6 +626,35 @@ function AppContent() {
         case 'toggle-word-wrap':
           void theme.toggleEditorWordWrap();
           break;
+        case 'context-copy-as-markdown':
+          // RAISE-28: dispatched from the WYSIWYG context menu. The
+          // WysiwygEditor handle owns the Milkdown serializer access;
+          // we just route the action.
+          void wysiwygRef.current?.copyAsMarkdown();
+          break;
+        case 'context-source-select-all':
+          // RAISE-28: dispatched from the Source-mode context menu.
+          // Routes to Monaco's own `editor.action.selectAll` —
+          // `webContents.selectAll()` (the role used by Electron menus)
+          // doesn't reach Monaco's internal selection.
+          editorRef.current?.selectAll();
+          break;
+        case 'context-preview-select-all': {
+          // RAISE-28: dispatched from the preview-pane context menu.
+          // Programmatic selection scoped to the preview node — looking
+          // it up by data attribute rather than `.raise-prose` because
+          // the latter is also used by the WYSIWYG body, and we want
+          // to be unambiguous about which surface we're selecting.
+          const preview = document.querySelector('[data-raise-preview-pane]');
+          if (preview) {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(preview);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
+          break;
+        }
         default:
           break;
       }

@@ -3,6 +3,7 @@ import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildMenu, type MenuDeps } from './menu';
+import { showEditorContextMenu, type ShowEditorContextMenuPayload } from './contextMenu';
 import * as assetOps from './assetOps';
 import { initAutoUpdater } from './autoUpdater';
 import * as fileOps from './fileOperations';
@@ -764,6 +765,19 @@ ipcMain.handle(
         callback: () => resolve(chosen),
       });
     });
+  },
+);
+
+// RAISE-28: editor surface context menu (right-click in WYSIWYG / Source /
+// preview). Built in main so it can use Electron's native `role` items
+// for cut/copy/paste/select-all (which auto-act on the focused web
+// contents) and dispatch the custom `Copy as Markdown` action through
+// the same `menu:action` channel as the app menu.
+ipcMain.handle(
+  'context-menu:show-editor',
+  async (_, payload: ShowEditorContextMenuPayload): Promise<void> => {
+    if (!mainWindow) return;
+    showEditorContextMenu(mainWindow, payload, dispatchMenuAction);
   },
 );
 
