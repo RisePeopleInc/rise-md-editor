@@ -42,6 +42,12 @@ const MIN_PERCENT = 20;
 const MAX_PERCENT = 80;
 const DEFAULT_PERCENT = 50;
 
+// RAISE-29: matches a GFM task-list marker (`* [ ]` / `- [x]` / `+ [X]`)
+// at the start of a line. Used to toggle the Nth task marker in source
+// when the user clicks a checkbox in the preview pane. See the
+// click-handling effect below.
+const TASK_MARKER_RE = /^([ \t]*[*\-+][ \t]+)\[([ xX])\]/gm;
+
 export function SplitView({
   sourceRef,
   content,
@@ -77,14 +83,13 @@ export function SplitView({
       breaks: false,
     });
     // RAISE-29: render `* [ ]` / `* [x]` GFM task lists as checkboxes
-    // in the preview. Disabled (read-only) because the preview pane
-    // is not editable — the user toggles via WYSIWYG or by editing
-    // source. `label: true` wraps the item text in a <label> for
-    // each checkbox, which improves accessibility (screen readers
-    // announce the label as the input's name) and gives us a clean
-    // CSS hook (`li.task-list-item:has(input:checked) label`) for
-    // the completed-item greying.
-    instance.use(markdownItTaskLists, { enabled: false, label: true });
+    // in the preview. `enabled: true` removes the `disabled` attribute
+    // on the input so the user can click to toggle — a click handler
+    // on the preview pane container (further down in this component)
+    // intercepts the change and rewrites the source markdown.
+    // `label: true` wraps the item text in a <label> for accessibility
+    // and gives us a clean CSS hook for completed-item greying.
+    instance.use(markdownItTaskLists, { enabled: true, label: true });
     // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
     // at render time. The token's `src` attribute is the literal markdown
     // src; we mutate it before delegating to the default renderer.
@@ -190,6 +195,63 @@ export function SplitView({
     // re-sync on content change. Monaco's onDidScrollChange will fire and
     // drive the preview when the user actually scrolls.
   }, [html]);
+
+  // RAISE-29: clicking a task-list checkbox in the preview pane
+  // toggles the corresponding `[ ]` / `[x]` in the source markdown.
+  // markdown-it-task-lists' `enabled: true` config removes the
+  // `disabled` attribute so the input fires click events; we then
+  // map the click back to source by counting which checkbox was
+  // clicked among all task-list checkboxes in the preview.
+  //
+  // Source is updated via `onChange` — the parent re-renders the
+  // preview from the new content, and the checkbox is shown in its
+  // new state. Letting the browser handle the input's visual toggle
+  // gives snappier feedback than preventing default and waiting on
+  // the re-render.
+  //
+  // Limitation: the regex matches any `^[ \t]*[*\-+] \[[ xX]\]`
+  // marker — including occurrences inside fenced code blocks, which
+  // markdown-it-task-lists itself wouldn't render as checkboxes.
+  // Files that mix real task lists with code-block-faux task lists
+  // would index off-by-one. Acceptable for now; rare in practice.
+  // Long-term fix would track source line numbers via markdown-it's
+  // env / token.map and target the exact source line.
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const handleClick = (e: MouseEvent): void => {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.type !== 'checkbox') return;
+      if (!target.classList.contains('task-list-item-checkbox')) return;
+      const allCheckboxes = preview.querySelectorAll(
+        'input.task-list-item-checkbox',
+      );
+      const index = Array.from(allCheckboxes).indexOf(target);
+      if (index < 0) return;
+      let count = 0;
+      let updated = false;
+      const next = contentRef.current.replace(
+        TASK_MARKER_RE,
+        (match, prefix: string, marker: string) => {
+          if (count++ !== index) return match;
+          updated = true;
+          return `${prefix}[${marker === ' ' ? 'x' : ' '}]`;
+        },
+      );
+      if (updated && next !== contentRef.current) {
+        onChangeRef.current(next);
+      }
+    };
+    preview.addEventListener('click', handleClick);
+    return () => {
+      preview.removeEventListener('click', handleClick);
+    };
+  }, []);
 
   // RAISE-28: right-click in the preview pane gets a Copy / Select All
   // menu (no Cut / Paste — preview is read-only). Copy here yields the

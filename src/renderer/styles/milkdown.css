@@ -156,59 +156,77 @@
 .raise-prose li > ol { margin-top: 0.25em; }
 
 /*
- * Task lists (RAISE-29). Two surfaces produce different DOM:
+ * Task lists (RAISE-29). The two surfaces produce different DOM —
+ * the rules below have to handle both:
  *
  *   WYSIWYG (Milkdown's GFM preset, with our list_item NodeView in
  *   WysiwygEditor.tsx):
  *     <li data-item-type="task" data-checked="true|false">
  *       <input type="checkbox" class="raise-task-checkbox" />
- *       <div>content</div>
+ *       <div>                                ← contentDOM
+ *         <p>content</p>
+ *         <ul>...nested list (if any)...</ul>
+ *       </div>
  *     </li>
  *
- *   Preview (markdown-it-task-lists, with `label: true`):
- *     <li class="task-list-item">
- *       <input type="checkbox" class="task-list-item-checkbox" disabled (checked) />
- *       <label class="task-list-item-label">content</label>
+ *   Preview (markdown-it-task-lists, with `label: true, enabled: true`):
+ *     <li class="task-list-item enabled">
+ *       <p>
+ *         <label>
+ *           <input type="checkbox" class="task-list-item-checkbox" />
+ *           content
+ *         </label>
+ *       </p>
+ *       <ul class="contains-task-list">...nested...</ul>
  *     </li>
- *
- * Rules below cover both. Task list items get no list marker (the
- * checkbox is the marker), the items align cleanly, and completed
- * items render with muted text + strikethrough so checked-off
- * todos are scan-past-able at a glance.
  */
+
+/* Layout: no list marker (checkbox replaces it), items shift left so
+ * the checkbox aligns with where the disc / decimal would be in a
+ * plain list, and flex-align checkbox + content with a small gap. */
 .raise-prose li[data-item-type="task"],
 .raise-prose li.task-list-item {
   list-style: none;
-  /* Pull the item back so the checkbox sits flush with where the
-   * disc / decimal marker would be in a regular list. */
   margin-left: -1.5rem;
   padding-left: 0;
+}
+.raise-prose li[data-item-type="task"] {
   display: flex;
   align-items: baseline;
   gap: 0.4em;
 }
 
-/* The checkbox itself — both the WYSIWYG NodeView's and the
- * preview's `markdown-it-task-lists` checkbox. */
+/* WYSIWYG: the contentDOM (`<div>`) and any nested list line up
+ * after the checkbox. Make the contentDOM grow into the remaining
+ * width so wraps line up cleanly. */
+.raise-prose li[data-item-type="task"] > div {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The checkbox itself. */
 .raise-prose li[data-item-type="task"] > input[type="checkbox"],
-.raise-prose li.task-list-item > input[type="checkbox"] {
-  /* Slight nudge: align with the text baseline rather than the
-   * default top-aligned input. */
+.raise-prose li.task-list-item input.task-list-item-checkbox {
   margin: 0;
   flex-shrink: 0;
   cursor: pointer;
 }
-.raise-prose li.task-list-item > input[type="checkbox"]:disabled {
-  /* Preview pane checkboxes are disabled (read-only). Don't grey
-   * them out further than the browser already does — they should
-   * still read as a real checkbox visually. */
-  cursor: default;
-}
 
-/* Completed-item styling: muted text + strikethrough on the content,
- * not on the checkbox itself. */
-.raise-prose li[data-item-type="task"][data-checked="true"] > div,
-.raise-prose li.task-list-item:has(> input[type="checkbox"]:checked) > label {
+/* Completed-item styling — muted + strikethrough.
+ *
+ * Critical scoping: target only the *immediate* content (the direct
+ * `<p>` child for WYSIWYG, the wrapping `<label>` for preview). If
+ * we'd applied this to the contentDOM `<div>` or the whole `<li>`,
+ * `text-decoration` would cascade into nested task items and a
+ * checked outer would visually strike through unchecked inner
+ * children — wrong.
+ *
+ * For preview, `label:has(> input:checked)` matches each label
+ * scoped to its own checkbox: each label contains exactly one
+ * input, so there's no cross-talk between siblings.
+ */
+.raise-prose li[data-item-type="task"][data-checked="true"] > div > p,
+.raise-prose li.task-list-item label:has(> input[type="checkbox"]:checked) {
   color: var(--rise-text-muted);
   text-decoration: line-through;
 }

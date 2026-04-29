@@ -22,7 +22,15 @@ import {
 } from '@milkdown/preset-gfm';
 
 type MarkName = 'strong' | 'emphasis' | 'inlineCode' | 'strike_through';
-type BlockName = 'h1' | 'h2' | 'h3' | 'bullet_list' | 'ordered_list' | 'blockquote' | '';
+type BlockName =
+  | 'h1'
+  | 'h2'
+  | 'h3'
+  | 'bullet_list'
+  | 'ordered_list'
+  | 'task_list'
+  | 'blockquote'
+  | '';
 
 interface ToolbarButtonProps {
   onClick: () => void;
@@ -110,18 +118,23 @@ export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
         else if (level === 2) setActiveBlock('h2');
         else if (level === 3) setActiveBlock('h3');
         else setActiveBlock('');
-      } else if (
-        node.type.name === 'bullet_list' ||
-        node.type.name === 'ordered_list' ||
-        node.type.name === 'blockquote'
-      ) {
-        setActiveBlock(node.type.name as BlockName);
       } else {
-        // Walk up to find list/blockquote ancestors
+        // Walk up to find list / blockquote / task ancestors. The
+        // task-list check inspects the nearest list_item's `checked`
+        // attribute (set by @milkdown/preset-gfm — `null` for
+        // ordinary items, `true` / `false` for task items).
         let depth = $from.depth;
         let found: BlockName = '';
         while (depth > 0) {
           const ancestor = $from.node(depth);
+          if (ancestor.type.name === 'list_item') {
+            const checked = (ancestor.attrs as { checked?: boolean | null })
+              .checked;
+            if (checked != null) {
+              found = 'task_list';
+              break;
+            }
+          }
           if (
             ancestor.type.name === 'bullet_list' ||
             ancestor.type.name === 'ordered_list' ||
@@ -191,6 +204,44 @@ export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
   const handleTable = useCallback(() => {
     run(insertTableCommand, { row: 3, col: 3 });
   }, [run]);
+
+  // RAISE-29: task list toggle. The GFM preset doesn't ship a
+  // `wrapInTaskListCommand` — only an input rule that fires when
+  // typing `[ ] `. To toggle from a button: ensure we're in a
+  // bullet list (wrap if not), then flip the containing
+  // `list_item`'s `checked` attribute between `null` (regular
+  // bullet) and `false` (unchecked task). Toggling an existing
+  // task back to a regular bullet just sets `checked` to `null`.
+  const handleTaskList = useCallback(() => {
+    if (loading) return;
+    const editor = get();
+    if (!editor) return;
+    // Step 1: make sure we're in a bullet list. wrapInBulletListCommand
+    // wraps a paragraph and is a no-op when already inside one.
+    editor.action(callCommand(wrapInBulletListCommand.key));
+    // Step 2: flip the list_item's `checked` attribute.
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const state = view.state;
+      const { $from } = state.selection;
+      for (let depth = $from.depth; depth > 0; depth--) {
+        if ($from.node(depth).type.name !== 'list_item') continue;
+        const pos = $from.before(depth);
+        const node = state.doc.nodeAt(pos);
+        const checked = (node?.attrs as { checked?: boolean | null }).checked;
+        view.dispatch(
+          state.tr.setNodeAttribute(
+            pos,
+            'checked',
+            // Already a task → unmark (back to plain bullet).
+            // Plain bullet → mark as unchecked task.
+            checked == null ? false : null,
+          ),
+        );
+        break;
+      }
+    });
+  }, [loading, get]);
 
   return (
     <div
@@ -262,6 +313,13 @@ export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
         onClick={() => run(wrapInOrderedListCommand)}
       >
         1.
+      </ToolbarButton>
+      <ToolbarButton
+        title="Task list"
+        active={activeBlock === 'task_list'}
+        onClick={handleTaskList}
+      >
+        ☑
       </ToolbarButton>
       <ToolbarButton
         title="Blockquote"

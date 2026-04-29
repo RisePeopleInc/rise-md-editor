@@ -266,23 +266,27 @@ function MilkdownBody({
                 checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.contentEditable = 'false';
-                // Without this, ProseMirror treats the checkbox as a
-                // selectable node and a click moves the caret instead
-                // of firing the toggle.
                 checkbox.classList.add('raise-task-checkbox');
-                checkbox.addEventListener('click', (e) => {
-                  e.preventDefault();
+                // Stop ProseMirror from interpreting the click as
+                // selection-into-the-document — without this the
+                // caret would jump to the start of the list item on
+                // every checkbox click.
+                checkbox.addEventListener('mousedown', (e) => {
+                  e.stopPropagation();
+                });
+                // `change` fires AFTER the browser's native toggle, so
+                // the visual checkbox state has already updated. Don't
+                // preventDefault — letting the browser handle the
+                // visual flip avoids a class of bugs where our
+                // `applyAttrs` doesn't re-render the input fast enough
+                // and the user sees a strikethrough on text but the
+                // checkbox itself stays unchecked.
+                checkbox.addEventListener('change', () => {
                   if (typeof getPos !== 'function') return;
                   const pos = getPos();
                   if (pos == null) return;
-                  const current = view.state.doc.nodeAt(pos);
-                  if (!current) return;
                   view.dispatch(
-                    view.state.tr.setNodeAttribute(
-                      pos,
-                      'checked',
-                      !(current.attrs as { checked?: boolean }).checked,
-                    ),
+                    view.state.tr.setNodeAttribute(pos, 'checked', checkbox!.checked),
                   );
                 });
                 li.insertBefore(checkbox, content);
