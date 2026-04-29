@@ -8,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import MarkdownIt from 'markdown-it';
+import { full as markdownItEmoji } from 'markdown-it-emoji';
 import markdownItTaskLists from 'markdown-it-task-lists';
 import {
   SourceEditor,
@@ -91,6 +92,23 @@ export function SplitView({
     // `label: true` wraps the item text in a <label> for accessibility
     // and gives us a clean CSS hook for completed-item greying.
     instance.use(markdownItTaskLists, { enabled: true, label: true });
+    // RAISE-30: render GitHub-style emoji shortcodes in the preview.
+    // `:warning:` → ⚠️, `:fire:` → 🔥, etc. The `full` flavour ships
+    // the GitHub set (~1500 codes); `light` would be ~40 ASCII-fallback
+    // codes which is too thin. The plugin respects code spans and
+    // fenced code blocks (`:warning:` inside `\`\`` stays literal),
+    // and unrecognised codes (e.g., `:not-an-emoji:`) pass through as
+    // text — both behaviours are inherited from markdown-it's standard
+    // tokenizer respecting code contexts.
+    //
+    // WYSIWYG-side rendering is deliberately out of scope here. A
+    // straightforward `remark-gemoji` integration would corrupt the
+    // source on round-trip (parses shortcode → emoji char in the AST,
+    // serialises back to the emoji char rather than the shortcode).
+    // Proper WYSIWYG support requires a custom Milkdown gemoji node
+    // type with its own parser/serializer pair — tracked under
+    // [RAISE-34](https://risepeople.atlassian.net/browse/RAISE-34).
+    instance.use(markdownItEmoji);
     // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
     // at render time. The token's `src` attribute is the literal markdown
     // src; we mutate it before delegating to the default renderer.
