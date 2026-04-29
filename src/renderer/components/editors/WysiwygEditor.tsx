@@ -37,6 +37,7 @@ import {
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
+import { gemojiPlugins } from '../../state/gemojiNode';
 
 export interface WysiwygEditorHandle {
   triggerUndo: () => void;
@@ -440,7 +441,12 @@ function MilkdownBody({
       .use(clipboard)
       .use(cursor)
       .use(tooltipPlugin)
-      .use(slashPlugin),
+      .use(slashPlugin)
+      // RAISE-34: emoji-shortcode rendering with source round-trip.
+      // Bundles the remark plugin (splits `:name:` text into typed
+      // mdast nodes), the gemoji schema (round-trips between mdast
+      // and ProseMirror), and the input rule (typing-trigger).
+      .use(gemojiPlugins),
   );
 
   // Bridge the imperative handle to Milkdown's history commands. The menu's
