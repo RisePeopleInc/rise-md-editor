@@ -33,6 +33,7 @@ export type MenuActionType =
   | 'editor-contrast-hard'
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'
+  | 'toggle-word-wrap'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -122,6 +123,7 @@ const update = {
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 export type EditorContrast = 'hard' | 'medium' | 'soft';
+export type WordWrap = 'on' | 'off';
 
 export interface AppThemeState {
   preference: ThemePreference;
@@ -131,6 +133,13 @@ export interface EditorThemeState {
   preference: ThemePreference;
   contrast: EditorContrast;
   resolved: ResolvedTheme;
+  /**
+   * Word-wrap mode for the Monaco source editor. Lives alongside theme
+   * + contrast because it's another per-editor view preference; the
+   * `theme:set-editor` IPC accepts it as part of the same payload to
+   * avoid duplicating get / set / broadcast plumbing for one boolean.
+   */
+  wordWrap: WordWrap;
 }
 export interface ThemeState {
   app: AppThemeState;
@@ -144,7 +153,16 @@ const theme = {
   setEditor: (payload: {
     preference?: ThemePreference;
     contrast?: EditorContrast;
+    wordWrap?: WordWrap;
   }): Promise<ThemeState> => ipcRenderer.invoke('theme:set-editor', payload),
+  /**
+   * Atomically flip the source-editor word-wrap mode. Resolves the
+   * toggle in main against the persisted value, so back-to-back
+   * presses that out-race React state updates still alternate
+   * correctly.
+   */
+  toggleEditorWordWrap: (): Promise<ThemeState> =>
+    ipcRenderer.invoke('theme:toggle-editor-word-wrap'),
   /** Subscribe to OS theme flips and explicit set events from main. */
   onChange: (callback: (state: ThemeState) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, state: ThemeState): void =>

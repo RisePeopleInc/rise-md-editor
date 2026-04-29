@@ -601,6 +601,9 @@ function AppContent() {
         case 'editor-contrast-soft':
           void theme.setEditorContrast('soft');
           break;
+        case 'toggle-word-wrap':
+          void theme.toggleEditorWordWrap();
+          break;
         default:
           break;
       }
@@ -793,6 +796,7 @@ function AppContent() {
               sourceRef={editorRef}
               wysiwygRef={wysiwygRef}
               monacoThemeId={theme.monacoThemeId}
+              wordWrap={theme.editor.wordWrap}
               onImageDrop={handleImageDrop}
               onImagePaste={handleImagePaste}
               onOpenImage={handleOpenImage}

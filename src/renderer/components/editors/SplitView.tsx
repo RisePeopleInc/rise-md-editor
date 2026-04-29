@@ -15,6 +15,7 @@ import {
 } from './SourceEditor';
 import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
+import type { WordWrap } from '../../env';
 
 interface SplitViewProps {
   sourceRef?: Ref<SourceEditorHandle>;
@@ -25,6 +26,8 @@ interface SplitViewProps {
   initialScrollTop?: number;
   /** Monaco theme id passed through to the source pane. */
   monacoThemeId: string;
+  /** Source-editor word-wrap mode. Preview pane always wraps regardless. */
+  wordWrap: WordWrap;
   /** Image-drop handler forwarded to the source pane. */
   onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
   /** Image-paste handler forwarded to the source pane. */
@@ -46,6 +49,7 @@ export function SplitView({
   initialCursor,
   initialScrollTop,
   monacoThemeId,
+  wordWrap,
   onImageDrop,
   onImagePaste,
   markdownPath,
@@ -203,6 +207,7 @@ export function SplitView({
           initialCursor={initialCursor}
           initialScrollTop={initialScrollTop}
           monacoThemeId={monacoThemeId}
+          wordWrap={wordWrap}
           onImageDrop={onImageDrop}
           onImagePaste={onImagePaste}
         />

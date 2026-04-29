@@ -5,6 +5,7 @@ import { SplitView } from './SplitView';
 import { WysiwygEditor, type WysiwygEditorHandle } from './WysiwygEditor';
 import type { EditorMode, Tab } from '../../state/fileState';
 import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
+import type { WordWrap } from '../../env';
 
 interface EditorContainerProps {
   tab: Tab;
@@ -15,6 +16,8 @@ interface EditorContainerProps {
   wysiwygRef: Ref<WysiwygEditorHandle>;
   /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
   monacoThemeId: string;
+  /** Source-editor word-wrap mode. WYSIWYG / preview ignore it. */
+  wordWrap: WordWrap;
   /** Image-drop handler — saves files via IPC, returns markdown to insert. */
   onImageDrop: (files: File[]) => Promise<ImageInsertion[]>;
   /** Image-paste handler — saves clipboard image, returns markdown to insert.
@@ -41,6 +44,7 @@ export function EditorContainer({
   sourceRef,
   wysiwygRef,
   monacoThemeId,
+  wordWrap,
   onImageDrop,
   onImagePaste,
   onOpenImage,
@@ -80,6 +84,7 @@ export function EditorContainer({
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
             monacoThemeId={monacoThemeId}
+            wordWrap={wordWrap}
             onImageDrop={onImageDrop}
             onImagePaste={onImagePaste}
             markdownPath={tab.path}
@@ -93,6 +98,7 @@ export function EditorContainer({
             initialCursor={tab.cursorPosition}
             initialScrollTop={tab.scrollPosition}
             monacoThemeId={monacoThemeId}
+            wordWrap={wordWrap}
             onImageDrop={onImageDrop}
             onImagePaste={onImagePaste}
           />

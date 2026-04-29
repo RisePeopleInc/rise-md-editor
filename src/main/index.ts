@@ -187,6 +187,7 @@ const menuDeps: MenuDeps = {
   getThemePreference: () => themeStore.getThemePreference(),
   getEditorThemePreference: () => themeStore.getEditorThemePreference(),
   getEditorContrast: () => themeStore.getEditorContrast(),
+  getWordWrap: () => themeStore.getWordWrap(),
   dispatch: dispatchMenuAction,
   clearRecent: () => {
     recentStore.clearRecent();
@@ -913,6 +914,7 @@ function snapshotThemeState() {
       preference: themeStore.getEditorThemePreference(),
       contrast: themeStore.getEditorContrast(),
       resolved: themeStore.getResolvedEditorTheme(),
+      wordWrap: themeStore.getWordWrap(),
     },
   };
 }
@@ -943,11 +945,16 @@ ipcMain.handle(
     payload: {
       preference?: themeStore.ThemePreference;
       contrast?: themeStore.EditorContrast;
+      wordWrap?: themeStore.WordWrap;
     },
   ) => {
     // No-op short-circuit when the caller passed nothing — avoids a
     // pointless menu rebuild + broadcast.
-    if (payload.preference === undefined && payload.contrast === undefined) {
+    if (
+      payload.preference === undefined &&
+      payload.contrast === undefined &&
+      payload.wordWrap === undefined
+    ) {
       return snapshotThemeState();
     }
     if (payload.preference !== undefined) {
@@ -956,10 +963,27 @@ ipcMain.handle(
     if (payload.contrast !== undefined) {
       themeStore.setEditorContrast(payload.contrast);
     }
+    if (payload.wordWrap !== undefined) {
+      themeStore.setWordWrap(payload.wordWrap);
+    }
     broadcastThemeUpdate();
     return snapshotThemeState();
   },
 );
+
+// Atomic toggle. The renderer used to read its local React state, flip
+// it, and call `theme:set-editor` with the explicit value — but two
+// rapid presses could both close over the same stale state and end up
+// at the same final value (two toggles "on → off → off" instead of
+// "on → off → on"). Reading current state in main and flipping it here
+// makes the read-modify-write uninterruptible (Node's event loop is
+// single-threaded), so back-to-back toggles always alternate.
+ipcMain.handle('theme:toggle-editor-word-wrap', async () => {
+  const current = themeStore.getWordWrap();
+  themeStore.setWordWrap(current === 'on' ? 'off' : 'on');
+  broadcastThemeUpdate();
+  return snapshotThemeState();
+});
 
 // macOS / Windows fire `nativeTheme.updated` when the OS appearance
 // changes. Both the app and editor zones may follow it (when their

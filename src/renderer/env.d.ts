@@ -126,6 +126,7 @@ export interface RaiseAssetsApi {
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 export type EditorContrast = 'hard' | 'medium' | 'soft';
+export type WordWrap = 'on' | 'off';
 
 export interface AppThemeState {
   preference: ThemePreference;
@@ -135,6 +136,7 @@ export interface EditorThemeState {
   preference: ThemePreference;
   contrast: EditorContrast;
   resolved: ResolvedTheme;
+  wordWrap: WordWrap;
 }
 export interface ThemeState {
   app: AppThemeState;
@@ -147,7 +149,10 @@ export interface RaiseThemeApi {
   setEditor: (payload: {
     preference?: ThemePreference;
     contrast?: EditorContrast;
+    wordWrap?: WordWrap;
   }) => Promise<ThemeState>;
+  /** Atomic word-wrap toggle, resolved against the persisted value in main. */
+  toggleEditorWordWrap: () => Promise<ThemeState>;
   onChange: (callback: (state: ThemeState) => void) => () => void;
 }
 

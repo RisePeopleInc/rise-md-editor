@@ -34,6 +34,7 @@ export type MenuAction =
   | 'editor-contrast-hard'
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'
+  | 'toggle-word-wrap'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -63,6 +64,11 @@ export interface MenuDeps {
   getEditorThemePreference: () => 'system' | 'light' | 'dark';
   /** Current editor contrast — drives the contrast checkmarks. */
   getEditorContrast: () => 'hard' | 'medium' | 'soft';
+  /**
+   * Current word-wrap mode for the source editor — drives the
+   * `View → Word Wrap` checkmark.
+   */
+  getWordWrap: () => 'on' | 'off';
   /**
    * Dispatch a menu action. The implementation is responsible for queuing and
    * (if needed) reopening the window — never short-circuits on a missing
@@ -248,6 +254,18 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Cycle Mode',
           accelerator: 'CmdOrCtrl+\\',
           click: () => send(deps, 'cycle-mode'),
+        },
+        { type: 'separator' },
+        {
+          // Word-wrap toggle for the Monaco source editor (Source-only
+          // and the source pane in Split). Cmd+Alt+Z matches VS Code's
+          // convention. WYSIWYG mode is unaffected — Milkdown always
+          // wraps. Pref persists in themeStore.
+          label: 'Word Wrap',
+          type: 'checkbox',
+          checked: deps.getWordWrap() === 'on',
+          accelerator: isMac ? 'Cmd+Alt+Z' : 'Ctrl+Alt+Z',
+          click: () => send(deps, 'toggle-word-wrap'),
         },
         { type: 'separator' },
         {

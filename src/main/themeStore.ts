@@ -19,6 +19,19 @@ export type ResolvedTheme = 'light' | 'dark';
  */
 export type EditorContrast = 'hard' | 'medium' | 'soft';
 
+/**
+ * Word-wrap mode for the Monaco source editor (Source-only and the
+ * source pane in Split). `'on'` wraps long lines to pane width — the
+ * historical default since RAISE-3, sensible for prose Markdown.
+ * `'off'` exposes Monaco's own horizontal scrollbar — better for
+ * code-heavy or table-heavy markdown where alignment matters.
+ *
+ * WYSIWYG / preview zones ignore this — Milkdown and the rendered
+ * preview always wrap; horizontal-scrolling rendered prose has no
+ * good use case.
+ */
+export type WordWrap = 'on' | 'off';
+
 interface Schema {
   /** App chrome / WYSIWYG / preview theme. */
   themePreference: ThemePreference;
@@ -26,6 +39,8 @@ interface Schema {
   editorThemePreference: ThemePreference;
   /** Source-editor contrast. */
   editorContrast: EditorContrast;
+  /** Source-editor word-wrap mode. */
+  wordWrap: WordWrap;
 }
 
 const store = new Store<Schema>({
@@ -34,6 +49,7 @@ const store = new Store<Schema>({
     themePreference: 'system',
     editorThemePreference: 'system',
     editorContrast: 'soft',
+    wordWrap: 'on',
   },
 });
 
@@ -77,6 +93,14 @@ export function getEditorContrast(): EditorContrast {
 
 export function setEditorContrast(contrast: EditorContrast): void {
   store.set('editorContrast', contrast);
+}
+
+export function getWordWrap(): WordWrap {
+  return store.get('wordWrap', 'on');
+}
+
+export function setWordWrap(wrap: WordWrap): void {
+  store.set('wordWrap', wrap);
 }
 
 /**
