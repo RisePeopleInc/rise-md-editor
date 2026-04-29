@@ -443,6 +443,46 @@ function MilkdownBody({
     [get, scrollContainerRef],
   );
 
+  // RAISE-28: right-click context menu. Lives in MilkdownBody (not the
+  // outer WysiwygEditor) so it can close over `editorInstanceRef`,
+  // which is needed to focus the editor view synchronously before
+  // the menu pops — without that, the very first right-click in a
+  // session (before the body has been clicked into) hits an unfocused
+  // webContents and Electron's role-bound items (Cut / Copy / Paste /
+  // Select All) end up disabled.
+  //
+  // The frontmatter textarea has its own `onContextMenu` prop in the
+  // JSX below, so this listener early-exits when the click lands
+  // there to avoid double-firing.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleContextMenu = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('.raise-frontmatter')) return;
+      e.preventDefault();
+
+      const editor = editorInstanceRef.current;
+      if (editor) {
+        editor.action((ctx) => {
+          ctx.get(editorViewCtx).focus();
+        });
+      }
+
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+      void window.api.contextMenu.showEditor({
+        mode: 'wysiwyg',
+        hasSelection,
+      });
+    };
+    container.addEventListener('contextmenu', handleContextMenu);
+    return () => {
+      container.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, [scrollContainerRef]);
+
   return <Milkdown />;
 }
 
@@ -522,50 +562,6 @@ export function WysiwygEditor({
     x: number;
     y: number;
   } | null>(null);
-
-  // RAISE-28: right-click context menu. The frontmatter textarea has
-  // its own handler attached via `onContextMenu` on the JSX (different
-  // mode + different selection-detection path), so the WYSIWYG body
-  // listener early-exits when the click lands on it.
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    const handleContextMenu = (e: MouseEvent): void => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      // Frontmatter has its own onContextMenu — let it handle that
-      // surface so we don't double-fire.
-      if (target.closest('.raise-frontmatter')) return;
-      e.preventDefault();
-
-      // Focus the editor view before requesting the menu. Without
-      // this, the very first right-click in a session — before the
-      // user has clicked into the WYSIWYG body — hits an unfocused
-      // webContents, and Electron's role-bound items (Cut / Copy /
-      // Paste / Select All) end up disabled because they have no
-      // valid target. A `view.focus()` here flips ProseMirror into
-      // the focused state synchronously, so by the time the IPC
-      // round-trip completes the role-based items have a target to
-      // act on.
-      const editor = editorInstanceRef.current;
-      if (editor) {
-        editor.action((ctx) => {
-          ctx.get(editorViewCtx).focus();
-        });
-      }
-
-      const sel = window.getSelection();
-      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
-      void window.api.contextMenu.showEditor({
-        mode: 'wysiwyg',
-        hasSelection,
-      });
-    };
-    container.addEventListener('contextmenu', handleContextMenu);
-    return () => {
-      container.removeEventListener('contextmenu', handleContextMenu);
-    };
-  }, []);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
