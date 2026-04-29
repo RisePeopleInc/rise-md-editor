@@ -8,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import MarkdownIt from 'markdown-it';
+import markdownItTaskLists from 'markdown-it-task-lists';
 import {
   SourceEditor,
   type CursorPosition,
@@ -40,6 +41,13 @@ interface SplitViewProps {
 const MIN_PERCENT = 20;
 const MAX_PERCENT = 80;
 const DEFAULT_PERCENT = 50;
+
+// RAISE-29: matches `[ ]` / `[x]` / `[X]` on a known task-list line.
+// Used to flip the marker on the specific source line that
+// markdown-it identified as a task-list item — applied to a single
+// line at a time so we don't have to worry about false-positive
+// matches inside fenced code blocks.
+const TASK_LINE_MARKER_RE = /\[([ xX])\]/;
 
 export function SplitView({
   sourceRef,
@@ -75,6 +83,14 @@ export function SplitView({
       typographer: true,
       breaks: false,
     });
+    // RAISE-29: render `* [ ]` / `* [x]` GFM task lists as checkboxes
+    // in the preview. `enabled: true` removes the `disabled` attribute
+    // on the input so the user can click to toggle — a click handler
+    // on the preview pane container (further down in this component)
+    // intercepts the change and rewrites the source markdown.
+    // `label: true` wraps the item text in a <label> for accessibility
+    // and gives us a clean CSS hook for completed-item greying.
+    instance.use(markdownItTaskLists, { enabled: true, label: true });
     // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
     // at render time. The token's `src` attribute is the literal markdown
     // src; we mutate it before delegating to the default renderer.
@@ -98,8 +114,30 @@ export function SplitView({
   // relative paths point at a different location. The image rule reads
   // markdownPath via a ref so it doesn't appear in `md.render`'s
   // signature; eslint can't see that, hence the disable.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const html = useMemo(() => md.render(content), [md, content, markdownPath]);
+  //
+  // RAISE-29: alongside the rendered HTML, build a parallel array of
+  // *source line numbers* for each task-list item. markdown-it-task-lists
+  // marks each task `<li>`'s `list_item_open` token with a
+  // `task-list-item` class; that token's `.map[0]` is the 0-indexed
+  // source line of the `* [ ]` / `* [x]` it represents. This lets the
+  // click handler below toggle the exact source line by index instead
+  // of regexing through the source for the Nth `[ ]` (which would
+  // false-match markers inside fenced code blocks etc.).
+  const { html, taskLines } = useMemo(() => {
+    const env = {};
+    const tokens = md.parse(content, env);
+    const renderedHtml = md.renderer.render(tokens, md.options, env);
+    const lines: number[] = [];
+    for (const t of tokens) {
+      if (t.type !== 'list_item_open') continue;
+      const cls = t.attrGet('class') ?? '';
+      if (!cls.includes('task-list-item')) continue;
+      const lineIdx = t.map?.[0];
+      if (lineIdx != null) lines.push(lineIdx);
+    }
+    return { html: renderedHtml, taskLines: lines };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [md, content, markdownPath]);
 
   // Scroll-sync lock: the side that initiated the scroll bumps a flag the
   // other side checks before mirroring, otherwise a single user scroll
@@ -180,6 +218,64 @@ export function SplitView({
     // re-sync on content change. Monaco's onDidScrollChange will fire and
     // drive the preview when the user actually scrolls.
   }, [html]);
+
+  // RAISE-29: clicking a task-list checkbox in the preview pane
+  // toggles the corresponding `[ ]` / `[x]` in the source markdown.
+  // markdown-it-task-lists' `enabled: true` config removes the
+  // `disabled` attribute so the input fires events; we listen for
+  // `change` (rather than `click`) to catch all activation methods —
+  // mouse, keyboard Space, label-for synthetic — without
+  // double-firing on label-wrapped click→input synthesis.
+  //
+  // Mapping from clicked checkbox to source line uses the
+  // `taskLines` array built alongside the HTML render: index N in
+  // the preview's checkbox order corresponds to source line
+  // `taskLines[N]`. We flip the marker on that line in place,
+  // `lines.join('\n')`, and propagate via `onChange`. Updating
+  // `contentRef.current` synchronously *before* `onChange` makes
+  // sequential rapid clicks compose correctly even if React's
+  // re-render hasn't propagated the new content prop back to us yet.
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const taskLinesRef = useRef<number[]>(taskLines);
+  taskLinesRef.current = taskLines;
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const handleChange = (e: Event): void => {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.type !== 'checkbox') return;
+      if (!target.classList.contains('task-list-item-checkbox')) return;
+      const allCheckboxes = preview.querySelectorAll(
+        'input.task-list-item-checkbox',
+      );
+      const index = Array.from(allCheckboxes).indexOf(target);
+      if (index < 0) return;
+      const lineIdx = taskLinesRef.current[index];
+      if (lineIdx == null) return;
+      const lines = contentRef.current.split('\n');
+      const sourceLine = lines[lineIdx];
+      if (sourceLine == null) return;
+      const updatedLine = sourceLine.replace(
+        TASK_LINE_MARKER_RE,
+        (_, marker: string) => `[${marker === ' ' ? 'x' : ' '}]`,
+      );
+      if (updatedLine === sourceLine) return;
+      lines[lineIdx] = updatedLine;
+      const next = lines.join('\n');
+      // Sync ref BEFORE calling onChange so a rapid second click
+      // composes on top of this update, not on the stale base.
+      contentRef.current = next;
+      onChangeRef.current(next);
+    };
+    preview.addEventListener('change', handleChange);
+    return () => {
+      preview.removeEventListener('change', handleChange);
+    };
+  }, []);
 
   // RAISE-28: right-click in the preview pane gets a Copy / Select All
   // menu (no Cut / Paste — preview is read-only). Copy here yields the

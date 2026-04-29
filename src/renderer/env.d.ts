@@ -1,5 +1,21 @@
 /// <reference types="vite/client" />
 
+// RAISE-29: `markdown-it-task-lists` ships no `.d.ts`. Declare just enough
+// for our usage — it's a default-exported markdown-it plugin function.
+declare module 'markdown-it-task-lists' {
+  import type MarkdownIt from 'markdown-it';
+  interface TaskListsOptions {
+    /** When true the rendered checkboxes are NOT disabled (interactive). */
+    enabled?: boolean;
+    /** When true, wraps the item text in a `<label>` for the checkbox. */
+    label?: boolean;
+    /** When true, places the label after the checkbox instead of around it. */
+    labelAfter?: boolean;
+  }
+  const plugin: (md: MarkdownIt, options?: TaskListsOptions) => void;
+  export default plugin;
+}
+
 export type MenuActionType =
   | 'new'
   | 'new-claude-md'

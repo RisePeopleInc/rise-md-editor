@@ -155,6 +155,90 @@
 .raise-prose li > ul,
 .raise-prose li > ol { margin-top: 0.25em; }
 
+/*
+ * Task lists (RAISE-29). The two surfaces produce different DOM —
+ * the rules below have to handle both:
+ *
+ *   WYSIWYG (Milkdown's GFM preset, with our list_item NodeView in
+ *   WysiwygEditor.tsx):
+ *     <li data-item-type="task" data-checked="true|false">
+ *       <input type="checkbox" class="raise-task-checkbox" />
+ *       <div>                                ← contentDOM
+ *         <p>content</p>
+ *         <ul>...nested list (if any)...</ul>
+ *       </div>
+ *     </li>
+ *
+ *   Preview (markdown-it-task-lists, with `label: true, enabled: true`):
+ *     <li class="task-list-item enabled">
+ *       <p>
+ *         <label>
+ *           <input type="checkbox" class="task-list-item-checkbox" />
+ *           content
+ *         </label>
+ *       </p>
+ *       <ul class="contains-task-list">...nested...</ul>
+ *     </li>
+ */
+
+/* Layout: hide the list marker (checkbox replaces it). Don't apply a
+ * negative margin to pull task items left — that would cancel the
+ * parent `<ul>`'s padding at every level of nesting and collapse all
+ * tasks to the same x-position regardless of depth. The natural
+ * `<ul>`-driven indentation gives proper nested behaviour at the
+ * cost of a slight horizontal offset between plain bullets (disc at
+ * ~1rem, outside `list-style-position`) and task checkboxes (input
+ * at the 1.5rem padding edge). Acceptable trade-off; clean nesting
+ * is more important than pixel-perfect bullet/checkbox alignment. */
+.raise-prose li[data-item-type="task"],
+.raise-prose li.task-list-item {
+  list-style: none;
+}
+/* WYSIWYG only: flex-align the input + content div so they sit on the
+ * same line and the content wraps cleanly to the right of the
+ * checkbox. The preview structure (`<li><p><label><input>text</label></p>`)
+ * already lays out inline via the natural `<p>` / `<label>` flow. */
+.raise-prose li[data-item-type="task"] {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+}
+
+/* WYSIWYG: the contentDOM (`<div>`) and any nested list line up
+ * after the checkbox. Make the contentDOM grow into the remaining
+ * width so wraps line up cleanly. */
+.raise-prose li[data-item-type="task"] > div {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The checkbox itself. */
+.raise-prose li[data-item-type="task"] > input[type="checkbox"],
+.raise-prose li.task-list-item input.task-list-item-checkbox {
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Completed-item styling — muted + strikethrough.
+ *
+ * Critical scoping: target only the *immediate* content (the direct
+ * `<p>` child for WYSIWYG, the wrapping `<label>` for preview). If
+ * we'd applied this to the contentDOM `<div>` or the whole `<li>`,
+ * `text-decoration` would cascade into nested task items and a
+ * checked outer would visually strike through unchecked inner
+ * children — wrong.
+ *
+ * For preview, `label:has(> input:checked)` matches each label
+ * scoped to its own checkbox: each label contains exactly one
+ * input, so there's no cross-talk between siblings.
+ */
+.raise-prose li[data-item-type="task"][data-checked="true"] > div > p,
+.raise-prose li.task-list-item label:has(> input[type="checkbox"]:checked) {
+  color: var(--rise-text-muted);
+  text-decoration: line-through;
+}
+
 /* Horizontal rule */
 .raise-prose hr {
   border: 0;
