@@ -247,6 +247,28 @@
   margin: 1.5em 0;
 }
 
+/*
+ * Emoji shortcode nodes (RAISE-34). The WYSIWYG editor renders each
+ * `:warning:`-style shortcode as <span data-gemoji="warning">⚠️</span>
+ * (an inline atom node). Without explicit styling, the span inherits
+ * the prose container's text styling, which can produce visible
+ * spacing differences against the same content rendered by the
+ * preview pane (where markdown-it-emoji emits the bare emoji
+ * character into a text run).
+ *
+ * `display: inline` (the default) keeps it on the same line as
+ * surrounding text. Resetting `line-height: inherit` and `vertical-align: baseline`
+ * would be no-ops for an inline element, but worth being explicit
+ * because some emoji glyphs are taller than the surrounding text
+ * and otherwise nudge the line-box height upwards on lines that
+ * contain them.
+ */
+.raise-prose span[data-gemoji] {
+  display: inline;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
 /* Links */
 .raise-prose a {
   color: var(--rise-interaction);

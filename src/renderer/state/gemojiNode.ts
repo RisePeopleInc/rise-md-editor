@@ -128,6 +128,16 @@ export const gemojiSchema = $nodeSchema('gemoji', () => ({
   group: 'inline',
   selectable: true,
   atom: true,
+  // `defining: true` + `isolating: true` mirror the image schema in
+  // @milkdown/preset-commonmark. They tell ProseMirror this is a
+  // self-contained inline unit — improves caret anchoring around the
+  // node so the visual cursor doesn't jump to a phantom position
+  // after insertion (smoke-test bug on RAISE-34: cursor appeared on
+  // the next line after typing `:warning:`, but typed text still
+  // landed adjacent to the emoji on the same line — classic
+  // contentEditable inline-atom selection drift).
+  defining: true,
+  isolating: true,
   marks: '',
   attrs: {
     name: { default: '', validate: 'string' },
@@ -188,11 +198,39 @@ export const gemojiSchema = $nodeSchema('gemoji', () => ({
  * Validates against `nameToEmoji` so typing `:foo:` (no such emoji)
  * doesn't get converted — it stays as literal text the user can
  * keep typing into without surprises.
+ *
+ * Suppresses inside an unclosed inline-code span: typing `` `:warning: ``
+ * (without the closing backtick yet) shouldn't convert the emoji,
+ * because the user's intent is `` `:warning:` `` (literal inline code).
+ * Milkdown's commonmark inline-code mark is only applied AFTER the
+ * closing backtick is typed, so when our rule fires there's no mark
+ * to inspect — instead we count backticks in the current text block
+ * before the cursor; odd count means there's an open `` ` `` we
+ * haven't closed yet, so we're mid-typing-code-span and should bail.
+ *
+ * Note on Cmd+Z: ProseMirror's input-rule history doesn't currently
+ * group the rule's transformation as a separate undo step from the
+ * triggering keystroke, so undo deletes the trailing `:` rather than
+ * reverting the conversion. Working as designed in
+ * prosemirror-inputrules; matches the behaviour of every other
+ * input rule in Milkdown (e.g. `_italic_` → italic mark + Cmd+Z).
  */
 export const gemojiInputRule = $inputRule((ctx) =>
   new InputRule(/:([a-zA-Z0-9_+-]+):$/, (state, match, start, end) => {
     const name = match[1];
     if (!name || nameToEmoji[name] == null) return null;
+
+    const $start = state.doc.resolve(start);
+    const blockStart = $start.start();
+    const textBefore = state.doc.textBetween(blockStart, start);
+    let backticks = 0;
+    for (let i = 0; i < textBefore.length; i++) {
+      // Skip escaped backticks — `\`` is a literal char, not an
+      // inline-code delimiter.
+      if (textBefore[i] === '`' && textBefore[i - 1] !== '\\') backticks++;
+    }
+    if (backticks % 2 === 1) return null;
+
     return state.tr.replaceWith(
       start,
       end,
