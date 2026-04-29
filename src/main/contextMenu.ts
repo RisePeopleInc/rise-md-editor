@@ -19,8 +19,17 @@ import type { MenuAction } from './menu';
  * handle (which has access to the Milkdown serializer).
  */
 
-/** What kind of editor surface the user right-clicked on. */
-export type EditorContextMode = 'wysiwyg' | 'source' | 'preview';
+/**
+ * What kind of editor surface the user right-clicked on. `frontmatter`
+ * is the YAML editor at the top of WYSIWYG mode — same items as a
+ * plain text input (cut/copy/paste/select-all), distinct mode for
+ * future flexibility (e.g., a "Format YAML" item).
+ */
+export type EditorContextMode =
+  | 'wysiwyg'
+  | 'source'
+  | 'preview'
+  | 'frontmatter';
 
 export interface ShowEditorContextMenuPayload {
   mode: EditorContextMode;
@@ -45,10 +54,21 @@ export function showEditorContextMenu(
       { role: 'selectAll' },
     );
   } else {
-    // wysiwyg + source share Cut / Copy / Paste / Select All.
+    // wysiwyg + source + frontmatter share Cut / Copy / Paste / Select All.
+    //
+    // Note: we do NOT pass `enabled: payload.hasSelection` to Cut/Copy.
+    // That was the original wiring, but it broke on the very first
+    // right-click in a session because the menu pops before the editor
+    // surface has gained focus, hasSelection arrives `false`, and
+    // Electron's role-bound items end up disabled (Paste / Select All
+    // included, due to focus targeting). The renderer side now focuses
+    // the editor view before requesting the menu, so leaving these
+    // always-enabled lets Electron handle the no-target case via the
+    // role itself (clicking Cut with nothing selected is a no-op, not
+    // a UX regression).
     items.push(
-      { role: 'cut', enabled: payload.hasSelection },
-      { role: 'copy', enabled: payload.hasSelection },
+      { role: 'cut' },
+      { role: 'copy' },
       { role: 'paste' },
       { type: 'separator' },
       { role: 'selectAll' },

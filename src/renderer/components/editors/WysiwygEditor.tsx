@@ -13,6 +13,7 @@ import {
   defaultValueCtx,
   editorViewCtx,
   editorViewOptionsCtx,
+  parserCtx,
   serializerCtx,
 } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
@@ -283,35 +284,69 @@ function MilkdownBody({
             return true;
           },
           handlePaste(view, event) {
-            const items = (event as ClipboardEvent).clipboardData?.items ?? null;
+            const cd = (event as ClipboardEvent).clipboardData;
+            if (!cd) return false;
+            const items = cd.items;
             const imageItem = firstImageItem(items);
-            if (!imageItem) return false;
-            // Synchronous snapshot — the DataTransferItem is invalidated
-            // when this handler returns, so a later read of `.type` or
-            // `getAsFile()` across an await would yield empty values.
-            const snapshot = snapshotPasteItem(imageItem);
-            if (!snapshot) return false;
+            if (imageItem) {
+              // Synchronous snapshot — the DataTransferItem is invalidated
+              // when this handler returns, so a later read of `.type` or
+              // `getAsFile()` across an await would yield empty values.
+              const snapshot = snapshotPasteItem(imageItem);
+              if (!snapshot) return false;
+              event.preventDefault();
+              void (async () => {
+                const handler = onImagePasteRef.current;
+                if (!handler) return;
+                const insertion = await handler(snapshot);
+                if (!insertion) return;
+                const editor = editorInstanceRef.current;
+                if (!editor) return;
+                const stem = insertion.asset.relPath.split('/').pop() ?? '';
+                const alt = stem.replace(/\.[^.]+$/, '');
+                editor.action(
+                  callCommand(insertImageCommand.key, {
+                    src: insertion.asset.relPath,
+                    alt,
+                  }),
+                );
+                // Re-focus the editor — the system-level paste interrupts
+                // ProseMirror's focus tracking; without this the user
+                // sees the image inserted but the caret on the wrong side.
+                view.focus();
+              })();
+              return true;
+            }
+
+            // RAISE-28: parse plain-text paste as markdown. Without
+            // this, `**bold**` (or any other markdown source) lands as
+            // literal text in WYSIWYG — the user expectation is that
+            // it renders the formatting (matches Notion, Bear,
+            // Obsidian). When the clipboard has HTML, fall through to
+            // the default handler — Milkdown's clipboard plugin
+            // converts HTML → markdown nodes more accurately than
+            // round-tripping through our remark parser would.
+            const html = cd.getData('text/html');
+            if (html) return false;
+            const text = cd.getData('text/plain');
+            if (!text) return false;
+
+            const editor = editorInstanceRef.current;
+            if (!editor) return false;
+
             event.preventDefault();
-            void (async () => {
-              const handler = onImagePasteRef.current;
-              if (!handler) return;
-              const insertion = await handler(snapshot);
-              if (!insertion) return;
-              const editor = editorInstanceRef.current;
-              if (!editor) return;
-              const stem = insertion.asset.relPath.split('/').pop() ?? '';
-              const alt = stem.replace(/\.[^.]+$/, '');
-              editor.action(
-                callCommand(insertImageCommand.key, {
-                  src: insertion.asset.relPath,
-                  alt,
-                }),
-              );
-              // Re-focus the editor — the system-level paste interrupts
-              // ProseMirror's focus tracking; without this the user
-              // sees the image inserted but the caret on the wrong side.
-              view.focus();
-            })();
+            editor.action((ctx) => {
+              const parser = ctx.get(parserCtx);
+              const parsed = parser(text);
+              if (!parsed) return;
+              // The parser returns a doc-level node. To insert at the
+              // selection, slice its full content as a Slice — open
+              // ends 0 means a clean cut on both sides, which gives
+              // us the closest behaviour to "insert this content
+              // here, preserving block structure where it makes sense".
+              const slice = parsed.slice(0, parsed.content.size);
+              view.dispatch(view.state.tr.replaceSelection(slice));
+            });
             return true;
           },
         }));
@@ -488,25 +523,37 @@ export function WysiwygEditor({
     y: number;
   } | null>(null);
 
-  // RAISE-28: right-click context menu. Capture the current selection
-  // state at click time and ask main to pop the native menu. The
-  // browser fires `contextmenu` *after* it would normally update the
-  // selection, so reading window.getSelection() here matches what the
-  // user sees — including the case where right-click on unselected
-  // text leaves an empty selection (we then offer Copy as Markdown
-  // for the whole doc).
+  // RAISE-28: right-click context menu. The frontmatter textarea has
+  // its own handler attached via `onContextMenu` on the JSX (different
+  // mode + different selection-detection path), so the WYSIWYG body
+  // listener early-exits when the click lands on it.
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
     const handleContextMenu = (e: MouseEvent): void => {
-      // Only handle clicks inside the editor body — the parent
-      // container also wraps the YAML frontmatter textarea, which
-      // gets a useful native menu of its own and shouldn't be
-      // overridden.
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      // Frontmatter has its own onContextMenu — let it handle that
+      // surface so we don't double-fire.
       if (target.closest('.raise-frontmatter')) return;
       e.preventDefault();
+
+      // Focus the editor view before requesting the menu. Without
+      // this, the very first right-click in a session — before the
+      // user has clicked into the WYSIWYG body — hits an unfocused
+      // webContents, and Electron's role-bound items (Cut / Copy /
+      // Paste / Select All) end up disabled because they have no
+      // valid target. A `view.focus()` here flips ProseMirror into
+      // the focused state synchronously, so by the time the IPC
+      // round-trip completes the role-based items have a target to
+      // act on.
+      const editor = editorInstanceRef.current;
+      if (editor) {
+        editor.action((ctx) => {
+          ctx.get(editorViewCtx).focus();
+        });
+      }
+
       const sel = window.getSelection();
       const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
       void window.api.contextMenu.showEditor({
@@ -581,6 +628,21 @@ export function WysiwygEditor({
                 aria-label="YAML frontmatter"
                 className="raise-frontmatter mb-6 block w-full resize-y rounded border border-stroke bg-surface p-3 font-mono text-xs leading-relaxed text-secondary focus:border-interaction focus:outline-none"
                 rows={Math.max(3, frontmatter.split('\n').length + 1)}
+                // RAISE-28: explicit context menu on the frontmatter
+                // textarea. Electron has no default menu for `<textarea>`
+                // (unlike a regular browser), so without this listener
+                // right-click lands silently. The textarea is focused
+                // automatically by the right-click itself, so role:'paste'
+                // etc. find a valid target.
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const t = e.currentTarget;
+                  const hasSelection = t.selectionStart !== t.selectionEnd;
+                  void window.api.contextMenu.showEditor({
+                    mode: 'frontmatter',
+                    hasSelection,
+                  });
+                }}
               />
             )}
             <div className="raise-prose">

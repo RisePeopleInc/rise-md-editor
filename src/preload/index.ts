@@ -291,7 +291,11 @@ const folder = {
  * select-all); only `Copy as Markdown` (WYSIWYG only) routes back
  * through `menu:action` for the renderer to execute.
  */
-export type EditorContextMode = 'wysiwyg' | 'source' | 'preview';
+export type EditorContextMode =
+  | 'wysiwyg'
+  | 'source'
+  | 'preview'
+  | 'frontmatter';
 const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;

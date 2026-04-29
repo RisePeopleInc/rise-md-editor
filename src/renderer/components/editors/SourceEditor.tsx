@@ -1,4 +1,10 @@
-import { useImperativeHandle, useMemo, useRef, type Ref } from 'react';
+import {
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+  type Ref,
+} from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import {
@@ -94,6 +100,12 @@ const BASE_EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = 
   automaticLayout: true,
   renderWhitespace: 'selection',
   tabSize: 2,
+  // RAISE-28: Monaco's web-rendered context menu uses
+  // `document.execCommand('paste')` which is restricted in modern
+  // Electron — Paste from that menu silently fails. Disabling it lets
+  // our wrapper-level Electron-native menu (registered below) handle
+  // right-click instead, where role:'paste' actually works.
+  contextmenu: false,
 };
 
 export function SourceEditor({
@@ -295,19 +307,43 @@ export function SourceEditor({
     }
   };
 
+  // RAISE-28: wrap Monaco in a div so we can attach our Electron-native
+  // context menu via React's onContextMenu. Monaco's own menu was
+  // disabled above (BASE_EDITOR_OPTIONS.contextmenu = false) because
+  // its Paste implementation is broken under modern Electron.
+  const handleContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    const editor = editorRef.current;
+    if (editor) {
+      // Focus Monaco synchronously so role:'paste' / role:'cut' / etc.
+      // have a target webContents-side. Without this the very first
+      // right-click (before Monaco was clicked into) finds the menu
+      // items disabled.
+      editor.focus();
+    }
+    const sel = editor?.getSelection();
+    const hasSelection = !!sel && !sel.isEmpty();
+    void window.api.contextMenu.showEditor({
+      mode: 'source',
+      hasSelection,
+    });
+  };
+
   return (
-    <Editor
-      height="100%"
-      language="markdown"
-      // All 6 Gruvbox variants are registered in monaco-setup.ts. The
-      // active variant id flows from useThemeState in App down through
-      // EditorContainer; @monaco-editor/react re-applies on prop change
-      // so contrast/mode swaps happen reactively.
-      theme={monacoThemeId}
-      value={content}
-      onChange={(value) => onChange(value ?? '')}
-      onMount={handleMount}
-      options={editorOptions}
-    />
+    <div className="h-full w-full" onContextMenu={handleContextMenu}>
+      <Editor
+        height="100%"
+        language="markdown"
+        // All 6 Gruvbox variants are registered in monaco-setup.ts. The
+        // active variant id flows from useThemeState in App down through
+        // EditorContainer; @monaco-editor/react re-applies on prop change
+        // so contrast/mode swaps happen reactively.
+        theme={monacoThemeId}
+        value={content}
+        onChange={(value) => onChange(value ?? '')}
+        onMount={handleMount}
+        options={editorOptions}
+      />
+    </div>
   );
 }

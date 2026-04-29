@@ -184,7 +184,11 @@ export interface RaiseFolderApi {
 }
 
 /** RAISE-28: editor-surface context-menu requests (right-click). */
-export type EditorContextMode = 'wysiwyg' | 'source' | 'preview';
+export type EditorContextMode =
+  | 'wysiwyg'
+  | 'source'
+  | 'preview'
+  | 'frontmatter';
 export interface RaiseContextMenuApi {
   showEditor: (payload: {
     mode: EditorContextMode;
