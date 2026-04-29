@@ -143,12 +143,27 @@ export const gemojiSchema = $nodeSchema('gemoji', () => ({
   },
   parseDOM: [
     {
+      // Higher than the default 50 priority so this rule wins over
+      // image's `img[src]` — both match our rendered DOM, but the
+      // `data-gemoji` attribute is the discriminator.
+      tag: 'img[data-gemoji]',
+      priority: 51,
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) return false;
+        const name = dom.getAttribute('data-gemoji') ?? '';
+        if (!name || nameToEmoji[name] == null) return false;
+        return { name };
+      },
+    },
+    {
+      // Legacy: earlier rounds of the implementation rendered the
+      // gemoji as a `<span>`. Keep this rule for paste-recovery from
+      // any pre-img copy, but the live render now goes through the
+      // `<img>` path above.
       tag: 'span[data-gemoji]',
       getAttrs: (dom) => {
         if (!(dom instanceof HTMLElement)) return false;
         const name = dom.getAttribute('data-gemoji') ?? '';
-        // Reject pasted spans whose `data-gemoji` doesn't resolve —
-        // we don't want to manufacture broken nodes from arbitrary HTML.
         if (!name || nameToEmoji[name] == null) return false;
         return { name };
       },
@@ -157,36 +172,50 @@ export const gemojiSchema = $nodeSchema('gemoji', () => ({
   toDOM: (node) => {
     const name = (node.attrs as { name?: string }).name ?? '';
     const emoji = nameToEmoji[name] ?? `:${name}:`;
-    // Render the glyph as actual text content inside a span marked
-    // `contenteditable="false"`. That attribute is the load-bearing
-    // bit: it tells Chromium's contentEditable engine to treat the
-    // element as an opaque, atomic region — caret cannot enter, and
-    // positions immediately before / after resolve to clean line-box
-    // anchors (the same way they do for replaced elements like
-    // `<img>`). Without `contenteditable="false"`, an inline `<span>`
-    // is just a transparent inline container to the engine, and the
-    // visual caret after an input-rule-inserted atom lands on the
-    // next line even though the logical selection is correct.
+    // Render as an `<img>` containing an inline-SVG data URL of the
+    // emoji glyph. Why <img>:
     //
-    // The DOM that ships is roughly
-    //   `<span data-gemoji="warning" aria-label=":warning:" contenteditable="false">⚠️</span>`
+    // Three rounds of <span>-based fixes (text child, ::before
+    // pseudo-element, contenteditable="false", trailing-break CSS
+    // suppression) all failed to fix the visual caret-jump after
+    // input-rule insertion. The categorical difference between
+    // <span> and <img> is that <img> is a *replaced element*: the
+    // layout engine and Chromium's contentEditable engine both
+    // treat it as an opaque box with intrinsic dimensions and hard
+    // boundary positions. ProseMirror's image schema (the only
+    // other inline atom shipping in this app) uses <img> and is
+    // confirmed to work without caret bugs.
     //
-    // The same `toDOM` is used by ProseMirror's default rendering
-    // path AND by the WYSIWYG NodeView (which mirrors the same
-    // shape). The preview pane (markdown-it-emoji) emits the emoji
-    // straight into a text run; both end up rendering the glyph in
-    // the parent's text flow with inherited line-height, so spacing
-    // matches across surfaces.
+    // We can't use a "real" image of the emoji (would need bundled
+    // assets or a CDN). Inline SVG with the emoji as a <text>
+    // element keeps the rendering self-contained: the system's
+    // color-emoji font (Apple Color Emoji on macOS, Segoe UI Emoji
+    // on Windows, Noto Color Emoji on Linux) renders the glyph
+    // inside the SVG, producing the same color-emoji output as
+    // plain text.
+    //
+    // Round-trip preservation (toMarkdown emits `:name:`) is
+    // unaffected — only the in-DOM rendering changes.
+    const safe = emoji
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">` +
+      `<text x="8" y="8" font-size="14" text-anchor="middle" ` +
+      `dominant-baseline="central" ` +
+      `font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">` +
+      `${safe}</text></svg>`;
     return [
-      'span',
+      'img',
       {
+        src: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+        // `alt` doubles as the screen-reader announcement and the
+        // text shown if the data URL ever fails to render.
+        alt: emoji,
         'data-gemoji': name,
-        // Surface the shortcode to assistive tech alongside the emoji
-        // so screen-readers can announce both forms ("warning emoji").
         'aria-label': `:${name}:`,
-        contenteditable: 'false',
       },
-      emoji,
     ];
   },
   parseMarkdown: {

@@ -323,16 +323,18 @@ function MilkdownBody({
                 },
               };
             },
-            // RAISE-34: gemoji has no NodeView. Its schema toDOM emits
-            //   `<span data-gemoji="..." contenteditable="false">⚠️</span>`
-            // and the explicit `contenteditable="false"` attribute is
-            // the load-bearing bit — it makes Chromium's contentEditable
-            // engine treat the inline atom as opaque (caret can't enter,
-            // positions either side land on the right line-box). Without
-            // it, an inline `<span>` is a transparent text container to
-            // the engine and the visual caret lands on the next line
-            // after an input-rule insertion even though the logical
-            // selection is correct. See gemojiNode.ts.
+            // RAISE-34: gemoji has no NodeView. Its schema toDOM
+            // emits an `<img>` whose `src` is a data:image/svg+xml URL
+            // containing the emoji glyph as SVG <text>. <img> is a
+            // replaced element, which is what makes the contentEditable
+            // engine treat the inline atom as opaque (same shape as
+            // the image schema, which is known-good). See gemojiNode.ts.
+            //
+            // The image schema's NodeView (above) doesn't intercept
+            // gemoji nodes — it's keyed on node.type === 'image', and
+            // gemoji nodes have type 'gemoji'. They share the <img>
+            // tag in the DOM but parse and serialise via separate
+            // schema rules.
           },
           handleDrop(view, event) {
             const dt = (event as DragEvent).dataTransfer;
@@ -668,7 +670,15 @@ export function WysiwygEditor({
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (target.closest('[data-image-tooltip]')) return; // tooltip clicks
-      if (target.tagName === 'IMG' && container.contains(target)) {
+      // Skip gemoji <img>s (RAISE-34) — they're inline emoji glyphs
+      // rendered as SVG data URLs, not user-facing images. The image
+      // tooltip is only meaningful for actual markdown image nodes,
+      // which the NodeView tags with `data-asset-src`.
+      if (
+        target.tagName === 'IMG' &&
+        container.contains(target) &&
+        !target.hasAttribute('data-gemoji')
+      ) {
         // The NodeView writes the original markdown src to
         // `data-asset-src` while the rendered `src` is a
         // raise-asset:// URL — for the "View full size" handler we

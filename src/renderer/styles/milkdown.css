@@ -248,56 +248,30 @@
 }
 
 /*
- * Emoji shortcode nodes (RAISE-34). The WYSIWYG schema emits
- *   `<span data-gemoji="warning" aria-label=":warning:" contenteditable="false">⚠️</span>`
- * (see toDOM in gemojiNode.ts).
+ * Emoji shortcode nodes (RAISE-34). The WYSIWYG schema renders each
+ * gemoji as an `<img>` whose `src` is a `data:image/svg+xml` URL
+ * containing the emoji glyph as SVG `<text>`. <img> is a replaced
+ * element, which lets the contentEditable engine treat the node
+ * boundary as a hard caret stop (same as ProseMirror's image
+ * schema, which is known-good).
  *
- * `contenteditable="false"` prevents the caret from entering the span;
- * the span otherwise lays out as a normal inline text run so its
- * baseline / line-height match the surrounding paragraph (and the
- * preview pane's plain-text rendering via markdown-it-emoji).
+ * Sizing: 1em width × 1em height keeps the visual glyph the same
+ * size as a plain emoji character in the preview pane, and avoids
+ * stretching the line-height. Vertical-align: middle pulls the
+ * glyph centre roughly onto the text x-height, which matches how
+ * an inline emoji glyph sits in a text run on macOS / Windows /
+ * Linux.
  */
-.raise-prose span[data-gemoji] {
+.raise-prose img[data-gemoji] {
   display: inline;
-  vertical-align: baseline;
-  line-height: inherit;
-}
-
-/*
- * Suppress ProseMirror's trailing `<br>` when it directly follows an
- * inline atom we own (the gemoji span). Background:
- *
- * ProseMirror's view appends `<br class="ProseMirror-trailingBreak">`
- * to any textblock whose last DOM child isn't a text node or BR. The
- * BR is needed for empty paragraphs (gives them height) and to give
- * the caret a place to land at the end of a line that ends with a
- * non-text inline element. For an image, this is harmless: the image
- * has its own height, and the BR's phantom line below it just looks
- * like normal post-image spacing.
- *
- * For an inline-sized atom like our gemoji, the BR is *very* visible:
- * after the input rule fires and the caret is logically positioned
- * "right after the emoji", Chromium renders the visual caret on the
- * line below the emoji (the line the BR sits on). User-visible
- * symptoms:
- *   - caret appears on the next line after typing `:warning:`
- *   - Backspace deletes the gemoji (because the logical caret IS
- *     after it; only the visual caret is misplaced)
- *   - typing inserts content and removes the BR, snapping the
- *     visual caret back into place
- *   - hitting Enter splits the paragraph at end, producing an
- *     unexpected paragraph-margin gap
- *
- * Hiding the BR with `display: none` removes the line break without
- * removing the BR from the DOM (so ProseMirror's view bookkeeping is
- * unaffected). Caret rendering at end-of-line falls back to "after
- * the span", which is the visually correct position. This rule is
- * intentionally narrow — `+ br.ProseMirror-trailingBreak` only
- * matches a trailing break *immediately* after a gemoji span, so
- * empty paragraphs and other trailing-break sites are unaffected.
- */
-.raise-prose span[data-gemoji] + br.ProseMirror-trailingBreak {
-  display: none;
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+  margin: 0;
+  /* SVG-data-URL renders crisply at any zoom; explicitly disable
+   * the user-agent's image rendering smoothing so the glyph keeps
+   * the system emoji font's hinting. */
+  image-rendering: auto;
 }
 
 /* Links */
