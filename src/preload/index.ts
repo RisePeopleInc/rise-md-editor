@@ -155,6 +155,14 @@ const theme = {
     contrast?: EditorContrast;
     wordWrap?: WordWrap;
   }): Promise<ThemeState> => ipcRenderer.invoke('theme:set-editor', payload),
+  /**
+   * Atomically flip the source-editor word-wrap mode. Resolves the
+   * toggle in main against the persisted value, so back-to-back
+   * presses that out-race React state updates still alternate
+   * correctly.
+   */
+  toggleEditorWordWrap: (): Promise<ThemeState> =>
+    ipcRenderer.invoke('theme:toggle-editor-word-wrap'),
   /** Subscribe to OS theme flips and explicit set events from main. */
   onChange: (callback: (state: ThemeState) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, state: ThemeState): void =>

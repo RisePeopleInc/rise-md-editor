@@ -28,6 +28,34 @@ import {
  */
 const BOOT_STORAGE_KEY = 'rise-theme';
 
+/**
+ * Sync mirror for the source-editor word-wrap mode ([RAISE-27](https://risepeople.atlassian.net/browse/RAISE-27)).
+ * Read in the `useState` initializer below so SourceEditor mounts with
+ * the user's last-set value rather than the `'on'` default → `'off'`
+ * flicker that happens when we have to wait on the `theme.get()` IPC.
+ *
+ * Written from `apply()` on every state push. localStorage in the
+ * renderer is plenty fast (sync, in-process) so we don't need an
+ * inline bootstrap script for this — the React useState initializer
+ * runs before the first paint of any editor anyway.
+ *
+ * The other editor prefs (theme preference, contrast) have the same
+ * flicker on launch but are out of scope here. If anyone reports it,
+ * the same pattern extends — just add another key + mirror call.
+ */
+const WORDWRAP_STORAGE_KEY = 'rise-word-wrap';
+
+function readBootstrappedWordWrap(): WordWrap {
+  try {
+    const v = localStorage.getItem(WORDWRAP_STORAGE_KEY);
+    return v === 'off' ? 'off' : 'on';
+  } catch {
+    // localStorage can throw in private/incognito profiles; fall back
+    // to the historical default.
+    return 'on';
+  }
+}
+
 interface UseThemeStateResult {
   app: ThemeState['app'];
   editor: ThemeState['editor'];
@@ -77,7 +105,15 @@ export function useThemeState(): UseThemeStateResult {
     const resolved: ResolvedTheme = attr === 'dark' ? 'dark' : 'light';
     return {
       app: { preference: 'system', resolved },
-      editor: { preference: 'system', contrast: 'soft', resolved, wordWrap: 'on' },
+      editor: {
+        preference: 'system',
+        contrast: 'soft',
+        resolved,
+        // Read the wordWrap mirror synchronously so SourceEditor mounts
+        // with the user's last-set value. theme.get() will overwrite
+        // shortly after, but with the same value 99% of the time.
+        wordWrap: readBootstrappedWordWrap(),
+      },
     };
   });
 
@@ -94,6 +130,17 @@ export function useThemeState(): UseThemeStateResult {
       localStorage.setItem(BOOT_STORAGE_KEY, next.app.resolved);
     } catch {
       // localStorage can throw in private/incognito profiles; not fatal.
+    }
+
+    // ----- Editor zone: wordWrap mirror for next-launch no-flash -------
+    // Lets the useState initializer above read the user's last value
+    // synchronously instead of waiting on the theme.get() IPC and
+    // briefly mounting Monaco with the wrong wordWrap. See
+    // [RAISE-27](https://risepeople.atlassian.net/browse/RAISE-27).
+    try {
+      localStorage.setItem(WORDWRAP_STORAGE_KEY, next.editor.wordWrap);
+    } catch {
+      // Same private/incognito caveat as above; not fatal.
     }
 
     // ----- Editor zone: pick the Gruvbox variant -----------------------
@@ -172,9 +219,15 @@ export function useThemeState(): UseThemeStateResult {
   );
 
   const toggleEditorWordWrap = useCallback(async () => {
-    const current = state.editor.wordWrap;
-    await setEditorWordWrap(current === 'on' ? 'off' : 'on');
-  }, [state.editor.wordWrap, setEditorWordWrap]);
+    // Resolved atomically in main against the persisted value — the
+    // renderer doesn't pass an explicit target. Removes the
+    // closure-stale-state race where two rapid presses could both
+    // capture the same `state.editor.wordWrap` and end up at the same
+    // final value instead of alternating. See `theme:toggle-editor-word-wrap`
+    // in src/main/index.ts.
+    const next = await window.api.theme.toggleEditorWordWrap();
+    apply(next);
+  }, [apply]);
 
   const monacoThemeId = gruvboxThemeId(
     state.editor.contrast,

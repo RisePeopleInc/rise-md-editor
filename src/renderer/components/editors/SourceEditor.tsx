@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react';
+import { useImperativeHandle, useMemo, useRef, type Ref } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import {
@@ -110,26 +110,16 @@ export function SourceEditor({
   onImagePaste,
 }: SourceEditorProps) {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  // Build the `options` object once per wordWrap value rather than on
-  // every render — `@monaco-editor/react` re-applies on referential
-  // change, so a stable identity matters for both perf and avoiding
-  // gratuitous internal recomputation in Monaco. The live-update effect
-  // below also calls `updateOptions` so the editor reflects toggles
-  // even when the prop change happens after initial mount (which is
-  // the common case — the user opens a file, then toggles wrap).
+  // Stable options identity per wordWrap value. `@monaco-editor/react`
+  // diffs the `options` prop and calls `editor.updateOptions(...)` on
+  // change — that's how live wordWrap toggles take effect (cursor +
+  // scroll position preserved, no remount). Without `useMemo`, every
+  // render would create a new options object and trigger redundant
+  // updateOptions calls.
   const editorOptions = useMemo<monaco.editor.IStandaloneEditorConstructionOptions>(
     () => ({ ...BASE_EDITOR_OPTIONS, wordWrap }),
     [wordWrap],
   );
-
-  // Live-update Monaco when the wordWrap prop changes. Without this,
-  // Monaco only sees the initial `options` and ignores subsequent
-  // changes that don't trigger a remount. `updateOptions` preserves
-  // cursor + scroll position — the user shouldn't lose their place
-  // just because they toggled wrap.
-  useEffect(() => {
-    editorRef.current?.updateOptions({ wordWrap });
-  }, [wordWrap]);
   // Hold the latest callback so the editor's scroll listener (registered
   // once on mount) always invokes the current handler.
   const onScrollChangeRef = useRef(onScrollChange);

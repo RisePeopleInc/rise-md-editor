@@ -151,6 +151,8 @@ export interface RaiseThemeApi {
     contrast?: EditorContrast;
     wordWrap?: WordWrap;
   }) => Promise<ThemeState>;
+  /** Atomic word-wrap toggle, resolved against the persisted value in main. */
+  toggleEditorWordWrap: () => Promise<ThemeState>;
   onChange: (callback: (state: ThemeState) => void) => () => void;
 }
 

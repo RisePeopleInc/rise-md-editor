@@ -971,6 +971,20 @@ ipcMain.handle(
   },
 );
 
+// Atomic toggle. The renderer used to read its local React state, flip
+// it, and call `theme:set-editor` with the explicit value — but two
+// rapid presses could both close over the same stale state and end up
+// at the same final value (two toggles "on → off → off" instead of
+// "on → off → on"). Reading current state in main and flipping it here
+// makes the read-modify-write uninterruptible (Node's event loop is
+// single-threaded), so back-to-back toggles always alternate.
+ipcMain.handle('theme:toggle-editor-word-wrap', async () => {
+  const current = themeStore.getWordWrap();
+  themeStore.setWordWrap(current === 'on' ? 'off' : 'on');
+  broadcastThemeUpdate();
+  return snapshotThemeState();
+});
+
 // macOS / Windows fire `nativeTheme.updated` when the OS appearance
 // changes. Both the app and editor zones may follow it (when their
 // preference is 'system'), so refreshing both resolved values is the
