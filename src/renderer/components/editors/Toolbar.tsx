@@ -14,7 +14,6 @@ import {
   wrapInHeadingCommand,
   createCodeBlockCommand,
   insertHrCommand,
-  toggleLinkCommand,
   insertImageCommand,
 } from '@milkdown/preset-commonmark';
 import {
@@ -187,42 +186,60 @@ export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
     if (loading) return;
     const editor = get();
     if (!editor) return;
+
+    // RAISE-38: capture the selection range *before* showing the
+    // prompt. `window.prompt` is a synchronous modal that takes
+    // focus from the editor, and Chromium collapses the
+    // contentEditable selection when focus moves out — so reading
+    // `state.selection` after the prompt sees a collapsed range,
+    // not the user's original highlight. Capturing first, then
+    // acting on the saved [from, to] range, keeps both the
+    // selection and the no-selection cases working.
+    let from = -1;
+    let to = -1;
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const sel = view.state.selection;
+      from = sel.from;
+      to = sel.to;
+    });
+    if (from < 0) return;
+
     const url = window.prompt('Link URL');
     if (!url) return;
-    // RAISE-38: `toggleLinkCommand` is `toggleMark` under the hood —
-    // it only adds the link mark to a non-empty selection. With a
-    // collapsed cursor (no selection) it just sets ProseMirror's
-    // "stored marks" so the next typed character gets the link
-    // mark, which gives the user the (wrong) impression that the
-    // button did nothing. Detect the collapsed-cursor case and
-    // insert the URL itself as both the link's visible text AND
-    // its href, with the inserted text selected so the user can
-    // immediately retype to replace the visible text without
-    // losing the link.
+
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       const { state } = view;
-      const { from, to, empty } = state.selection;
-      if (!empty) {
-        // Selection present: existing toggle behaviour.
-        view.focus();
-        run(toggleLinkCommand, { href: url });
-        return;
-      }
       const linkMark = state.schema.marks.link;
       if (!linkMark) return;
+
+      if (from !== to) {
+        // Selection present: replace any existing link marks in the
+        // captured range with the new href. (`removeMark` + `addMark`
+        // is the canonical pattern for "set the link on this range",
+        // unlike `toggleMark` which would just add or remove without
+        // reading the saved range.)
+        const tr = state.tr
+          .removeMark(from, to, linkMark)
+          .addMark(from, to, linkMark.create({ href: url }));
+        view.dispatch(tr);
+        view.focus();
+        return;
+      }
+
+      // No selection: insert the URL itself as both the link's
+      // visible text AND its href, with the inserted text selected
+      // so a subsequent keystroke replaces the visible URL with the
+      // user's intended link text without losing the link mark.
       const node = state.schema.text(url, [linkMark.create({ href: url })]);
       const tr = state.tr.replaceRangeWith(from, to, node);
-      // Select the just-inserted text so a subsequent keystroke
-      // replaces the visible URL with the user's intended link
-      // text. ProseMirror's `TextSelection.create(doc, from, to)`
-      // does exactly that.
       const insertEnd = from + node.nodeSize;
       const sel = TextSelection.create(tr.doc, from, insertEnd);
       view.dispatch(tr.setSelection(sel).scrollIntoView());
       view.focus();
     });
-  }, [loading, run, get]);
+  }, [loading, get]);
 
   const handleImage = useCallback(async () => {
     if (loading) return;
