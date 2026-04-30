@@ -588,19 +588,42 @@ function MilkdownBody({
       if (target.closest('.raise-frontmatter')) return;
       e.preventDefault();
 
-      const editor = editorInstanceRef.current;
-      if (editor) {
-        editor.action((ctx) => {
-          ctx.get(editorViewCtx).focus();
-        });
-      }
-
       const sel = window.getSelection();
       const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
       // RAISE-38: detect right-click on an existing link so the
-      // context menu can show "Edit Link…" instead of "Add Link…"
-      // (and the menu item appears even without a text selection).
+      // context menu can show "Edit Link…" instead of "Add Link…".
       const isOnLink = !!target.closest('a');
+
+      const editor = editorInstanceRef.current;
+      if (editor) {
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          view.focus();
+          // RAISE-38: Chromium contentEditable doesn't reliably
+          // move the caret on right-click — for our "Edit Link…"
+          // flow we need the caret to actually land on the link
+          // the user clicked, otherwise `findLinkMarkRange` reads
+          // the caret's previous position and the modal opens
+          // empty. Synthesize the move via posAtCoords whenever
+          // the right-click lands on a link AND the user didn't
+          // have a real selection (we don't want to clobber an
+          // existing selection — the user may be right-clicking
+          // ON the selected text).
+          if (isOnLink && !hasSelection) {
+            const coords = view.posAtCoords({
+              left: e.clientX,
+              top: e.clientY,
+            });
+            if (coords) {
+              const tr = view.state.tr.setSelection(
+                TextSelection.near(view.state.doc.resolve(coords.pos)),
+              );
+              view.dispatch(tr);
+            }
+          }
+        });
+      }
+
       void window.api.contextMenu.showEditor({
         mode: 'wysiwyg',
         hasSelection,

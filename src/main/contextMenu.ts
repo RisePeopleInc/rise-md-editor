@@ -149,31 +149,23 @@ export function showEditorContextMenu(
         click: () => dispatch('context-copy-as-markdown'),
       },
     );
-    // RAISE-38: link menu item — same `context-add-link` action
-    // surfaces the in-app link prompt; the modal itself decides
-    // whether it's adding or editing based on whether the cursor
-    // is on an existing link mark.
+    // RAISE-38: link menu item — always visible in WYSIWYG. The
+    // same `context-add-link` action surfaces the in-app link
+    // prompt; the modal decides whether it's adding or editing
+    // based on whether the cursor is on an existing link mark.
     //
-    //   - Right-click on an existing link → "Edit Link…" (visible
-    //     even without a text selection — the cursor lands on the
-    //     link from the right-click and the modal pre-fills with
-    //     the existing URL and text).
-    //   - Right-click with a selection (and not on a link) → "Add
-    //     Link…" (wraps the selection).
-    //   - Right-click on plain non-selected text → menu item
-    //     hidden (no obvious user intent — the toolbar button
-    //     still handles the bare-cursor "insert URL as text" case).
-    if (payload.isOnLink) {
-      items.push({
-        label: 'Edit Link…',
-        click: () => dispatch('context-add-link'),
-      });
-    } else if (hasSel) {
-      items.push({
-        label: 'Add Link…',
-        click: () => dispatch('context-add-link'),
-      });
-    }
+    //   - Right-click on an existing link → "Edit Link…" (modal
+    //     pre-fills with the link's text and href).
+    //   - Right-click anywhere else (with or without a text
+    //     selection) → "Add Link…":
+    //       - With selection: wraps the selection in a link.
+    //       - Without selection: opens the modal with both fields
+    //         empty so the user can type both — same flow as
+    //         clicking the toolbar's link button on a bare caret.
+    items.push({
+      label: payload.isOnLink ? 'Edit Link…' : 'Add Link…',
+      click: () => dispatch('context-add-link'),
+    });
   }
 
   const menu = Menu.buildFromTemplate(items);
