@@ -317,6 +317,17 @@ const api = {
   showError: (title: string, message: string): void => {
     ipcRenderer.send('dialog:show-error', { title, message });
   },
+  /**
+   * RAISE-38: open a URL in the user's default external browser.
+   * Used by the WYSIWYG modifier-click handler and the Split-mode
+   * preview pane's link click handler. Main validates the URL
+   * scheme (http / https / mailto only) before forwarding to
+   * shell.openExternal, so arbitrary `javascript:` or `file:` URLs
+   * are silently dropped.
+   */
+  openExternal: (url: string): void => {
+    ipcRenderer.send('shell:open-external', url);
+  },
   notifyReady: (): void => {
     ipcRenderer.send('renderer:ready');
   },

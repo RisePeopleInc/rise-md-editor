@@ -677,6 +677,25 @@ export function WysiwygEditor({
     const handleClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      // RAISE-38: modifier-click on a link opens it in the user's
+      // default external browser. Plain clicks fall through to
+      // ProseMirror's default (caret positioning inside the link
+      // text), matching the convention used by VS Code, iA Writer,
+      // and most other editors with contentEditable links.
+      const anchor = target.closest('a');
+      if (anchor && container.contains(anchor)) {
+        const isMac = window.api.platform === 'darwin';
+        const modifier = isMac ? e.metaKey : e.ctrlKey;
+        if (modifier) {
+          const href = anchor.getAttribute('href');
+          if (href) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.api.openExternal(href);
+            return;
+          }
+        }
+      }
       if (target.closest('[data-image-tooltip]')) return; // tooltip clicks
       if (target.tagName === 'IMG' && container.contains(target)) {
         // The NodeView writes the original markdown src to

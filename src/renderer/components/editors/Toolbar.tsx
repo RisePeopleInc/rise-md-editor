@@ -3,6 +3,7 @@ import { useInstance } from '@milkdown/react';
 import { callCommand } from '@milkdown/utils';
 import { editorViewCtx } from '@milkdown/core';
 import { listenerCtx } from '@milkdown/plugin-listener';
+import { TextSelection } from '@milkdown/prose/state';
 import {
   toggleStrongCommand,
   toggleEmphasisCommand,
@@ -184,10 +185,44 @@ export function Toolbar({ requireSavedPath }: ToolbarProps = {}) {
 
   const handleLink = useCallback(() => {
     if (loading) return;
+    const editor = get();
+    if (!editor) return;
     const url = window.prompt('Link URL');
     if (!url) return;
-    run(toggleLinkCommand, { href: url });
-  }, [loading, run]);
+    // RAISE-38: `toggleLinkCommand` is `toggleMark` under the hood —
+    // it only adds the link mark to a non-empty selection. With a
+    // collapsed cursor (no selection) it just sets ProseMirror's
+    // "stored marks" so the next typed character gets the link
+    // mark, which gives the user the (wrong) impression that the
+    // button did nothing. Detect the collapsed-cursor case and
+    // insert the URL itself as both the link's visible text AND
+    // its href, with the inserted text selected so the user can
+    // immediately retype to replace the visible text without
+    // losing the link.
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const { state } = view;
+      const { from, to, empty } = state.selection;
+      if (!empty) {
+        // Selection present: existing toggle behaviour.
+        view.focus();
+        run(toggleLinkCommand, { href: url });
+        return;
+      }
+      const linkMark = state.schema.marks.link;
+      if (!linkMark) return;
+      const node = state.schema.text(url, [linkMark.create({ href: url })]);
+      const tr = state.tr.replaceRangeWith(from, to, node);
+      // Select the just-inserted text so a subsequent keystroke
+      // replaces the visible URL with the user's intended link
+      // text. ProseMirror's `TextSelection.create(doc, from, to)`
+      // does exactly that.
+      const insertEnd = from + node.nodeSize;
+      const sel = TextSelection.create(tr.doc, from, insertEnd);
+      view.dispatch(tr.setSelection(sel).scrollIntoView());
+      view.focus();
+    });
+  }, [loading, run, get]);
 
   const handleImage = useCallback(async () => {
     if (loading) return;

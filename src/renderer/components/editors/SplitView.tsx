@@ -323,6 +323,34 @@ export function SplitView({
     };
   }, []);
 
+  // RAISE-38: open links in the user's default external browser instead
+  // of in the renderer's webContents. The preview pane is read-only so
+  // plain click is the right gesture (no cursor-positioning to preserve).
+  // Without this handler, `<a href>` clicks navigate the renderer to the
+  // URL, blowing away the editor — a footgun that's both UX-bad and
+  // security-bad. window.api.openExternal validates the scheme on the
+  // main side (only http / https / mailto are forwarded), so we don't
+  // need to filter here.
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const handleClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const anchor = target.closest('a');
+      if (!anchor || !preview.contains(anchor)) return;
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.api.openExternal(href);
+    };
+    preview.addEventListener('click', handleClick);
+    return () => {
+      preview.removeEventListener('click', handleClick);
+    };
+  }, []);
+
   // RAISE-28: right-click in the preview pane gets a Copy / Select All
   // menu (no Cut / Paste — preview is read-only). Copy here yields the
   // rendered text, which is the right default; "Copy as Markdown" from
