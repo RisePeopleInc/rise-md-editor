@@ -28,7 +28,7 @@ import { slashFactory } from '@milkdown/plugin-slash';
 import { nord } from '@milkdown/theme-nord';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import { callCommand } from '@milkdown/utils';
-import { Toolbar } from './Toolbar';
+import { Toolbar, type ToolbarHandle } from './Toolbar';
 import {
   firstImageItem,
   pickImageFiles,
@@ -61,6 +61,13 @@ export interface WysiwygEditorHandle {
    * doc. Resolves once the clipboard write completes.
    */
   copyAsMarkdown: () => Promise<void>;
+  /**
+   * RAISE-38: open the link-URL prompt as if the user clicked the
+   * link toolbar button. Routed here from App.tsx's menu-action
+   * dispatcher so the WYSIWYG context menu's "Add Link…" item can
+   * surface the same modal as the toolbar.
+   */
+  promptLink: () => void;
 }
 
 interface WysiwygEditorProps {
@@ -148,6 +155,10 @@ function MilkdownBody({
   // ref instead of capturing the prop.
   const markdownPathRef = useRef(markdownPath);
   markdownPathRef.current = markdownPath;
+  // RAISE-38: ref to the toolbar so the imperative handle can route
+  // a "promptLink" call from App.tsx (context-menu → Add Link…)
+  // into the same flow as a toolbar-button click.
+  const toolbarRef = useRef<ToolbarHandle>(null);
 
   useEditor((root) =>
     Editor.make()
@@ -544,6 +555,9 @@ function MilkdownBody({
           );
         }
       },
+      promptLink: () => {
+        toolbarRef.current?.promptLink();
+      },
     }),
     [get, scrollContainerRef],
   );
@@ -740,7 +754,7 @@ export function WysiwygEditor({
   return (
     <MilkdownProvider>
       <div className="flex h-full w-full flex-col bg-app">
-        <Toolbar requireSavedPath={requireSavedPath} />
+        <Toolbar ref={toolbarRef} requireSavedPath={requireSavedPath} />
         <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <div className="mx-auto max-w-[720px] px-6 py-8">
             {frontmatter !== null && (

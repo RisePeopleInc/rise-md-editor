@@ -632,6 +632,14 @@ function AppContent() {
           // we just route the action.
           void wysiwygRef.current?.copyAsMarkdown();
           break;
+        case 'context-add-link':
+          // RAISE-38: dispatched from the WYSIWYG context menu's
+          // "Add Link…" item (selection-only). Routes into the
+          // toolbar's existing link-prompt flow via the imperative
+          // handle so right-click → Add Link uses the same modal as
+          // the toolbar button.
+          wysiwygRef.current?.promptLink();
+          break;
         case 'context-source-select-all':
           // RAISE-28: dispatched from the Source-mode context menu.
           // Routes to Monaco's own `editor.action.selectAll` —

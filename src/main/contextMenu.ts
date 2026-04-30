@@ -142,6 +142,18 @@ export function showEditorContextMenu(
         click: () => dispatch('context-copy-as-markdown'),
       },
     );
+    // RAISE-38: Add Link… surfaces the same in-app link prompt as
+    // the toolbar's link button. Selection-only — without a
+    // selection there's no obvious user intent to disambiguate
+    // ("link the cursor position?" makes no sense), and the
+    // toolbar button still handles the no-selection case for users
+    // who want it.
+    if (hasSel) {
+      items.push({
+        label: 'Add Link…',
+        click: () => dispatch('context-add-link'),
+      });
+    }
   }
 
   const menu = Menu.buildFromTemplate(items);
