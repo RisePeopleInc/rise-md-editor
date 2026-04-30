@@ -1,3 +1,4 @@
+import type { MilkdownPlugin } from '@milkdown/ctx';
 import { $inputRule, $remark } from '@milkdown/utils';
 import { InputRule } from '@milkdown/prose/inputrules';
 import type { Node as MdastNode, Text as MdastText } from 'mdast';
@@ -159,7 +160,16 @@ export const gemojiInputRule = $inputRule(
  * Bundle the two plugins so consumers can `.use(gemojiPlugins)` in
  * one shot.
  */
-export const gemojiPlugins = [remarkGemojiPlugin, gemojiInputRule];
+// `$remark` and `$inputRule` return tuple-with-extras objects from
+// Milkdown's factory helpers — they have a `.plugin: MilkdownPlugin`
+// property and Milkdown's `.use()` accepts them, but the structural
+// type isn't `MilkdownPlugin` itself. Cast to keep `.use(gemojiPlugins)`
+// type-checking. Mirrors how `@milkdown/plugin-cursor` exports its own
+// plugin array as `MilkdownPlugin[]`.
+export const gemojiPlugins: MilkdownPlugin[] = [
+  remarkGemojiPlugin,
+  gemojiInputRule,
+] as unknown as MilkdownPlugin[];
 
 /**
  * Build a regex that matches any emoji character in the gemoji

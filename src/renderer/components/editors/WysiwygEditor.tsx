@@ -107,6 +107,15 @@ const slashPlugin = slashFactory('raise-slash');
 interface MilkdownBodyProps {
   ref?: Ref<WysiwygEditorHandle>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * RAISE-38: ref to the Toolbar (which is rendered in
+   * WysiwygEditor's tree, sibling to MilkdownBody, not inside it).
+   * MilkdownBody owns the imperative handle exposed to App.tsx,
+   * and one of those methods (`promptLink`) needs to delegate
+   * into the toolbar — so the toolbar ref is created in
+   * WysiwygEditor and passed in here.
+   */
+  toolbarRef: React.RefObject<ToolbarHandle | null>;
   initial: string;
   initialCursorOffset?: number;
   onMarkdownChange: (markdown: string) => void;
@@ -119,6 +128,7 @@ interface MilkdownBodyProps {
 function MilkdownBody({
   ref,
   scrollContainerRef,
+  toolbarRef,
   initial,
   initialCursorOffset,
   onMarkdownChange,
@@ -155,10 +165,6 @@ function MilkdownBody({
   // ref instead of capturing the prop.
   const markdownPathRef = useRef(markdownPath);
   markdownPathRef.current = markdownPath;
-  // RAISE-38: ref to the toolbar so the imperative handle can route
-  // a "promptLink" call from App.tsx (context-menu → Add Link…)
-  // into the same flow as a toolbar-button click.
-  const toolbarRef = useRef<ToolbarHandle>(null);
 
   useEditor((root) =>
     Editor.make()
@@ -559,7 +565,7 @@ function MilkdownBody({
         toolbarRef.current?.promptLink();
       },
     }),
-    [get, scrollContainerRef],
+    [get, scrollContainerRef, toolbarRef],
   );
 
   // RAISE-28: right-click context menu. Lives in MilkdownBody (not the
@@ -627,6 +633,12 @@ export function WysiwygEditor({
   );
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // RAISE-38: ref to the Toolbar component, created here (not in
+  // MilkdownBody) because Toolbar is rendered as a sibling to
+  // MilkdownBody in this component's tree. Forwarded into
+  // MilkdownBody as a prop so its imperative handle can route
+  // `promptLink()` into the toolbar's existing flow.
+  const toolbarRef = useRef<ToolbarHandle | null>(null);
   // Capture the initial scrollTop on mount so the restore effect (below)
   // runs against the value that was current when the component mounted.
   const initialScrollTopRef = useRef(initialScrollTop);
@@ -786,6 +798,7 @@ export function WysiwygEditor({
               <MilkdownBody
                 ref={ref}
                 scrollContainerRef={scrollContainerRef}
+                toolbarRef={toolbarRef}
                 initial={initialSplit.body}
                 initialCursorOffset={initialCursorOffset}
                 onMarkdownChange={handleBodyChange}
