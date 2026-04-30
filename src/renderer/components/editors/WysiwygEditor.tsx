@@ -39,6 +39,7 @@ import {
 import { resolveAssetUrl } from '../../state/assetUrl';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
+import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
 export interface WysiwygEditorHandle {
   triggerUndo: () => void;
@@ -476,7 +477,12 @@ function MilkdownBody({
       // markdownUpdated listener above, via emojiToShortcodes —
       // the model carries plain text throughout, so there's no
       // schema or NodeView for emoji.
-      .use(gemojiPlugins),
+      .use(gemojiPlugins)
+      // RAISE-36: keep an empty paragraph trailing any code block
+      // that lands at the end of the doc, so the user can navigate
+      // out of the code block via Down arrow / click / End rather
+      // than being trapped inside it. See state/trailingParagraph.ts.
+      .use(trailingParagraphPlugin),
   );
 
   // Bridge the imperative handle to Milkdown's history commands. The menu's
