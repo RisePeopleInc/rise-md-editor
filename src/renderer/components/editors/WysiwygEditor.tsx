@@ -600,21 +600,37 @@ function MilkdownBody({
           const view = ctx.get(editorViewCtx);
           view.focus();
           // RAISE-38: Chromium contentEditable doesn't reliably
-          // move the caret on right-click — for our "Edit Link…"
-          // flow we need the caret to actually land on the link
-          // the user clicked, otherwise `findLinkMarkRange` reads
-          // the caret's previous position and the modal opens
-          // empty. Synthesize the move via posAtCoords whenever
-          // the right-click lands on a link AND the user didn't
-          // have a real selection (we don't want to clobber an
-          // existing selection — the user may be right-clicking
-          // ON the selected text).
-          if (isOnLink && !hasSelection) {
-            const coords = view.posAtCoords({
-              left: e.clientX,
-              top: e.clientY,
-            });
-            if (coords) {
+          // move the caret on right-click. Synthesize standard
+          // text-editor behaviour:
+          //
+          //   - Right-click *inside* the current selection
+          //     → preserve selection (the menu's Cut / Copy /
+          //     selection-sensitive actions all expect the
+          //     selection to still be there).
+          //   - Right-click *outside* the current selection
+          //     → move the caret to the click point and clear
+          //     the selection. Subsequent menu actions (Add /
+          //     Edit Link, Copy as Markdown, etc.) operate on
+          //     the new cursor position. This also fixes the
+          //     "Edit Link…" flow that needs the caret on the
+          //     clicked link to read its href / text, and the
+          //     "Add Link…" flow that should ignore an
+          //     unrelated existing link the caret happened to
+          //     be inside.
+          //
+          // Matches TextEdit / Word / VS Code / Chromium's own
+          // textarea right-click behaviour.
+          const coords = view.posAtCoords({
+            left: e.clientX,
+            top: e.clientY,
+          });
+          if (coords) {
+            const pmSel = view.state.selection;
+            const clickInSelection =
+              !pmSel.empty &&
+              coords.pos >= pmSel.from &&
+              coords.pos <= pmSel.to;
+            if (!clickInSelection) {
               const tr = view.state.tr.setSelection(
                 TextSelection.near(view.state.doc.resolve(coords.pos)),
               );
