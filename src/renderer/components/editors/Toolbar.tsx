@@ -180,8 +180,20 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
   // moves to a modal input, so we snapshot before opening and act
   // on the snapshot when the user submits.
   const [linkPrompt, setLinkPrompt] = useState<{
+    /** Action range — what gets replaced on submit. Equals the
+     *  user's selection for the wrap-selection case, the link's
+     *  full range for the edit-existing-link case, or the cursor
+     *  position (from === to) for the bare-cursor insert case. */
     from: number;
     to: number;
+    /** Original selection at modal-open time. Used by
+     *  `cancelLinkPrompt` to restore the user's cursor/selection
+     *  if they bail out — it differs from `from` / `to` in the
+     *  edit-existing-link case (where the action range is the
+     *  whole link but the user's cursor was just a single point
+     *  inside it). */
+    originalFrom: number;
+    originalTo: number;
     /** True when the modal is editing an existing link mark. Used
      *  to switch the modal title and submit-button label. */
     isEditing: boolean;
@@ -301,6 +313,8 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
     // synchronously before opening the modal.
     let from = -1;
     let to = -1;
+    let originalFrom = -1;
+    let originalTo = -1;
     let isEditing = false;
     let initialText = '';
     let initialUrl = '';
@@ -308,6 +322,11 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
       const view = ctx.get(editorViewCtx);
       const { state } = view;
       const sel = state.selection;
+      // Always capture the user's actual selection — used for
+      // restoring on cancel even if the action range gets
+      // expanded below.
+      originalFrom = sel.from;
+      originalTo = sel.to;
       const linkType = state.schema.marks.link;
       if (!linkType) return;
       // Look for an existing link mark at the current $from. If
@@ -336,20 +355,44 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
     if (from < 0) return;
     setLinkText(initialText);
     setLinkUrl(initialUrl);
-    setLinkPrompt({ from, to, isEditing });
+    setLinkPrompt({ from, to, originalFrom, originalTo, isEditing });
   }, [loading, get]);
 
   const cancelLinkPrompt = useCallback(() => {
+    const captured = linkPrompt;
     setLinkPrompt(null);
     setLinkUrl('');
     setLinkText('');
-    // Restore focus to the editor so the user can keep typing
-    // without an extra click.
     const editor = get();
-    editor?.action((ctx) => {
-      ctx.get(editorViewCtx).focus();
+    if (!editor) return;
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      // Restore the original cursor / selection that the user
+      // had when they opened the modal. Chromium collapses the
+      // contentEditable selection when focus moves to a modal
+      // input, so without this restore the user is left with an
+      // empty selection after a cancel — particularly bad in the
+      // "select text → click toolbar Link → change mind" flow,
+      // where the user expects to still have their selection.
+      //
+      // Note we restore `originalFrom` / `originalTo` (the user's
+      // actual selection at modal-open) rather than `from` / `to`
+      // (the action range, which may span an entire link in the
+      // edit-existing-link flow).
+      if (captured) {
+        const { originalFrom, originalTo } = captured;
+        const max = view.state.doc.content.size;
+        const safeFrom = Math.min(Math.max(originalFrom, 0), max);
+        const safeTo = Math.min(Math.max(originalTo, 0), max);
+        const sel =
+          safeFrom !== safeTo
+            ? TextSelection.create(view.state.doc, safeFrom, safeTo)
+            : TextSelection.near(view.state.doc.resolve(safeFrom));
+        view.dispatch(view.state.tr.setSelection(sel));
+      }
+      view.focus();
     });
-  }, [get]);
+  }, [get, linkPrompt]);
 
   const submitLinkPrompt = useCallback(() => {
     const rawUrl = linkUrl.trim();
@@ -380,13 +423,32 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
       const { state } = view;
       const linkMark = state.schema.marks.link;
       if (!linkMark) return;
+      // Preserve any other marks active at the start of the
+      // captured range — bold / italic / inline-code / etc. — so
+      // editing a `**[link](url)**` (bold link) doesn't silently
+      // strip the bold. Filter out the existing `link` mark so we
+      // can apply a fresh one with the user's new href.
+      //
+      // Limitation: only the marks at `from` are preserved. If the
+      // captured range has heterogeneous marks (e.g. half bold,
+      // half plain), the entire replacement gets the marks from
+      // the start. Acceptable simplification — the user is
+      // explicitly typing new flat text in the modal, so any
+      // sub-range mark variation in the original would have been
+      // collapsed regardless.
+      const $from = state.doc.resolve(from);
+      const surroundingMarks = $from
+        .marks()
+        .filter((m) => m.type !== linkMark);
       // Single transaction for both add and edit: replace the
       // captured [from, to] range with a fresh text node carrying
-      // the link mark. This handles all three flows uniformly:
+      // the link mark + preserved surrounding marks. Handles all
+      // three flows uniformly:
       //   - editing an existing link (range spans the link)
       //   - wrapping a selection (range spans the selection)
       //   - inserting at a collapsed cursor (range is empty)
       const node = state.schema.text(text, [
+        ...surroundingMarks,
         linkMark.create({ href: url }),
       ]);
       const tr = state.tr.replaceRangeWith(from, to, node);
@@ -516,184 +578,184 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
 
   return (
     <>
-    <div
-      role="toolbar"
-      aria-label="Formatting"
-      className="flex h-9 shrink-0 items-center gap-0.5 border-b border-stroke bg-surface px-2"
-    >
-      <ToolbarButton
-        title="Heading 1"
-        active={activeBlock === 'h1'}
-        onClick={() => run(wrapInHeadingCommand, 1)}
-      >
-        H1
-      </ToolbarButton>
-      <ToolbarButton
-        title="Heading 2"
-        active={activeBlock === 'h2'}
-        onClick={() => run(wrapInHeadingCommand, 2)}
-      >
-        H2
-      </ToolbarButton>
-      <ToolbarButton
-        title="Heading 3"
-        active={activeBlock === 'h3'}
-        onClick={() => run(wrapInHeadingCommand, 3)}
-      >
-        H3
-      </ToolbarButton>
-      <Divider />
-      <ToolbarButton
-        title="Bold (⌘B)"
-        active={activeMarks.strong}
-        onClick={() => run(toggleStrongCommand)}
-      >
-        <span className="font-bold">B</span>
-      </ToolbarButton>
-      <ToolbarButton
-        title="Italic (⌘I)"
-        active={activeMarks.emphasis}
-        onClick={() => run(toggleEmphasisCommand)}
-      >
-        <span className="italic">I</span>
-      </ToolbarButton>
-      <ToolbarButton
-        title="Strikethrough"
-        active={activeMarks.strike_through}
-        onClick={() => run(toggleStrikethroughCommand)}
-      >
-        <span className="line-through">S</span>
-      </ToolbarButton>
-      <ToolbarButton
-        title="Inline code"
-        active={activeMarks.inlineCode}
-        onClick={() => run(toggleInlineCodeCommand)}
-      >
-        <span className="font-mono">{'<>'}</span>
-      </ToolbarButton>
-      <Divider />
-      <ToolbarButton
-        title="Bullet list"
-        active={activeBlock === 'bullet_list'}
-        onClick={() => run(wrapInBulletListCommand)}
-      >
-        •
-      </ToolbarButton>
-      <ToolbarButton
-        title="Numbered list"
-        active={activeBlock === 'ordered_list'}
-        onClick={() => run(wrapInOrderedListCommand)}
-      >
-        1.
-      </ToolbarButton>
-      <ToolbarButton
-        title="Task list"
-        active={activeBlock === 'task_list'}
-        onClick={handleTaskList}
-      >
-        ☑
-      </ToolbarButton>
-      <ToolbarButton
-        title="Blockquote"
-        active={activeBlock === 'blockquote'}
-        onClick={() => run(wrapInBlockquoteCommand)}
-      >
-        ❝
-      </ToolbarButton>
-      <Divider />
-      <ToolbarButton title="Code block" onClick={() => run(createCodeBlockCommand)}>
-        <span className="font-mono text-[10px]">{'{ }'}</span>
-      </ToolbarButton>
-      <ToolbarButton title="Link" onClick={handleLink}>
-        🔗
-      </ToolbarButton>
-      <ToolbarButton title="Image" onClick={handleImage}>
-        🖼
-      </ToolbarButton>
-      <ToolbarButton title="Horizontal rule" onClick={() => run(insertHrCommand)}>
-        —
-      </ToolbarButton>
-      <Divider />
-      <ToolbarButton title="Insert table" onClick={handleTable}>
-        ⊞
-      </ToolbarButton>
-    </div>
-    {linkPrompt !== null && (
       <div
-        // RAISE-38: link prompt (window.prompt is suppressed in the
-        // sandboxed renderer, so we render a small in-app modal
-        // instead). Backdrop closes on click; the inner card stops
-        // propagation so clicking the inputs doesn't dismiss.
-        role="dialog"
-        aria-modal="true"
-        aria-label={linkPrompt.isEditing ? 'Edit link' : 'Insert link'}
-        onClick={cancelLinkPrompt}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        role="toolbar"
+        aria-label="Formatting"
+        className="flex h-9 shrink-0 items-center gap-0.5 border-b border-stroke bg-surface px-2"
       >
-        <form
-          onClick={(e) => e.stopPropagation()}
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitLinkPrompt();
-          }}
-          className="flex min-w-[420px] flex-col gap-3 rounded-[var(--rise-radius-card)] border border-stroke bg-app p-4 shadow-[var(--rise-shadow-depth-1)]"
+        <ToolbarButton
+          title="Heading 1"
+          active={activeBlock === 'h1'}
+          onClick={() => run(wrapInHeadingCommand, 1)}
         >
-          <h2 className="text-sm font-semibold text-strong">
-            {linkPrompt.isEditing ? 'Edit link' : 'Insert link'}
-          </h2>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-semibold text-strong">Text</span>
-            <input
-              ref={linkTextInputRef}
-              type="text"
-              value={linkText}
-              onChange={(e) => setLinkText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  cancelLinkPrompt();
-                }
-              }}
-              placeholder="Display text (defaults to the URL)"
-              className="rounded border border-stroke bg-surface px-3 py-1.5 text-sm text-strong focus:border-interaction focus:outline-none"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-semibold text-strong">URL</span>
-            <input
-              ref={linkUrlInputRef}
-              type="text"
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  cancelLinkPrompt();
-                }
-              }}
-              placeholder="https://example.com or name@example.com"
-              className="rounded border border-stroke bg-surface px-3 py-1.5 text-sm text-strong focus:border-interaction focus:outline-none"
-            />
-          </label>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={cancelLinkPrompt}
-              className="rounded border border-stroke px-3 py-1 text-sm text-strong hover:bg-elevated"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!linkUrl.trim()}
-              className="rounded bg-interaction px-3 py-1 text-sm font-semibold text-white hover:bg-interaction-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {linkPrompt.isEditing ? 'Update' : 'Insert'}
-            </button>
-          </div>
-        </form>
+          H1
+        </ToolbarButton>
+        <ToolbarButton
+          title="Heading 2"
+          active={activeBlock === 'h2'}
+          onClick={() => run(wrapInHeadingCommand, 2)}
+        >
+          H2
+        </ToolbarButton>
+        <ToolbarButton
+          title="Heading 3"
+          active={activeBlock === 'h3'}
+          onClick={() => run(wrapInHeadingCommand, 3)}
+        >
+          H3
+        </ToolbarButton>
+        <Divider />
+        <ToolbarButton
+          title="Bold (⌘B)"
+          active={activeMarks.strong}
+          onClick={() => run(toggleStrongCommand)}
+        >
+          <span className="font-bold">B</span>
+        </ToolbarButton>
+        <ToolbarButton
+          title="Italic (⌘I)"
+          active={activeMarks.emphasis}
+          onClick={() => run(toggleEmphasisCommand)}
+        >
+          <span className="italic">I</span>
+        </ToolbarButton>
+        <ToolbarButton
+          title="Strikethrough"
+          active={activeMarks.strike_through}
+          onClick={() => run(toggleStrikethroughCommand)}
+        >
+          <span className="line-through">S</span>
+        </ToolbarButton>
+        <ToolbarButton
+          title="Inline code"
+          active={activeMarks.inlineCode}
+          onClick={() => run(toggleInlineCodeCommand)}
+        >
+          <span className="font-mono">{'<>'}</span>
+        </ToolbarButton>
+        <Divider />
+        <ToolbarButton
+          title="Bullet list"
+          active={activeBlock === 'bullet_list'}
+          onClick={() => run(wrapInBulletListCommand)}
+        >
+          •
+        </ToolbarButton>
+        <ToolbarButton
+          title="Numbered list"
+          active={activeBlock === 'ordered_list'}
+          onClick={() => run(wrapInOrderedListCommand)}
+        >
+          1.
+        </ToolbarButton>
+        <ToolbarButton
+          title="Task list"
+          active={activeBlock === 'task_list'}
+          onClick={handleTaskList}
+        >
+          ☑
+        </ToolbarButton>
+        <ToolbarButton
+          title="Blockquote"
+          active={activeBlock === 'blockquote'}
+          onClick={() => run(wrapInBlockquoteCommand)}
+        >
+          ❝
+        </ToolbarButton>
+        <Divider />
+        <ToolbarButton title="Code block" onClick={() => run(createCodeBlockCommand)}>
+          <span className="font-mono text-[10px]">{'{ }'}</span>
+        </ToolbarButton>
+        <ToolbarButton title="Link" onClick={handleLink}>
+          🔗
+        </ToolbarButton>
+        <ToolbarButton title="Image" onClick={handleImage}>
+          🖼
+        </ToolbarButton>
+        <ToolbarButton title="Horizontal rule" onClick={() => run(insertHrCommand)}>
+          —
+        </ToolbarButton>
+        <Divider />
+        <ToolbarButton title="Insert table" onClick={handleTable}>
+          ⊞
+        </ToolbarButton>
       </div>
-    )}
+      {linkPrompt !== null && (
+        <div
+          // RAISE-38: link prompt (window.prompt is suppressed in the
+          // sandboxed renderer, so we render a small in-app modal
+          // instead). Backdrop closes on click; the inner card stops
+          // propagation so clicking the inputs doesn't dismiss.
+          role="dialog"
+          aria-modal="true"
+          aria-label={linkPrompt.isEditing ? 'Edit link' : 'Insert link'}
+          onClick={cancelLinkPrompt}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitLinkPrompt();
+            }}
+            className="flex min-w-[420px] flex-col gap-3 rounded-[var(--rise-radius-card)] border border-stroke bg-app p-4 shadow-[var(--rise-shadow-depth-1)]"
+          >
+            <h2 className="text-sm font-semibold text-strong">
+              {linkPrompt.isEditing ? 'Edit link' : 'Insert link'}
+            </h2>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-semibold text-strong">Text</span>
+              <input
+                ref={linkTextInputRef}
+                type="text"
+                value={linkText}
+                onChange={(e) => setLinkText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelLinkPrompt();
+                  }
+                }}
+                placeholder="Display text (defaults to the URL)"
+                className="rounded border border-stroke bg-surface px-3 py-1.5 text-sm text-strong focus:border-interaction focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-semibold text-strong">URL</span>
+              <input
+                ref={linkUrlInputRef}
+                type="text"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelLinkPrompt();
+                  }
+                }}
+                placeholder="https://example.com or name@example.com"
+                className="rounded border border-stroke bg-surface px-3 py-1.5 text-sm text-strong focus:border-interaction focus:outline-none"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelLinkPrompt}
+                className="rounded border border-stroke px-3 py-1 text-sm text-strong hover:bg-elevated"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!linkUrl.trim()}
+                className="rounded bg-interaction px-3 py-1 text-sm font-semibold text-white hover:bg-interaction-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {linkPrompt.isEditing ? 'Update' : 'Insert'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   );
 }
