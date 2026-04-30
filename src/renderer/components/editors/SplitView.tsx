@@ -17,6 +17,7 @@ import {
 } from './SourceEditor';
 import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
+import { splitFrontmatter } from '../../state/markdown';
 import type { WordWrap } from '../../env';
 
 interface SplitViewProps {
@@ -142,16 +143,43 @@ export function SplitView({
   // of regexing through the source for the Nth `[ ]` (which would
   // false-match markers inside fenced code blocks etc.).
   const { html, taskLines } = useMemo(() => {
+    // RAISE-32: split YAML frontmatter off the body before parsing.
+    // Without this, markdown-it sees `---\nkey: v\n---\n# Heading`
+    // and parses the second `---` as a Setext H2 underline,
+    // rendering `key: v` as a giant heading at the top of the
+    // preview. We render the frontmatter as a styled metadata block
+    // above the body's HTML, mirroring the way the WYSIWYG editor
+    // shows frontmatter in its own dedicated textarea above the
+    // prose surface.
+    const { frontmatter, body, bodyLineOffset } = splitFrontmatter(content);
     const env = {};
-    const tokens = md.parse(content, env);
-    const renderedHtml = md.renderer.render(tokens, md.options, env);
+    const tokens = md.parse(body, env);
+    const bodyHtml = md.renderer.render(tokens, md.options, env);
     const lines: number[] = [];
     for (const t of tokens) {
       if (t.type !== 'list_item_open') continue;
       const cls = t.attrGet('class') ?? '';
       if (!cls.includes('task-list-item')) continue;
       const lineIdx = t.map?.[0];
-      if (lineIdx != null) lines.push(lineIdx);
+      // markdown-it `.map[0]` is body-relative (we parsed only the
+      // body); offset back to absolute source-line indices so the
+      // task-checkbox click handler (which rewrites the source)
+      // targets the right line.
+      if (lineIdx != null) lines.push(bodyLineOffset + lineIdx);
+    }
+    let renderedHtml = bodyHtml;
+    if (frontmatter !== null) {
+      // Escape HTML special chars in the frontmatter content — it
+      // ships as plain text inside a `<pre>`, but markdown-it is
+      // configured with `html: false` so any `<`, `>`, `&` need
+      // escaping for safety regardless.
+      const escaped = frontmatter
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      renderedHtml =
+        `<div class="raise-frontmatter-preview"><pre>${escaped}</pre></div>` +
+        bodyHtml;
     }
     return { html: renderedHtml, taskLines: lines };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -317,3 +317,34 @@
   font-size: 0.75rem;
   box-shadow: var(--rise-shadow-depth-1);
 }
+
+/*
+ * Frontmatter metadata block in the Split-mode preview pane
+ * (RAISE-32). markdown-it doesn't understand YAML frontmatter — it
+ * sees `---\nkey: v\n---\n# Heading` as a paragraph followed by a
+ * Setext H2 underline, rendering the frontmatter content as a
+ * giant heading. SplitView strips the frontmatter off before
+ * passing the body to markdown-it and renders the frontmatter as
+ * its own block here: a muted, monospace `<pre>` that visually
+ * matches the WYSIWYG editor's `.raise-frontmatter` textarea so
+ * users see the same shape across both surfaces.
+ *
+ * `pre` defaults to `white-space: pre`, so the original line
+ * structure is preserved without manual `<br />` insertion.
+ */
+.raise-frontmatter-preview {
+  margin-bottom: 1.5em;
+  border: 1px solid var(--rise-border);
+  border-radius: var(--rise-radius-card);
+  background: var(--rise-bg-secondary);
+  padding: 0.75rem;
+}
+.raise-frontmatter-preview pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--rise-text-muted);
+  white-space: pre;
+  overflow-x: auto;
+}
