@@ -325,26 +325,40 @@
  * Setext H2 underline, rendering the frontmatter content as a
  * giant heading. SplitView strips the frontmatter off before
  * passing the body to markdown-it and renders the frontmatter as
- * its own block here: a muted, monospace `<pre>` that visually
- * matches the WYSIWYG editor's `.raise-frontmatter` textarea so
- * users see the same shape across both surfaces.
+ * its own block here: a muted, monospace `<pre>` styled to look
+ * like the WYSIWYG editor's `.raise-frontmatter` textarea (a plain
+ * bordered card on the surface background) so users see the same
+ * metadata shape across both surfaces.
  *
- * `pre` defaults to `white-space: pre`, so the original line
- * structure is preserved without manual `<br />` insertion.
+ * Specificity note: the `.raise-frontmatter-preview pre` selectors
+ * below need to override `.raise-prose pre` rules earlier in this
+ * file (the brand-blue left-edge stripe and the secondary bg are
+ * the visual signature of code blocks; we don't want the
+ * frontmatter to look like a code block). Both selectors live in
+ * `.raise-prose` scope at the same level, so the more specific
+ * one wins.
  */
 .raise-frontmatter-preview {
   margin-bottom: 1.5em;
   border: 1px solid var(--rise-border);
   border-radius: var(--rise-radius-card);
-  background: var(--rise-bg-secondary);
+  background: var(--rise-bg-primary);
   padding: 0.75rem;
 }
-.raise-frontmatter-preview pre {
+.raise-prose .raise-frontmatter-preview pre {
   margin: 0;
+  padding: 0;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.75rem;
   line-height: 1.5;
   color: var(--rise-text-muted);
   white-space: pre;
   overflow-x: auto;
+  /* Override `.raise-prose pre`: no card background, no border,
+   * no brand-blue left-edge stripe — the styled wrapper above
+   * provides the card shell, the `<pre>` is just text. */
+  background: transparent;
+  border: 0;
+  border-left: 0;
+  border-radius: 0;
 }

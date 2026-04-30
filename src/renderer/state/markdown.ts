@@ -16,10 +16,22 @@
 
 /**
  * Match a YAML frontmatter block at the very start of the document.
- * Supports CRLF and LF line endings, with or without a trailing
- * newline after the closing `---` fence.
+ *
+ * Supports:
+ *   - LF and CRLF line endings
+ *   - With or without a trailing newline after the closing `---` fence
+ *   - Empty frontmatter (`---\n---\n`) as a degenerate but legitimate
+ *     case — the inner `(?:([\s\S]*?)\r?\n)?` is optional so the
+ *     content + separating newline can be absent. Without that
+ *     optional wrapper, `---\n---\n` would not match, and markdown-it
+ *     would then render the two fences as two separate `<hr>` tags
+ *     (RAISE-32 smoke-test bug).
+ *
+ * Capture group 1 is the content between the fences. When the match
+ * is the "empty frontmatter" form, group 1 is `undefined`; consumers
+ * should normalise via `match[1] ?? ''`.
  */
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+const FRONTMATTER_RE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
 
 export interface FrontmatterSplit {
   /**
