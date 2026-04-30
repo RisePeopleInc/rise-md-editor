@@ -597,9 +597,14 @@ function MilkdownBody({
 
       const sel = window.getSelection();
       const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+      // RAISE-38: detect right-click on an existing link so the
+      // context menu can show "Edit Link…" instead of "Add Link…"
+      // (and the menu item appears even without a text selection).
+      const isOnLink = !!target.closest('a');
       void window.api.contextMenu.showEditor({
         mode: 'wysiwyg',
         hasSelection,
+        isOnLink,
       });
     };
     container.addEventListener('contextmenu', handleContextMenu);

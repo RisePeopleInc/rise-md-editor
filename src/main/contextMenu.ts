@@ -40,6 +40,13 @@ export interface ShowEditorContextMenuPayload {
   mode: EditorContextMode;
   /** True if the editor has a non-empty text selection at the click. */
   hasSelection: boolean;
+  /**
+   * RAISE-38: true when the right-click landed on an existing link
+   * element in the WYSIWYG surface. Drives whether the link menu
+   * item reads "Edit Link…" (and appears without a selection) or
+   * "Add Link…" (selection-only).
+   */
+  isOnLink?: boolean;
 }
 
 /**
@@ -142,13 +149,26 @@ export function showEditorContextMenu(
         click: () => dispatch('context-copy-as-markdown'),
       },
     );
-    // RAISE-38: Add Link… surfaces the same in-app link prompt as
-    // the toolbar's link button. Selection-only — without a
-    // selection there's no obvious user intent to disambiguate
-    // ("link the cursor position?" makes no sense), and the
-    // toolbar button still handles the no-selection case for users
-    // who want it.
-    if (hasSel) {
+    // RAISE-38: link menu item — same `context-add-link` action
+    // surfaces the in-app link prompt; the modal itself decides
+    // whether it's adding or editing based on whether the cursor
+    // is on an existing link mark.
+    //
+    //   - Right-click on an existing link → "Edit Link…" (visible
+    //     even without a text selection — the cursor lands on the
+    //     link from the right-click and the modal pre-fills with
+    //     the existing URL and text).
+    //   - Right-click with a selection (and not on a link) → "Add
+    //     Link…" (wraps the selection).
+    //   - Right-click on plain non-selected text → menu item
+    //     hidden (no obvious user intent — the toolbar button
+    //     still handles the bare-cursor "insert URL as text" case).
+    if (payload.isOnLink) {
+      items.push({
+        label: 'Edit Link…',
+        click: () => dispatch('context-add-link'),
+      });
+    } else if (hasSel) {
       items.push({
         label: 'Add Link…',
         click: () => dispatch('context-add-link'),

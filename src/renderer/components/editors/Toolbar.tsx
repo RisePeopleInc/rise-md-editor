@@ -28,8 +28,71 @@ import {
   toggleStrikethroughCommand,
   insertTableCommand,
 } from '@milkdown/preset-gfm';
+import type { Mark, MarkType, ResolvedPos } from '@milkdown/prose/model';
 
 type MarkName = 'strong' | 'emphasis' | 'inlineCode' | 'strike_through';
+
+/**
+ * Find the contiguous range of a mark of `type` covering `$pos`.
+ * Walks the parent textblock's children outward from the position
+ * until it hits a sibling that doesn't carry the mark — the
+ * standard prosemirror-utils "getMarkRange" recipe, inlined here
+ * to avoid pulling in the dependency for one helper.
+ */
+function findLinkMarkRange(
+  $pos: ResolvedPos,
+  type: MarkType,
+): { from: number; to: number; mark: Mark } | null {
+  if (!$pos.parent.isTextblock) return null;
+  const after = $pos.parent.childAfter($pos.parentOffset);
+  // `childAfter` returns `{ node, index, offset }` — `node` may be
+  // null if the position is at the very end of the parent. In that
+  // case there's no text node carrying any mark, so no link.
+  if (!after.node) return null;
+  const mark = after.node.marks.find((m) => m.type === type);
+  if (!mark) return null;
+  let startIndex = after.index;
+  let startPos = $pos.start() + after.offset;
+  while (
+    startIndex > 0 &&
+    mark.isInSet($pos.parent.child(startIndex - 1).marks)
+  ) {
+    startIndex -= 1;
+    startPos -= $pos.parent.child(startIndex).nodeSize;
+  }
+  let endPos = startPos + after.node.nodeSize;
+  let endIndex = after.index + 1;
+  while (
+    endIndex < $pos.parent.childCount &&
+    mark.isInSet($pos.parent.child(endIndex).marks)
+  ) {
+    endPos += $pos.parent.child(endIndex).nodeSize;
+    endIndex += 1;
+  }
+  return { from: startPos, to: endPos, mark };
+}
+
+/**
+ * Auto-prefix the URL scheme so a bare hostname (`www.google.com`)
+ * or email (`steve@example.com`) becomes a working link instead of
+ * a renderer-relative href that resolves to nothing.
+ *
+ *   - Already has a scheme (`http:`, `https:`, `mailto:`, anything
+ *     matching `[a-z][a-z0-9+\-.]*:`) → leave alone.
+ *   - Email-shaped (`local@host.tld`) → prepend `mailto:`.
+ *   - Anything else → prepend `https://`.
+ *
+ * Worth noting: `https://` is the safe default in 2025+; bare
+ * `http://` is rare for new content and most servers redirect
+ * anyway. Keeping the default aligns with how Slack, Discord,
+ * Gmail, and every other modern composer auto-link bare URLs.
+ */
+function ensureProtocol(url: string): string {
+  if (!url) return url;
+  if (/^[a-z][a-z0-9+\-.]*:/i.test(url)) return url;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(url)) return `mailto:${url}`;
+  return `https://${url}`;
+}
 type BlockName =
   | 'h1'
   | 'h2'
@@ -119,9 +182,14 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
   const [linkPrompt, setLinkPrompt] = useState<{
     from: number;
     to: number;
+    /** True when the modal is editing an existing link mark. Used
+     *  to switch the modal title and submit-button label. */
+    isEditing: boolean;
   } | null>(null);
   const [linkUrl, setLinkUrl] = useState('');
-  const linkInputRef = useRef<HTMLInputElement>(null);
+  const [linkText, setLinkText] = useState('');
+  const linkUrlInputRef = useRef<HTMLInputElement>(null);
+  const linkTextInputRef = useRef<HTMLInputElement>(null);
 
   const refreshState = useCallback(() => {
     const editor = get();
@@ -226,25 +294,55 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
     if (loading) return;
     const editor = get();
     if (!editor) return;
-    // Snapshot the selection range now — the input field that's
-    // about to take focus will collapse the contentEditable
-    // selection in Chromium, and we need to remember the user's
-    // original range to apply the link to the right text.
+    // Snapshot the selection range AND any existing link mark at
+    // the cursor position — the input field that's about to take
+    // focus will collapse the contentEditable selection in
+    // Chromium, so we have to capture everything we'll need
+    // synchronously before opening the modal.
     let from = -1;
     let to = -1;
+    let isEditing = false;
+    let initialText = '';
+    let initialUrl = '';
     editor.action((ctx) => {
-      const sel = ctx.get(editorViewCtx).state.selection;
+      const view = ctx.get(editorViewCtx);
+      const { state } = view;
+      const sel = state.selection;
+      const linkType = state.schema.marks.link;
+      if (!linkType) return;
+      // Look for an existing link mark at the current $from. If
+      // there's one, expand the working range to span the entire
+      // link — the user's intent when invoking the link command on
+      // a position inside an existing link is "edit this link",
+      // not "create a new link starting at the caret".
+      const range = findLinkMarkRange(sel.$from, linkType);
+      if (range) {
+        from = range.from;
+        to = range.to;
+        initialText = state.doc.textBetween(from, to);
+        initialUrl =
+          (range.mark.attrs as { href?: string }).href ?? '';
+        isEditing = true;
+        return;
+      }
+      // No existing link at $from — use the user's actual
+      // selection. With a non-empty selection, prefill the link
+      // text from the selected content; with a collapsed cursor,
+      // both fields start empty.
       from = sel.from;
       to = sel.to;
+      if (!sel.empty) initialText = state.doc.textBetween(from, to);
     });
     if (from < 0) return;
-    setLinkUrl('');
-    setLinkPrompt({ from, to });
+    setLinkText(initialText);
+    setLinkUrl(initialUrl);
+    setLinkPrompt({ from, to, isEditing });
   }, [loading, get]);
 
   const cancelLinkPrompt = useCallback(() => {
     setLinkPrompt(null);
     setLinkUrl('');
+    setLinkText('');
     // Restore focus to the editor so the user can keep typing
     // without an extra click.
     const editor = get();
@@ -254,52 +352,74 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
   }, [get]);
 
   const submitLinkPrompt = useCallback(() => {
-    const url = linkUrl.trim();
-    if (!url || !linkPrompt) {
+    const rawUrl = linkUrl.trim();
+    if (!rawUrl || !linkPrompt) {
       cancelLinkPrompt();
       return;
     }
+    // Auto-prefix the protocol if the user typed a bare hostname
+    // (`www.example.com`) or an email address. Without this the
+    // resulting `<a href="www.example.com">` is non-functional —
+    // browsers resolve the href relative to the current document
+    // (which under raise-asset:// produces nothing useful), and
+    // mailto: discoverability is poor for casual users.
+    const url = ensureProtocol(rawUrl);
+    // Visible text falls back to the URL when the user leaves the
+    // text field empty — avoids creating an invisible / zero-width
+    // link, and matches the previous "URL is its own visible text"
+    // behaviour for the no-selection case.
+    const text = linkText.trim() || rawUrl;
     const editor = get();
     if (!editor) return;
     const { from, to } = linkPrompt;
     setLinkPrompt(null);
     setLinkUrl('');
+    setLinkText('');
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       const { state } = view;
       const linkMark = state.schema.marks.link;
       if (!linkMark) return;
-      if (from !== to) {
-        // Selection: replace any existing link marks in the saved
-        // range with the new href.
-        const tr = state.tr
-          .removeMark(from, to, linkMark)
-          .addMark(from, to, linkMark.create({ href: url }));
-        view.dispatch(tr);
-        view.focus();
-        return;
-      }
-      // No selection: insert URL as both visible text and href,
-      // with that text selected so a subsequent keystroke replaces
-      // the visible URL with the user's intended link text.
-      const node = state.schema.text(url, [linkMark.create({ href: url })]);
+      // Single transaction for both add and edit: replace the
+      // captured [from, to] range with a fresh text node carrying
+      // the link mark. This handles all three flows uniformly:
+      //   - editing an existing link (range spans the link)
+      //   - wrapping a selection (range spans the selection)
+      //   - inserting at a collapsed cursor (range is empty)
+      const node = state.schema.text(text, [
+        linkMark.create({ href: url }),
+      ]);
       const tr = state.tr.replaceRangeWith(from, to, node);
+      // Place the caret at the end of the inserted link so the
+      // user can keep typing immediately after.
       const insertEnd = from + node.nodeSize;
-      const sel = TextSelection.create(tr.doc, from, insertEnd);
-      view.dispatch(tr.setSelection(sel).scrollIntoView());
+      tr.setSelection(TextSelection.create(tr.doc, insertEnd));
+      view.dispatch(tr.scrollIntoView());
       view.focus();
     });
-  }, [linkUrl, linkPrompt, get, cancelLinkPrompt]);
+  }, [linkUrl, linkText, linkPrompt, get, cancelLinkPrompt]);
 
-  // Auto-focus the input when the modal opens.
+  // Auto-focus the right input when the modal opens. If the text
+  // field is empty (e.g. no selection, no existing link) we focus
+  // there — the user needs to type both fields. Otherwise focus
+  // the URL field (the more common thing to fill or edit).
   useEffect(() => {
     if (linkPrompt) {
-      // requestAnimationFrame so the input is in the DOM before
-      // .focus() runs — the modal renders conditionally below.
-      const id = requestAnimationFrame(() => linkInputRef.current?.focus());
+      const id = requestAnimationFrame(() => {
+        if (linkText.length === 0) {
+          linkTextInputRef.current?.focus();
+        } else {
+          linkUrlInputRef.current?.focus();
+          linkUrlInputRef.current?.select();
+        }
+      });
       return () => cancelAnimationFrame(id);
     }
     return undefined;
+    // linkText is intentionally omitted from deps — its value is
+    // captured at modal-open time and shouldn't refocus on every
+    // keystroke as the user types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkPrompt]);
 
   // RAISE-38: expose `promptLink()` so the WYSIWYG context menu
@@ -500,13 +620,13 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
     </div>
     {linkPrompt !== null && (
       <div
-        // RAISE-38: link-URL prompt (window.prompt is suppressed in
-        // the sandboxed renderer, so we render a small in-app modal
+        // RAISE-38: link prompt (window.prompt is suppressed in the
+        // sandboxed renderer, so we render a small in-app modal
         // instead). Backdrop closes on click; the inner card stops
-        // propagation so clicking the input doesn't dismiss.
+        // propagation so clicking the inputs doesn't dismiss.
         role="dialog"
         aria-modal="true"
-        aria-label="Insert link"
+        aria-label={linkPrompt.isEditing ? 'Edit link' : 'Insert link'}
         onClick={cancelLinkPrompt}
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       >
@@ -516,12 +636,32 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
             e.preventDefault();
             submitLinkPrompt();
           }}
-          className="flex min-w-[400px] flex-col gap-3 rounded-[var(--rise-radius-card)] border border-stroke bg-app p-4 shadow-[var(--rise-shadow-depth-1)]"
+          className="flex min-w-[420px] flex-col gap-3 rounded-[var(--rise-radius-card)] border border-stroke bg-app p-4 shadow-[var(--rise-shadow-depth-1)]"
         >
+          <h2 className="text-sm font-semibold text-strong">
+            {linkPrompt.isEditing ? 'Edit link' : 'Insert link'}
+          </h2>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-semibold text-strong">Link URL</span>
+            <span className="font-semibold text-strong">Text</span>
             <input
-              ref={linkInputRef}
+              ref={linkTextInputRef}
+              type="text"
+              value={linkText}
+              onChange={(e) => setLinkText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelLinkPrompt();
+                }
+              }}
+              placeholder="Display text (defaults to the URL)"
+              className="rounded border border-stroke bg-surface px-3 py-1.5 text-sm text-strong focus:border-interaction focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-semibold text-strong">URL</span>
+            <input
+              ref={linkUrlInputRef}
               type="text"
               value={linkUrl}
               onChange={(e) => setLinkUrl(e.target.value)}
@@ -531,7 +671,7 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
                   cancelLinkPrompt();
                 }
               }}
-              placeholder="https://..."
+              placeholder="https://example.com or name@example.com"
               className="rounded border border-stroke bg-surface px-3 py-1.5 text-sm text-strong focus:border-interaction focus:outline-none"
             />
           </label>
@@ -548,7 +688,7 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
               disabled={!linkUrl.trim()}
               className="rounded bg-interaction px-3 py-1 text-sm font-semibold text-white hover:bg-interaction-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Insert
+              {linkPrompt.isEditing ? 'Update' : 'Insert'}
             </button>
           </div>
         </form>

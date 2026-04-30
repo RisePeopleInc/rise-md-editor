@@ -303,6 +303,9 @@ const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;
     hasSelection: boolean;
+    /** RAISE-38: true when the right-click landed on an existing
+     *  link element. Surfaces an "Edit Link…" menu item. */
+    isOnLink?: boolean;
   }): Promise<void> => ipcRenderer.invoke('context-menu:show-editor', payload),
 };
 
