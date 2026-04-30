@@ -39,6 +39,11 @@ import {
 import { resolveAssetUrl } from '../../state/assetUrl';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
+import {
+  joinFrontmatter,
+  splitFrontmatter,
+  type FrontmatterSplit,
+} from '../../state/markdown';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
 export interface WysiwygEditorHandle {
@@ -83,30 +88,6 @@ interface WysiwygEditorProps {
   onOpenImage?: (relPath: string) => void;
   /** Used by the toolbar's image button (file picker → assets/ copy). */
   requireSavedPath?: () => Promise<string | null>;
-}
-
-// Match a YAML frontmatter block at the very start of the document. The
-// closing fence may or may not be followed by a newline.
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
-
-interface Split {
-  frontmatter: string | null;
-  body: string;
-}
-
-function splitFrontmatter(content: string): Split {
-  // Strip a leading UTF-8 BOM — fs.readFile('utf-8') doesn't, and a BOM
-  // would push the `---` past the regex's `^` anchor and we'd miss the
-  // frontmatter on files saved by Notepad / older Windows tools.
-  const stripped = content.replace(/^\uFEFF/, '');
-  const match = stripped.match(FRONTMATTER_RE);
-  if (!match) return { frontmatter: null, body: stripped };
-  return { frontmatter: match[1] ?? '', body: stripped.slice(match[0].length) };
-}
-
-function joinFrontmatter(frontmatter: string | null, body: string): string {
-  if (frontmatter === null) return body;
-  return `---\n${frontmatter}\n---\n\n${body}`;
 }
 
 // Tooltip / slash plugins in Milkdown v7 are factory-created so each
@@ -625,8 +606,11 @@ export function WysiwygEditor({
   // Split once at mount; the parent keys this component by tab id + load
   // epoch, so a tab switch or re-open of the same file fully remounts and
   // we re-split against the new content.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const initialSplit = useMemo<Split>(() => splitFrontmatter(content), []);
+  const initialSplit = useMemo<FrontmatterSplit>(
+    () => splitFrontmatter(content),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Capture the initial scrollTop on mount so the restore effect (below)
