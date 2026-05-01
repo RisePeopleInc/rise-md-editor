@@ -18,6 +18,7 @@ import {
 import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
 import { splitFrontmatter } from '../../state/markdown';
+import { markdownItComments } from '../../state/markdownItComments';
 import type { WordWrap } from '../../env';
 
 interface SplitViewProps {
@@ -110,6 +111,14 @@ export function SplitView({
     // type with its own parser/serializer pair — tracked under
     // [RAISE-34](https://risepeople.atlassian.net/browse/RAISE-34).
     instance.use(markdownItEmoji);
+    // RAISE-31: render review-style comments greyed-out. Two
+    // forms: `<!-- text -->` (inline or block) and `// text` (at
+    // start of a line, after optional whitespace). Both render
+    // with `class="md-comment"`; styled muted-italic via CSS in
+    // milkdown.css. Skips code spans / fenced blocks naturally
+    // because markdown-it's code rules consume those before our
+    // rules see them.
+    instance.use(markdownItComments);
     // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
     // at render time. The token's `src` attribute is the literal markdown
     // src; we mutate it before delegating to the default renderer.
