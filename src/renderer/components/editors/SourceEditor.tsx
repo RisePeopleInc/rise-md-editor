@@ -303,9 +303,14 @@ export function SourceEditor({
         (event) => {
           const clipboardData = (event as ClipboardEvent).clipboardData;
           if (!clipboardData) return;
-          // Image branch first — these snapshot synchronously and
-          // run an async save before inserting.
-          const item = firstImageItem(clipboardData.items);
+          // RAISE-39: image-only paste path. Skip when text/html
+          // is also present — Word / Excel / browser / PowerPoint
+          // clipboards bundle a screenshot alongside the rich
+          // content, and we want the text in those cases.
+          const hasHtml = !!clipboardData.getData('text/html');
+          const item = hasHtml
+            ? null
+            : firstImageItem(clipboardData.items);
           if (item) {
             // Snapshot now: DataTransferItems become "neutered"
             // the moment the paste handler returns, so reading

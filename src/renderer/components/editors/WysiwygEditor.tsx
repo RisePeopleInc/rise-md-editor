@@ -37,7 +37,10 @@ import {
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
-import { getMarkdownFromClipboard } from '../../state/clipboardPaste';
+import {
+  getMarkdownFromClipboard,
+  unescapeHeadingNumberDot,
+} from '../../state/clipboardPaste';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import {
@@ -192,7 +195,17 @@ function MilkdownBody({
           // parse-side `remarkGemojiSubstitute`; converts emoji
           // characters back to `:name:` so source preserves the
           // shortcode form.
-          const processed = emojiToShortcodes(stripEmptyParagraphMarkers(markdown));
+          //
+          // RAISE-39: `unescapeHeadingNumberDot` undoes the `1\.`
+          // escape that lands in heading lines on the WYSIWYG
+          // round-trip after a Google Docs paste — cleanup at
+          // paste time strips the Google-Docs escape but the
+          // round-trip re-introduces it via mdast-util-to-
+          // markdown's safe-escape patterns; this is the
+          // belt-and-braces strip on the way to disk.
+          const processed = unescapeHeadingNumberDot(
+            emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+          );
           onChangeRef.current(processed);
         });
         // Once Milkdown finishes its initial mount, jump the caret to the
@@ -396,7 +409,19 @@ function MilkdownBody({
             const cd = (event as ClipboardEvent).clipboardData;
             if (!cd) return false;
             const items = cd.items;
-            const imageItem = firstImageItem(items);
+            // RAISE-39: only treat the paste as image-only when
+            // there's NO text/html alongside the image. Word /
+            // Excel / browser / PowerPoint clipboards routinely
+            // bundle a screenshot of the source content with the
+            // text/html version, and we want the text in those
+            // cases — a screenshot loses all the structure (and
+            // triggers the requireSavedPath save-as dialog for
+            // an untitled doc, which is the smoke-test report).
+            // For genuine image-only paste (screenshot tool,
+            // Preview's clipboard, drag-from-image-on-disk), no
+            // text/html is present and the image branch fires.
+            const hasHtml = !!cd.getData('text/html');
+            const imageItem = hasHtml ? null : firstImageItem(items);
             if (imageItem) {
               // Synchronous snapshot — the DataTransferItem is invalidated
               // when this handler returns, so a later read of `.type` or

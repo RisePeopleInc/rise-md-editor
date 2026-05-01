@@ -115,13 +115,63 @@ function getTurndown(): TurndownService {
 }
 
 /**
+ * Strip residual HTML that Turndown couldn't / didn't convert.
+ * Web pages especially throw off `<div>` wrappers, `<span style>`
+ * spans, `<br>` inside table cells, etc. — Turndown's defaults
+ * leave these in the output as inline HTML, and Milkdown's
+ * commonmark parser then renders them as literal text in WYSIWYG
+ * (the html schema is an inline atom that displays its raw
+ * value), which is what RAISE-39 smoke testing was hitting.
+ *
+ * Strip categories:
+ *   - `<style>...</style>` / `<script>...</script>` — drop
+ *     entirely, content is non-prose noise
+ *   - `<br>` / `<br />` — replace with a single space (typical
+ *     source: GFM table cells where line breaks aren't supported,
+ *     so Turndown emits `<br>` to preserve the visual break)
+ *   - `<div>` / `<span>` opening/closing tags — drop the tags but
+ *     keep the content (Turndown leaves these on unknown
+ *     elements; the wrapped text is what we want)
+ */
+function sanitizeTurndownOutput(md: string): string {
+  return md
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/?(?:div|span)[^>]*>/gi, '')
+    // Collapse the runs of spaces that the <br> → ' ' replacement
+    // and the dropped tags can leave behind.
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+/**
  * Convert HTML to markdown via Turndown + GFM. Trims the result
  * because Turndown sometimes emits trailing newlines that
  * compound into blank lines once inserted into an editor.
+ * Sanitises the output to drop residual HTML that Turndown left
+ * in (web pages especially leak `<div>`, `<span>`, `<br>` etc.).
  */
 export function htmlToMarkdown(html: string): string {
   if (!html) return '';
-  return getTurndown().turndown(html).trim();
+  return sanitizeTurndownOutput(getTurndown().turndown(html)).trim();
+}
+
+/**
+ * Defensive serialize-side post-process: undo the `\.` escape
+ * that mdast-util-to-markdown sometimes inserts after digits
+ * inside heading text. Cleanup at paste time *should* strip
+ * the Google-Docs version of this escape, but smoke-test
+ * feedback shows `\.` still landing in source on the WYSIWYG
+ * round-trip — so we belt-and-braces it here too.
+ *
+ * Narrow regex: only matches `^(#+\s+\d+)\.` after a digit at
+ * the start of a heading line. Outside that exact shape, `\.`
+ * could be the user's deliberate literal-period escape, so we
+ * don't touch it.
+ */
+export function unescapeHeadingNumberDot(markdown: string): string {
+  if (!markdown || !markdown.includes('\\.')) return markdown;
+  return markdown.replace(/^(#+\s+\d+)\\\./gm, '$1.');
 }
 
 /**

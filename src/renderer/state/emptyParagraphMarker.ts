@@ -49,12 +49,27 @@
 /**
  * The literal Milkdown emits for an empty middle paragraph.
  * `paragraph.toMarkdown` writes exactly `<br />` (lowercase, one
- * space, self-closing) — we match exactly that, with optional
- * trailing whitespace, on its own line. Anything else (`<br>`,
- * `<BR/>`, `<br/>`, attributes, mid-line `<br />`) is treated as
- * user content and passed through.
+ * space, self-closing) — we match exactly that on a line, with
+ * optional trailing whitespace. Two flavours of "lines that are
+ * just a marker":
+ *
+ *   1. **Standalone**: `<br />` on its own line, with optional
+ *      leading whitespace. The prototypical RAISE-37 case —
+ *      empty paragraph between two real ones.
+ *
+ *   2. **Empty list item**: `* <br />` / `- [ ] <br />` etc.
+ *      RAISE-39 surfaced this when pasting task-list content
+ *      ended in an empty trailing item. Milkdown's paragraph
+ *      serializer writes the `<br />` for an empty middle
+ *      paragraph regardless of whether the paragraph is wrapped
+ *      in a list_item, so the marker leaks the same way; we
+ *      just need a wider regex to catch it.
+ *
+ * Anything else (mid-line `<br />`, `<br>` without slash, `<BR>`,
+ * `<br />` with attributes) is treated as user content.
  */
-const EMPTY_PARAGRAPH_MARKER_LINE = /^<br \/>\s*$/gm;
+const EMPTY_PARAGRAPH_MARKER_LINE =
+  /^[ \t]*(?:[-*+] (?:\[[^\]]*\] )?)?<br \/>\s*$/gm;
 
 /**
  * Match a code region the strip must skip:
