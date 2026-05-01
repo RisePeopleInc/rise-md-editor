@@ -468,6 +468,19 @@ export function preprocessClipboardHtml(html: string): string {
     html = html
       .replace(/<\/(?:p|div|h[1-6]|o:p)>/gi, '<br>')
       .replace(/<(?:p|div|h[1-6]|o:p)\b[^>]*>/gi, '');
+    // Collapse runs of `<br>` to a single one. Word uses empty
+    // `<p></p>` paragraphs as visual spacers between paragraphs
+    // in a cell — after the close-tag → `<br>` substitution above,
+    // those empties contribute extra `<br>` markers between the
+    // real content paragraphs. Without collapsing, a cell with
+    // "P1 + 2 empty spacers + P3" becomes `P1<br><br><br>P3`,
+    // which after Turndown override + Milkdown round-trip lands
+    // in source as `P1   P3` (3 spaces — one per `<br />`,
+    // because Milkdown's GFM table cell parser flattens inline
+    // breaks to spaces). Smoke-test [round 7] showed exactly that
+    // gap. Collapse to a single `<br>` so the round-trip produces
+    // a single space.
+    html = html.replace(/(?:<br\s*\/?>\s*){2,}/gi, '<br>');
     // Trim trailing `<br>` runs the close-tag substitution
     // leaves behind on the last block.
     html = html.replace(/(?:<br\s*\/?>\s*)+$/i, '');
