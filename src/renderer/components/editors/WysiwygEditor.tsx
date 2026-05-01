@@ -37,7 +37,10 @@ import {
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
-import { commentDecorationsPlugin } from '../../state/commentDecorations';
+import {
+  commentDecorationsPlugin,
+  unescapeCommentDelimiters,
+} from '../../state/commentDecorations';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import {
@@ -192,7 +195,16 @@ function MilkdownBody({
           // parse-side `remarkGemojiSubstitute`; converts emoji
           // characters back to `:name:` so source preserves the
           // shortcode form.
-          const processed = emojiToShortcodes(stripEmptyParagraphMarkers(markdown));
+          //
+          // RAISE-31: `unescapeCommentDelimiters` strips the
+          // backslash that remark-stringify inserts in front of
+          // `<!--` for inline-HTML safety. Comments are
+          // deliberately HTML-shaped so the escape isn't doing
+          // useful work; without this fix the source on disk
+          // shows `\<!-- foo -->` instead of `<!-- foo -->`.
+          const processed = unescapeCommentDelimiters(
+            emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+          );
           onChangeRef.current(processed);
         });
         // Once Milkdown finishes its initial mount, jump the caret to the

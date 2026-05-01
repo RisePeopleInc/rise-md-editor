@@ -378,11 +378,28 @@
  * `.md-comment` paragraphs collapse their margin so a stack of
  * `// note 1\n// note 2` reads as one visual block instead of
  * two paragraph-spaced ones.
+ *
+ * Combined `color` + `opacity` for the greyed effect: the muted
+ * variable is already a slightly lighter grey than body text, but
+ * the difference is subtle in both themes (light: #555c61 vs
+ * #6a7075, dark: #c8d0d8 vs #aaadb0). Adding 0.65 opacity gives
+ * a clearly-dimmed look that reads unambiguously as "this is a
+ * comment, not main content" — matching how code editors render
+ * inline source comments.
+ *
+ * Specificity note: `.raise-prose` sets the body color, and a
+ * descendant `.md-comment` / `.raise-comment` needs more
+ * specificity than that to override. `.raise-prose .md-comment`
+ * (0,2,0) beats `.raise-prose` (0,1,0). The `.raise-comment`
+ * decoration class lands inside the same `.raise-prose`
+ * container in WYSIWYG, so the same selector pattern works.
  */
 .raise-prose .raise-comment,
-.raise-prose .md-comment {
+.raise-prose .md-comment,
+.raise-prose .md-comment * {
   color: var(--rise-text-muted);
   font-style: italic;
+  opacity: 0.65;
 }
 .raise-prose .md-comment + .md-comment {
   margin-top: 0;
