@@ -447,6 +447,37 @@ export function preprocessClipboardHtml(html: string): string {
   // (rare — heading inside a cell), and `<o:p>` (Word-XML
   // paragraph marker on the Office namespace).
   body.querySelectorAll('th, td').forEach((cell) => {
+    // First pass — drop visually-empty block elements within the
+    // cell. Word inserts `<p>&nbsp;</p>` (literally non-breaking
+    // space inside an empty paragraph) as visual line-gap padding
+    // between content paragraphs in a cell. The regex collapse
+    // below only matches consecutive `<br>` markers; an `&nbsp;`
+    // between them isn't matched, so the nbsp survives Turndown
+    // and the Milkdown round-trip as a visible space character —
+    // smoke-test [round 8] surfaced this with three spaces between
+    // paragraphs in the rendered cell. Removing the empty blocks
+    // upstream of the regex unwrap means the collapse only sees
+    // consecutive `<br>` (or none at all) and produces a single
+    // separator.
+    //
+    // `textContent` on a Comment / Text / Element is the standard
+    // way to ask "does this node have any visible content at
+    // all?", treating `&nbsp;` and other whitespace characters
+    // uniformly. `.trim()` then catches the all-whitespace case.
+    cell
+      .querySelectorAll('p, div, h1, h2, h3, h4, h5, h6')
+      .forEach((block) => {
+        if (block.textContent?.trim() === '') block.remove();
+      });
+    // `o:p` is in the Office XML namespace; HTML5 parses it as a
+    // tag with literal name "o:p". `getElementsByTagName` accepts
+    // the colon directly (querySelectorAll needs `o\\:p` escaping
+    // and is handled inconsistently across browsers, so we avoid
+    // that here).
+    Array.from(cell.getElementsByTagName('o:p')).forEach((block) => {
+      if (block.textContent?.trim() === '') block.remove();
+    });
+
     let html = cell.innerHTML;
     if (!/<(?:p|div|h[1-6]|o:p)\b/i.test(html)) return;
     // Replace each block close tag with `<br>`, then drop the
