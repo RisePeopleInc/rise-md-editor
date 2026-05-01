@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
+import { getMarkdownFromClipboard } from '../../state/clipboardPaste';
 import {
   firstImageItem,
   pickImageFiles,
@@ -302,25 +303,72 @@ export function SourceEditor({
         (event) => {
           const clipboardData = (event as ClipboardEvent).clipboardData;
           if (!clipboardData) return;
+          // Image branch first — these snapshot synchronously and
+          // run an async save before inserting.
           const item = firstImageItem(clipboardData.items);
-          if (!item) return; // Plain text paste — Monaco handles it.
-          // Snapshot now: DataTransferItems become "neutered" the
-          // moment the paste handler returns, so reading .type or
-          // calling getAsFile() across an `await` returns null/empty.
-          const snapshot = snapshotPasteItem(item);
-          if (!snapshot) return;
+          if (item) {
+            // Snapshot now: DataTransferItems become "neutered"
+            // the moment the paste handler returns, so reading
+            // .type or calling getAsFile() across an `await`
+            // returns null/empty.
+            const snapshot = snapshotPasteItem(item);
+            if (!snapshot) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void (async () => {
+              const handler = onImagePasteRef.current;
+              if (!handler) return;
+              const insertion = await handler(snapshot);
+              if (!insertion) return;
+              const position = instance.getPosition();
+              if (!position) return;
+              insertAt(position, insertion.markdown);
+              instance.focus();
+            })();
+            return;
+          }
+
+          // RAISE-39: text/rich-text paste. Route through the
+          // shared clipboard helper so the source editor benefits
+          // from the same Google-Docs-cleanup + Turndown-fallback
+          // pipeline as WYSIWYG. Without this intervention,
+          // Monaco's default paste pulls `text/plain` verbatim —
+          // which for Google Docs is markdown with cosmetic
+          // over-escapes (`\.`, `\#`) AND broken double-wrapped
+          // links, and for Word / browser pages is an unstyled
+          // text dump that's lost all structure.
+          //
+          // We only preventDefault when we have a useful markdown
+          // string to insert. If the helper returns null (truly
+          // empty clipboard), we let Monaco fall through to its
+          // default no-op so we don't break anything.
+          const markdown = getMarkdownFromClipboard(clipboardData);
+          if (markdown == null) return;
           event.preventDefault();
           event.stopPropagation();
-          void (async () => {
-            const handler = onImagePasteRef.current;
-            if (!handler) return;
-            const insertion = await handler(snapshot);
-            if (!insertion) return;
-            const position = instance.getPosition();
-            if (!position) return;
-            insertAt(position, insertion.markdown);
-            instance.focus();
-          })();
+          const selection = instance.getSelection();
+          const range = selection
+            ? new monaco.Range(
+                selection.startLineNumber,
+                selection.startColumn,
+                selection.endLineNumber,
+                selection.endColumn,
+              )
+            : (() => {
+                const pos = instance.getPosition();
+                if (!pos) return null;
+                return new monaco.Range(
+                  pos.lineNumber,
+                  pos.column,
+                  pos.lineNumber,
+                  pos.column,
+                );
+              })();
+          if (!range) return;
+          instance.executeEdits('paste', [
+            { range, text: markdown, forceMoveMarkers: true },
+          ]);
+          instance.focus();
         },
         { capture: true },
       );
