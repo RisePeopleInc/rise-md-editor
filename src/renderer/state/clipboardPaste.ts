@@ -278,6 +278,62 @@ export function preprocessClipboardHtml(html: string): string {
   }
   comments.forEach((c) => c.parentNode?.removeChild(c));
 
+  // Word represents the document "Title" style as a
+  // `<p class="MsoTitle">...</p>` rather than a heading element
+  // (HTML has no semantic title separate from `<h1>`). Without
+  // this conversion Turndown sees a paragraph and emits the
+  // bold-via-CSS title as `**Title**` instead of `# Title` —
+  // the smoke-test screenshot showed exactly this. Promote the
+  // common Word title / subtitle classes to real heading tags
+  // so Turndown's heading rule fires.
+  //
+  // Word's `MsoHeading1` … `MsoHeading6` *do* already render as
+  // `<h1>` … `<h6>` (Word maps them itself), so they don't need
+  // promotion here.
+  body.querySelectorAll('p').forEach((p) => {
+    const cls = p.className.toLowerCase();
+    let level: number | undefined;
+    if (/\bmso-?title\b/.test(cls)) level = 1;
+    else if (/\bmso-?subtitle\b/.test(cls)) level = 2;
+    if (level === undefined) return;
+    const h = doc.createElement(`h${level}`);
+    h.innerHTML = p.innerHTML;
+    p.replaceWith(h);
+  });
+
+  // Unwrap block-level children inside table cells. Word emits
+  // table cells as `<td><p>Some text</p></td>` — sometimes with
+  // multiple `<p>` siblings — and Turndown's table-cell rule
+  // serialises that as `| <newline><newline>Some text<newline>
+  // <newline> |`, which breaks the markdown row format. The
+  // smoke-test screenshot showed exactly this: each cell landed
+  // on its own line with a stray `|` between them, plus a
+  // disconnected `\| --- | --- | --- | --- |` alignment row.
+  //
+  // Replace each cell's block children with their inline content
+  // joined by `<br>`. GFM tables support `<br>` for line breaks
+  // within a cell, so multi-paragraph Word cells survive as
+  // single rows without losing the visual line breaks.
+  //
+  // Pattern matches the tags Word actually emits inside cells:
+  // `<p>` (most common), `<div>` (nested wrapper), `<h1>`-`<h6>`
+  // (rare — heading inside a cell), and `<o:p>` (Word-XML
+  // paragraph marker on the Office namespace).
+  body.querySelectorAll('th, td').forEach((cell) => {
+    let html = cell.innerHTML;
+    if (!/<(?:p|div|h[1-6]|o:p)\b/i.test(html)) return;
+    // Replace each block close tag with `<br>`, then drop the
+    // open tags. Order matters — the close-tag pass injects the
+    // separator before we strip the surrounding markup.
+    html = html
+      .replace(/<\/(?:p|div|h[1-6]|o:p)>/gi, '<br>')
+      .replace(/<(?:p|div|h[1-6]|o:p)\b[^>]*>/gi, '');
+    // Trim trailing `<br>` runs the close-tag substitution
+    // leaves behind on the last block.
+    html = html.replace(/(?:<br\s*\/?>\s*)+$/i, '');
+    cell.innerHTML = html;
+  });
+
   // For any `<table>` lacking a `<thead>`, promote the first
   // row to a `<thead>` with `<th>` cells so GFM Turndown's
   // tables rule converts it instead of keeping it as raw HTML.
