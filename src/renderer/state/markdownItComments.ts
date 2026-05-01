@@ -55,10 +55,17 @@ function inlineHtmlComment(state: StateInline, silent: boolean): boolean {
   const open = state.push('comment_inline_open', 'span', 1);
   open.attrSet('class', 'md-comment');
   open.markup = HTML_COMMENT_OPEN;
-  const inner = state.push('text', '', 0);
-  inner.content = src
+  // Recursively parse the comment's inner content as inline
+  // markdown so links / bold / italic / inline code inside a
+  // comment render correctly. `state.md.inline.parse` runs the
+  // full inline tokenizer on the substring and pushes the
+  // resulting flat token sequence into the array we hand it —
+  // we hand it `state.tokens` directly so the parsed children
+  // land between our open / close span tokens.
+  const innerSrc = src
     .slice(start + HTML_COMMENT_OPEN.length, end)
     .trim();
+  state.md.inline.parse(innerSrc, state.md, state.env, state.tokens);
   state.push('comment_inline_close', 'span', -1);
   state.pos = end + HTML_COMMENT_CLOSE.length;
   return true;

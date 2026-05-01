@@ -41,7 +41,10 @@ import {
   getMarkdownFromClipboard,
   unescapeHeadingNumberDot,
 } from '../../state/clipboardPaste';
-import { commentDecorationsPlugin } from '../../state/commentDecorations';
+import {
+  commentDecorationsPlugin,
+  unescapeCommentDelimiters,
+} from '../../state/commentDecorations';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import {
@@ -204,8 +207,17 @@ function MilkdownBody({
           // round-trip re-introduces it via mdast-util-to-
           // markdown's safe-escape patterns; this is the
           // belt-and-braces strip on the way to disk.
-          const processed = unescapeHeadingNumberDot(
-            emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+          //
+          // RAISE-31: `unescapeCommentDelimiters` strips the
+          // backslash that remark-stringify inserts in front of
+          // `<!--` for inline-HTML safety. Comments are
+          // deliberately HTML-shaped so the escape isn't doing
+          // useful work; without this fix the source on disk
+          // shows `\<!-- foo -->` instead of `<!-- foo -->`.
+          const processed = unescapeCommentDelimiters(
+            unescapeHeadingNumberDot(
+              emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+            ),
           );
           onChangeRef.current(processed);
         });
