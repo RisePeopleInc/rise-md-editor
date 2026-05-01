@@ -246,6 +246,31 @@ function getTurndown(): TurndownService {
   // / browser-page tables would fall back to plain-text dump and
   // lose structure.
   td.use(gfm);
+  // Override Turndown's default `<br>` rule. The default emits
+  // `'  \n'` (markdown hard break = two trailing spaces + literal
+  // newline), which breaks GFM table rows when the `<br>` is
+  // inside a `<td>`: the newline splits the cell across physical
+  // lines, mangling the `|...|` row format and pushing trailing
+  // cells out of the table. Smoke test on a Word doc with a
+  // multi-paragraph cell hit exactly this:
+  // `preprocessClipboardHtml` joins multi-`<p>` cell content with
+  // `<br>` so cells flatten to single lines for Turndown's
+  // table-cell rule, but the default lineBreak handler then
+  // re-injected newlines and the row exploded — cell 4 ended up
+  // as the literal `<br />` token, with the rest of the cell-3
+  // content continuing outside the table on subsequent lines.
+  //
+  // Replacing the rule to emit literal `<br />` text keeps cell
+  // content on one line. GFM tables natively render `<br>` as an
+  // in-cell line break, so visual structure is preserved.
+  // Outside tables, `sanitizeTurndownOutput`'s per-line pass
+  // turns `<br />` into a space (the existing prose behaviour).
+  // Tying both together: `<br />` in markdown source means "line
+  // break inside table cell" and "space in prose paragraph".
+  td.addRule('lineBreak', {
+    filter: 'br',
+    replacement: () => '<br />',
+  });
   turndownInstance = td;
   return td;
 }
