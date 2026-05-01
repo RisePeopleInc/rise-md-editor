@@ -362,3 +362,28 @@
   border-left: 0;
   border-radius: 0;
 }
+
+/*
+ * Review-style comments rendered greyed-out (RAISE-31).
+ *
+ *   - `.raise-comment` is the class our ProseMirror decoration
+ *     plugin applies in WYSIWYG. Inline range over the comment
+ *     text — same look as a span styled muted-italic.
+ *   - `.md-comment` is the class the markdown-it custom rules
+ *     emit on the preview side: `<span class="md-comment">` for
+ *     `<!-- inline -->`, `<p class="md-comment">` for `// line`.
+ *
+ * Both render with the same muted-italic styling so the two
+ * surfaces look identical for the same source text. Adjacent
+ * `.md-comment` paragraphs collapse their margin so a stack of
+ * `// note 1\n// note 2` reads as one visual block instead of
+ * two paragraph-spaced ones.
+ */
+.raise-prose .raise-comment,
+.raise-prose .md-comment {
+  color: var(--rise-text-muted);
+  font-style: italic;
+}
+.raise-prose .md-comment + .md-comment {
+  margin-top: 0;
+}

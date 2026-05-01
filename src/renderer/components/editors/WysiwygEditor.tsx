@@ -37,6 +37,7 @@ import {
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
+import { commentDecorationsPlugin } from '../../state/commentDecorations';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import {
@@ -480,7 +481,14 @@ function MilkdownBody({
       // that lands at the end of the doc, so the user can navigate
       // out of the code block via Down arrow / click / End rather
       // than being trapped inside it. See state/trailingParagraph.ts.
-      .use(trailingParagraphPlugin),
+      .use(trailingParagraphPlugin)
+      // RAISE-31: visually grey out review-style comments —
+      // `<!-- text -->` (inline or block) and `// text` (line-
+      // start). Pure decoration, no model change, so the source
+      // round-trips with the literal characters intact. Code
+      // blocks and inline-code text are skipped. See
+      // state/commentDecorations.ts.
+      .use(commentDecorationsPlugin),
   );
 
   // Bridge the imperative handle to Milkdown's history commands. The menu's
