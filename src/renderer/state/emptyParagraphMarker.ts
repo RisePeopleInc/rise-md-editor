@@ -49,12 +49,51 @@
 /**
  * The literal Milkdown emits for an empty middle paragraph.
  * `paragraph.toMarkdown` writes exactly `<br />` (lowercase, one
- * space, self-closing) — we match exactly that, with optional
- * trailing whitespace, on its own line. Anything else (`<br>`,
- * `<BR/>`, `<br/>`, attributes, mid-line `<br />`) is treated as
- * user content and passed through.
+ * space, self-closing) — we match exactly that on a line, with
+ * optional trailing whitespace. Several flavours of "lines that
+ * are just a marker", widened iteratively from smoke-test
+ * feedback:
+ *
+ *   1. **Standalone**: `<br />` on its own line, with optional
+ *      leading whitespace. The prototypical RAISE-37 case —
+ *      empty paragraph between two real ones.
+ *
+ *   2. **Empty unordered list item**: `* <br />` / `- <br />` /
+ *      `+ <br />`. RAISE-39 iteration 1 surfaced this when
+ *      pasting list content with a trailing empty item.
+ *      Milkdown's paragraph serializer writes the `<br />` for
+ *      an empty middle paragraph regardless of whether the
+ *      paragraph is wrapped in a list_item, so the marker leaks
+ *      the same way.
+ *
+ *   3. **Empty task list item**: `* [ ] <br />` / `- [x] <br />`.
+ *      Same as (2) plus the GFM checkbox marker.
+ *
+ *   4. **Empty ordered list item**: `1. <br />` / `12) <br />`.
+ *      RAISE-39 iteration 2 — same Milkdown leak path, but for
+ *      ordered lists. The original `[-*+] ` regex missed this.
+ *
+ *   5. **Empty blockquote line**: `> <br />`. Empty paragraph
+ *      inside a blockquote's middle has the `> ` quote prefix
+ *      retained on the marker line.
+ *
+ * The regex uses a permissive character class for the leading
+ * "marker prefix" portion — any combination of whitespace,
+ * blockquote `>`, list-marker chars (`-`, `*`, `+`, digits, `.`,
+ * `)`), and task-checkbox brackets (`[`, `]`). Followed by the
+ * literal `<br />` and optional trailing whitespace.
+ *
+ * False-positive risk: a user content line that happens to
+ * contain *only* those marker chars before a literal `<br />`
+ * would be stripped. In practice that doesn't happen — any
+ * meaningful prose introduces letters that break the char class
+ * and the regex stops matching.
+ *
+ * Anything else (mid-line `<br />`, `<br>` without slash, `<BR>`,
+ * `<br />` with attributes) is treated as user content.
  */
-const EMPTY_PARAGRAPH_MARKER_LINE = /^<br \/>\s*$/gm;
+const EMPTY_PARAGRAPH_MARKER_LINE =
+  /^[ \t>\-*+\d.()[\]xX]*<br \/>\s*$/gm;
 
 /**
  * Match a code region the strip must skip:
