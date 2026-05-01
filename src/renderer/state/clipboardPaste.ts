@@ -32,30 +32,69 @@ import { gfm } from 'turndown-plugin-gfm';
  * Returns `null` for an empty clipboard.
  */
 
-const MARKDOWN_SYNTAX_PATTERNS: readonly RegExp[] = [
-  /^#{1,6} /m, // ATX heading
-  /\*\*[^*\s][\s\S]*?\*\*/, // bold
-  /__[^_\s][\s\S]*?__/, // alt bold
-  /\*[^*\s][^*]*\*/, // italic (rough — accepts some false negatives)
-  /\[[^\]]+\]\([^)]+\)/, // link
-  /^\s*[-*+] /m, // unordered list
-  /^\s*\d+[.\\]\.? /m, // ordered list (commonmark `1.` or Google Docs `1\.`)
+/**
+ * Patterns that *strongly* indicate a `text/plain` clipboard slot is
+ * already-prepared markdown (vs. unstyled text from Word / Outlook /
+ * etc.). Tightened ([RAISE-39](https://risepeople.atlassian.net/browse/RAISE-39))
+ * after smoke-test feedback that Word paste was losing tables — Word's
+ * plain-text bullets (`* item`) and ordered lists (`1. item`) and
+ * Outlook's reply quote markers (`> text`) all look superficially like
+ * markdown but are actually structure-stripped dumps where the rich
+ * version (text/html) carries the real formatting.
+ *
+ * To distinguish "I copied real markdown" from "I copied rich content
+ * that happens to have bullets in plain text", require a marker that
+ * wouldn't naturally appear in a Word/Outlook/etc. plain-text dump:
+ *
+ *   - ATX heading (`# `, `## `, ...) — Word doesn't prefix headings
+ *     with `#` in plain-text export.
+ *   - Fenced code (` ``` ` / `~~~`) — strong unambiguous marker.
+ *   - Inline link (`[text](url)`) / image (`![alt](url)`) — explicit
+ *     markdown syntax; plain-text export shows just the link text.
+ *   - Bold delimiters (`**`, `__`) — plain-text export drops the
+ *     bold styling entirely.
+ *   - Backslash escapes (`\.`, `\#`) — Google Docs's "Copy as
+ *     markdown" signature; nothing else emits these.
+ *   - GFM table row (`| a | b |` with at least 3 pipes) — Word
+ *     plain-text uses tabs, not pipes, for tables.
+ *
+ * Deliberately omitted (used to be in this list, removed because
+ * they false-positive on rich-content plain-text dumps):
+ *
+ *   - Bullet lists (`^\s*[-*+] `) — Word/Outlook plain bullets match.
+ *   - Plain ordered lists (`^\s*\d+\. `) — Word/Outlook match.
+ *   - Italic (`*text*`) — too loose, overlaps with bullet plain-text.
+ *   - Blockquote (`^> `) — Outlook reply quote markers match.
+ *
+ * The trade-off: a paste that's *only* unstyled bullet markdown
+ * (no headings / links / bold / etc.) routes through the HTML
+ * branch instead, which still produces correct output via Turndown
+ * because the source app's HTML side carries the bullet structure.
+ */
+const STRONG_MARKDOWN_PATTERNS: readonly RegExp[] = [
+  /^#{1,6} \S/m, // ATX heading with content
   /^```/m, // fenced code (backticks)
   /^~~~/m, // fenced code (tildes)
-  /^\|.*\|$/m, // table row
-  /^>\s/m, // blockquote
+  /\[[^\]]+\]\([^)]+\)/, // inline link
+  /!\[[^\]]*\]\([^)]+\)/, // inline image
+  /\*\*[^*\s][\s\S]{0,200}?\*\*/, // bold (paired, length-bounded)
+  /__[^_\s][\s\S]{0,200}?__/, // alt bold (paired, length-bounded)
+  /\\[.#]/, // backslash-dot or backslash-hash (Google Docs sig)
+  /^\|[^|\n]*\|[^|\n]*\|/m, // GFM table row (3+ pipes on one line)
 ];
 
 /**
- * Heuristic: does this string contain at least one markdown
- * syntactic pattern? Conservative — false negatives are fine
- * (we'd then route through HTML / Turndown which still produces
- * usable output), but a false positive (treating non-markdown as
- * markdown) would blow up the paste.
+ * Heuristic: does this string contain at least one *strong* markdown
+ * marker (one that Word / Outlook / etc. wouldn't put in plain-text
+ * export)? Conservative — false negatives are fine (we'd then route
+ * through HTML / Turndown which still produces usable output), but a
+ * false positive (treating a Word plain-text dump as markdown) would
+ * lose all the rich structure (tables, bold, etc.) carried by the
+ * accompanying text/html slot.
  */
 export function looksLikeMarkdown(text: string): boolean {
   if (!text) return false;
-  return MARKDOWN_SYNTAX_PATTERNS.some((re) => re.test(text));
+  return STRONG_MARKDOWN_PATTERNS.some((re) => re.test(text));
 }
 
 /**
@@ -68,10 +107,18 @@ export function looksLikeMarkdown(text: string): boolean {
  *      mis-renders without this fix.
  *
  *   2. **Cosmetic over-escapes**: Google Docs escapes `.` after
- *      digits in headings (`### 1\. Foo`) and `#` inside table
- *      cells (`| \# |`). Both parse correctly via commonmark
+ *      *every* digit in heading text (`### 1\. Foo`,
+ *      `### Item 1\. Foo`, `## A 1\. B 2\. C`) and `#` inside
+ *      table cells (`| \# |`). Both parse correctly via commonmark
  *      escape rules, but the visible `\.` / `\#` is jarring in
- *      source view, so strip the escape.
+ *      source view, so strip the escape. The smoke-test feedback
+ *      on iteration 1 caught the mid-heading-digits case (the
+ *      original narrow regex only matched digits *immediately*
+ *      after `#+`) — the fix scans the whole heading line.
+ *
+ *   3. **Ordered-list-start escapes**: `1\. Foo` at line start
+ *      (start of a list item). Strip so the rendered source is
+ *      `1. Foo`.
  *
  * Applied unconditionally to every "looks like markdown" paste —
  * if the source wasn't Google Docs the patterns simply don't
@@ -79,11 +126,21 @@ export function looksLikeMarkdown(text: string): boolean {
  */
 export function cleanupGoogleDocsMarkdown(text: string): string {
   if (!text) return text;
-  return text
-    .replace(/\[\[([^\]]+)\]\(([^)]+)\)\]\(([^)]+)\)/g, '[$1]($3)')
-    .replace(/^(\s*\d+)\\\./gm, '$1.')
-    .replace(/^(#+\s+\d+)\\\./gm, '$1.')
-    .replace(/\\#/g, '#');
+  return (
+    text
+      .replace(/\[\[([^\]]+)\]\(([^)]+)\)\]\(([^)]+)\)/g, '[$1]($3)')
+      // Strip `\.` after any digit on heading lines (broader than
+      // RAISE-39 iteration 1's `^(#+\s+\d+)\\.` which missed
+      // `### Item 1\. Foo`).
+      .replace(/^(#+\s+.*)$/gm, (line) =>
+        line.replace(/(\d)\\\./g, '$1.'),
+      )
+      // Ordered list start: `1\. Foo` or `  1\. Foo` → `1. Foo`.
+      .replace(/^(\s*\d+)\\\./gm, '$1.')
+      // Table cell `\#` → `#`. Applies anywhere; outside tables
+      // there's no functional difference.
+      .replace(/\\#/g, '#')
+  );
 }
 
 /**
@@ -164,14 +221,19 @@ export function htmlToMarkdown(html: string): string {
  * feedback shows `\.` still landing in source on the WYSIWYG
  * round-trip — so we belt-and-braces it here too.
  *
- * Narrow regex: only matches `^(#+\s+\d+)\.` after a digit at
- * the start of a heading line. Outside that exact shape, `\.`
- * could be the user's deliberate literal-period escape, so we
- * don't touch it.
+ * Scans every heading line (`#+ ` prefix) and strips `\.` after
+ * any digit on that line. Heading text never needs the escape
+ * (list-marker parsing only matters at paragraph start, not
+ * inside a heading), so this is unconditionally safe.
+ *
+ * Outside heading lines, `\.` could be the user's deliberate
+ * literal-period escape, so we don't touch those.
  */
 export function unescapeHeadingNumberDot(markdown: string): string {
   if (!markdown || !markdown.includes('\\.')) return markdown;
-  return markdown.replace(/^(#+\s+\d+)\\\./gm, '$1.');
+  return markdown.replace(/^(#+\s+.*)$/gm, (line) =>
+    line.replace(/(\d)\\\./g, '$1.'),
+  );
 }
 
 /**
