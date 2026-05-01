@@ -194,6 +194,11 @@ function sanitizeTurndownOutput(md: string): string {
   return md
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
+    // HTML comments — `preprocessClipboardHtml` removes these
+    // upstream via DOMParser, but a string-level pass is cheap
+    // belt-and-braces against any path that bypasses the parse
+    // step (malformed HTML that DOMParser couldn't handle, etc.).
+    .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<\/?(?:div|span)[^>]*>/gi, '')
     // Collapse the runs of spaces that the <br> → ' ' replacement
@@ -202,15 +207,115 @@ function sanitizeTurndownOutput(md: string): string {
 }
 
 /**
+ * Pre-process clipboard HTML before handing to Turndown
+ * ([RAISE-39](https://risepeople.atlassian.net/browse/RAISE-39)
+ * iteration 3). Word / Outlook / Excel put a full HTML document
+ * in the clipboard with two specific shapes Turndown's defaults
+ * mishandle:
+ *
+ *   1. **`<head><style>`** — Word writes a megabyte-class CSS
+ *      preamble (`@font-face`, `p.MsoNormal`, etc.) into a
+ *      `<style>` block in the document head, with the CSS
+ *      itself wrapped in HTML comments (CSS-comment delimiters
+ *      around the rule body) for legacy IE compatibility.
+ *      Turndown's default rule set doesn't strip these — the
+ *      raw style content leaks out into the converted markdown
+ *      as the literal "Font Definitions / @font-face / etc."
+ *      string, which then renders verbatim in the WYSIWYG
+ *      editor as the smoke-test screenshot showed.
+ *
+ *   2. **`<table>` without `<thead>`** — Word emits tables as
+ *      `<table><tr><td>...</td></tr>...</table>` with no header
+ *      row. The `turndown-plugin-gfm` tables rule only converts
+ *      tables that have a heading row (either `<thead>` or all-
+ *      `<th>` first row); without one, the table is `keep`'d as
+ *      raw `<table>` HTML in the output. Milkdown then parses
+ *      that raw HTML as an inline html node and the user sees
+ *      the literal `<table>...</table>` text in their document.
+ *
+ * Strategy: parse the HTML via the renderer's native DOMParser,
+ * drop head / style / script / comment nodes, and promote the
+ * first row of each thead-less table to a `<thead>` with `<th>`
+ * cells so the GFM rule can convert it. Return the body's
+ * innerHTML for Turndown to chew on.
+ *
+ * If parsing fails (extremely malformed HTML) we fall back to
+ * the raw input — Turndown handled it fine before, just with
+ * the styling-leak bug.
+ */
+export function preprocessClipboardHtml(html: string): string {
+  if (!html) return html;
+  // DOMParser is a renderer-side API; clipboardPaste.ts is
+  // already renderer-only (DataTransfer is browser-only too)
+  // so this is consistent with the file's environment.
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(html, 'text/html');
+  } catch {
+    return html;
+  }
+  const body = doc.body;
+  if (!body) return html;
+
+  // Drop head — it's where Word's CSS preamble lives.
+  doc.head?.remove();
+
+  // Drop any style / script that snuck into body (rare, but
+  // some sources put them inline).
+  body.querySelectorAll('style, script').forEach((el) => el.remove());
+
+  // Drop HTML comments anywhere in body. DOMParser exposes
+  // these as Comment nodes; we walk and remove them so the
+  // CSS-inside-`<!-- -->` pattern (Word's `<style>` content
+  // is wrapped in legacy-IE conditional comments) doesn't
+  // leak even if a `<style>` block was missed above.
+  const commentWalker = doc.createTreeWalker(body, NodeFilter.SHOW_COMMENT);
+  const comments: Node[] = [];
+  let cur: Node | null = commentWalker.nextNode();
+  while (cur) {
+    comments.push(cur);
+    cur = commentWalker.nextNode();
+  }
+  comments.forEach((c) => c.parentNode?.removeChild(c));
+
+  // For any `<table>` lacking a `<thead>`, promote the first
+  // row to a `<thead>` with `<th>` cells so GFM Turndown's
+  // tables rule converts it instead of keeping it as raw HTML.
+  // Word / Excel / browser-page tables all hit this — none of
+  // them produce explicit `<thead>` in clipboard HTML.
+  body.querySelectorAll('table').forEach((table) => {
+    if (table.tHead) return;
+    const firstRow = table.rows[0];
+    if (!firstRow) return;
+    const thead = doc.createElement('thead');
+    const headerRow = doc.createElement('tr');
+    Array.from(firstRow.cells).forEach((cell) => {
+      const th = doc.createElement('th');
+      th.innerHTML = cell.innerHTML;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.insertBefore(thead, table.firstChild);
+    firstRow.remove();
+  });
+
+  return body.innerHTML;
+}
+
+/**
  * Convert HTML to markdown via Turndown + GFM. Trims the result
  * because Turndown sometimes emits trailing newlines that
  * compound into blank lines once inserted into an editor.
- * Sanitises the output to drop residual HTML that Turndown left
- * in (web pages especially leak `<div>`, `<span>`, `<br>` etc.).
+ * Pre-processes Word / Outlook / Excel clipboard HTML to strip
+ * the `<style>` preamble and to make table headers explicit
+ * (see `preprocessClipboardHtml`). Sanitises the output to drop
+ * residual HTML that Turndown left in (web pages especially
+ * leak `<div>`, `<span>`, `<br>` etc.).
  */
 export function htmlToMarkdown(html: string): string {
   if (!html) return '';
-  return sanitizeTurndownOutput(getTurndown().turndown(html)).trim();
+  const cleaned = preprocessClipboardHtml(html);
+  return sanitizeTurndownOutput(getTurndown().turndown(cleaned)).trim();
 }
 
 /**
