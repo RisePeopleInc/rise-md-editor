@@ -30,6 +30,80 @@ import { gfm } from 'turndown-plugin-gfm';
  *      handle it as a plain paste.
  *
  * Returns `null` for an empty clipboard.
+ *
+ * ---
+ *
+ * ## Iteration history
+ *
+ * Every regex / preprocessing step here earned its place via a
+ * specific smoke-test failure. Future maintainers touching these
+ * patterns can use this map to understand which input shape each
+ * branch is defending against without re-running the manual
+ * test matrix.
+ *
+ *   **Iteration 0 (initial)** — the decision-rule scaffold and
+ *   `cleanupGoogleDocsMarkdown` for the three quirks called out
+ *   in the ticket: double-wrapped links, `\.` after digits in
+ *   numbered headings (narrow shape only), and `\#` in table
+ *   cells.
+ *
+ *   **Iteration 1** — five smoke-test fixes:
+ *   1. *Word/Excel/browser paste lands as image* — those apps
+ *      bundle a screenshot alongside `text/html`, and the image
+ *      branch fired first. Both editors now skip the image
+ *      branch when `text/html` is present.
+ *   2. *Web-page paste leaks `<div>` / `<span>` into WYSIWYG* —
+ *      Turndown leaves wrapper tags on unknown elements; added
+ *      `sanitizeTurndownOutput` to strip them.
+ *   3. *Empty trailing list-item renders `* [ ] <br />` in
+ *      source* — RAISE-37's empty-paragraph stripper widened
+ *      to match list-item-prefixed marker lines.
+ *   4. *`\.` after digits persists on round-trip* — added
+ *      `unescapeHeadingNumberDot` post-process in the
+ *      `markdownUpdated` pipeline (mdast-util-to-markdown's
+ *      safe-escape rules re-introduce the escape).
+ *   5. (Same flow as #1.)
+ *
+ *   **Iteration 2** — three further fixes:
+ *   1. *`\.` mid-heading still leaks* — both cleanup and
+ *      post-process broadened to scan the whole heading line
+ *      (was anchored to digits *immediately* after `#+`).
+ *   2. *Word paste loses tables* — `looksLikeMarkdown` was
+ *      matching Word's plain-text bullets / ordered lists /
+ *      blockquote-style email reply markers and routing the
+ *      paste away from Turndown. Tightened to require a
+ *      *strong* marker.
+ *   3. *`<br />` still in source* — empty-paragraph stripper
+ *      widened again to handle ordered list items
+ *      (`1. <br />`) and blockquote lines (`> <br />`).
+ *
+ *   **Iteration 3** — Word's `<style>` preamble + headerless
+ *   tables:
+ *   - Added `preprocessClipboardHtml` running before Turndown:
+ *     parse via DOMParser, drop head / inline style / script /
+ *     comment nodes, promote first row of every `<thead>`-less
+ *     `<table>` to a real `<thead>`.
+ *
+ *   **Iteration 4** — Word table cells fragmented + title
+ *   styled as bold:
+ *   - Cell unwrap: replace `<p>` / `<div>` / `<o:p>` block
+ *     children of `<th>` / `<td>` with `<br>`-joined inline
+ *     content, so Turndown's table-cell rule sees a clean
+ *     single-line string.
+ *   - `MsoTitle` / `MsoSubtitle` paragraphs promoted to
+ *     `<h1>` / `<h2>` so Turndown's heading rule fires.
+ *
+ *   **Iteration 5** — review feedback:
+ *   - `sanitizeTurndownOutput` `<br>` → space substitution
+ *     made table-row-aware so multi-paragraph cells preserve
+ *     their `<br>` line breaks (GFM tables render those as
+ *     in-cell line breaks). Previous unconditional pass
+ *     collapsed cells to single visual lines on save.
+ *   - Inline doc cleanups: dropped a defensive but-unused
+ *     `-?` in the `Mso(?:title|subtitle)` regex; documented
+ *     the cell-unwrap close-tag-before-open-tag ordering
+ *     dependency; documented the pipe-art edge-case false
+ *     positive in the `looksLikeMarkdown` table pattern.
  */
 
 /**
@@ -56,7 +130,12 @@ import { gfm } from 'turndown-plugin-gfm';
  *   - Backslash escapes (`\.`, `\#`) — Google Docs's "Copy as
  *     markdown" signature; nothing else emits these.
  *   - GFM table row (`| a | b |` with at least 3 pipes) — Word
- *     plain-text uses tabs, not pipes, for tables.
+ *     plain-text uses tabs, not pipes, for tables. Edge-case
+ *     false positive: a plain-text doc with literal pipe-
+ *     separated columns (ASCII art / hand-typed table) would
+ *     trigger this and skip the HTML branch — acceptable,
+ *     because such content is already structured enough to
+ *     route through the markdown path correctly.
  *
  * Deliberately omitted (used to be in this list, removed because
  * they false-positive on rich-content plain-text dumps):
@@ -183,9 +262,17 @@ function getTurndown(): TurndownService {
  * Strip categories:
  *   - `<style>...</style>` / `<script>...</script>` — drop
  *     entirely, content is non-prose noise
- *   - `<br>` / `<br />` — replace with a single space (typical
- *     source: GFM table cells where line breaks aren't supported,
- *     so Turndown emits `<br>` to preserve the visual break)
+ *   - `<br>` / `<br />` outside table rows — replace with a
+ *     single space (typical source: prose paragraphs where the
+ *     `<br>` is a soft line-break that markdown renders as a
+ *     single space anyway)
+ *   - `<br>` / `<br />` *inside* a table row (line begins with
+ *     `|`) — keep verbatim. GFM tables natively render `<br>`
+ *     as an in-cell line break, and `preprocessClipboardHtml`
+ *     deliberately injects `<br>` between unwrapped multi-`<p>`
+ *     cell content for exactly this reason. The previous
+ *     unconditional space-replacement collapsed those cells to
+ *     a single visual line on save, losing the structure.
  *   - `<div>` / `<span>` opening/closing tags — drop the tags but
  *     keep the content (Turndown leaves these on unknown
  *     elements; the wrapped text is what we want)
@@ -199,10 +286,20 @@ function sanitizeTurndownOutput(md: string): string {
     // belt-and-braces against any path that bypasses the parse
     // step (malformed HTML that DOMParser couldn't handle, etc.).
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<br\s*\/?>/gi, ' ')
+    // Per-line <br> handling: keep <br> in lines that look like
+    // GFM table rows (start with optional whitespace then `|`),
+    // replace with space everywhere else.
+    .split('\n')
+    .map((line) =>
+      /^\s*\|/.test(line) ? line : line.replace(/<br\s*\/?>/gi, ' '),
+    )
+    .join('\n')
     .replace(/<\/?(?:div|span)[^>]*>/gi, '')
     // Collapse the runs of spaces that the <br> → ' ' replacement
-    // and the dropped tags can leave behind.
+    // and the dropped tags can leave behind. Excludes table-row
+    // lines (handled by the per-line pass above) implicitly: the
+    // pattern requires 2+ spaces, and table cells don't gain
+    // double-spaces from <br>-keep.
     .replace(/[ \t]{2,}/g, ' ');
 }
 
@@ -250,6 +347,11 @@ export function preprocessClipboardHtml(html: string): string {
   // so this is consistent with the file's environment.
   let doc: Document;
   try {
+    // `DOMParser.parseFromString(html, 'text/html')` is documented
+    // as never-throwing — malformed HTML produces a document with
+    // a `<parsererror>` node rather than an exception. The catch
+    // here is a paranoia guard against future changes to that
+    // contract; in practice this branch is unreachable.
     doc = new DOMParser().parseFromString(html, 'text/html');
   } catch {
     return html;
@@ -293,8 +395,8 @@ export function preprocessClipboardHtml(html: string): string {
   body.querySelectorAll('p').forEach((p) => {
     const cls = p.className.toLowerCase();
     let level: number | undefined;
-    if (/\bmso-?title\b/.test(cls)) level = 1;
-    else if (/\bmso-?subtitle\b/.test(cls)) level = 2;
+    if (/\bmsotitle\b/.test(cls)) level = 1;
+    else if (/\bmsosubtitle\b/.test(cls)) level = 2;
     if (level === undefined) return;
     const h = doc.createElement(`h${level}`);
     h.innerHTML = p.innerHTML;
@@ -323,8 +425,21 @@ export function preprocessClipboardHtml(html: string): string {
     let html = cell.innerHTML;
     if (!/<(?:p|div|h[1-6]|o:p)\b/i.test(html)) return;
     // Replace each block close tag with `<br>`, then drop the
-    // open tags. Order matters — the close-tag pass injects the
-    // separator before we strip the surrounding markup.
+    // open tags. Order matters — the close-tag pass needs to run
+    // first so the `<br>` separator marks each block boundary
+    // before the open-tag strip flattens the surrounding markup.
+    // Reversing the order (open-strip first) would lose the
+    // boundary information: `<p>A</p><p>B</p>` would become
+    // `A</p>B</p>` and then `AB` (no separator).
+    //
+    // The pass is single-shot, not iterated to fixpoint. That's
+    // sufficient because Word's actual cell content is always
+    // single-level (cell → `<p>` direct child); but it also
+    // handles two-deep nesting correctly because both the inner
+    // and outer close tags get replaced with `<br>` in the same
+    // sweep, and both opens get stripped in the next. E.g.
+    // `<div><p>Foo</p></div>` → `<div>Foo<br><br>` →
+    // `Foo<br><br>` → trimmed to `Foo`.
     html = html
       .replace(/<\/(?:p|div|h[1-6]|o:p)>/gi, '<br>')
       .replace(/<(?:p|div|h[1-6]|o:p)\b[^>]*>/gi, '');
