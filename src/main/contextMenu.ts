@@ -40,6 +40,13 @@ export interface ShowEditorContextMenuPayload {
   mode: EditorContextMode;
   /** True if the editor has a non-empty text selection at the click. */
   hasSelection: boolean;
+  /**
+   * RAISE-38: true when the right-click landed on an existing link
+   * element in the WYSIWYG surface. Drives whether the link menu
+   * item reads "Edit Link…" (and appears without a selection) or
+   * "Add Link…" (selection-only).
+   */
+  isOnLink?: boolean;
 }
 
 /**
@@ -142,6 +149,23 @@ export function showEditorContextMenu(
         click: () => dispatch('context-copy-as-markdown'),
       },
     );
+    // RAISE-38: link menu item — always visible in WYSIWYG. The
+    // same `context-add-link` action surfaces the in-app link
+    // prompt; the modal decides whether it's adding or editing
+    // based on whether the cursor is on an existing link mark.
+    //
+    //   - Right-click on an existing link → "Edit Link…" (modal
+    //     pre-fills with the link's text and href).
+    //   - Right-click anywhere else (with or without a text
+    //     selection) → "Add Link…":
+    //       - With selection: wraps the selection in a link.
+    //       - Without selection: opens the modal with both fields
+    //         empty so the user can type both — same flow as
+    //         clicking the toolbar's link button on a bare caret.
+    items.push({
+      label: payload.isOnLink ? 'Edit Link…' : 'Add Link…',
+      click: () => dispatch('context-add-link'),
+    });
   }
 
   const menu = Menu.buildFromTemplate(items);

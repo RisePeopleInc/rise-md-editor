@@ -28,7 +28,7 @@ import { slashFactory } from '@milkdown/plugin-slash';
 import { nord } from '@milkdown/theme-nord';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import { callCommand } from '@milkdown/utils';
-import { Toolbar } from './Toolbar';
+import { Toolbar, type ToolbarHandle } from './Toolbar';
 import {
   firstImageItem,
   pickImageFiles,
@@ -61,6 +61,13 @@ export interface WysiwygEditorHandle {
    * doc. Resolves once the clipboard write completes.
    */
   copyAsMarkdown: () => Promise<void>;
+  /**
+   * RAISE-38: open the link-URL prompt as if the user clicked the
+   * link toolbar button. Routed here from App.tsx's menu-action
+   * dispatcher so the WYSIWYG context menu's "Add Link…" item can
+   * surface the same modal as the toolbar.
+   */
+  promptLink: () => void;
 }
 
 interface WysiwygEditorProps {
@@ -100,6 +107,15 @@ const slashPlugin = slashFactory('raise-slash');
 interface MilkdownBodyProps {
   ref?: Ref<WysiwygEditorHandle>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * RAISE-38: ref to the Toolbar (which is rendered in
+   * WysiwygEditor's tree, sibling to MilkdownBody, not inside it).
+   * MilkdownBody owns the imperative handle exposed to App.tsx,
+   * and one of those methods (`promptLink`) needs to delegate
+   * into the toolbar — so the toolbar ref is created in
+   * WysiwygEditor and passed in here.
+   */
+  toolbarRef: React.RefObject<ToolbarHandle | null>;
   initial: string;
   initialCursorOffset?: number;
   onMarkdownChange: (markdown: string) => void;
@@ -112,6 +128,7 @@ interface MilkdownBodyProps {
 function MilkdownBody({
   ref,
   scrollContainerRef,
+  toolbarRef,
   initial,
   initialCursorOffset,
   onMarkdownChange,
@@ -544,8 +561,11 @@ function MilkdownBody({
           );
         }
       },
+      promptLink: () => {
+        toolbarRef.current?.promptLink();
+      },
     }),
-    [get, scrollContainerRef],
+    [get, scrollContainerRef, toolbarRef],
   );
 
   // RAISE-28: right-click context menu. Lives in MilkdownBody (not the
@@ -568,18 +588,62 @@ function MilkdownBody({
       if (target.closest('.raise-frontmatter')) return;
       e.preventDefault();
 
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+      // RAISE-38: detect right-click on an existing link so the
+      // context menu can show "Edit Link…" instead of "Add Link…".
+      const isOnLink = !!target.closest('a');
+
       const editor = editorInstanceRef.current;
       if (editor) {
         editor.action((ctx) => {
-          ctx.get(editorViewCtx).focus();
+          const view = ctx.get(editorViewCtx);
+          view.focus();
+          // RAISE-38: Chromium contentEditable doesn't reliably
+          // move the caret on right-click. Synthesize standard
+          // text-editor behaviour:
+          //
+          //   - Right-click *inside* the current selection
+          //     → preserve selection (the menu's Cut / Copy /
+          //     selection-sensitive actions all expect the
+          //     selection to still be there).
+          //   - Right-click *outside* the current selection
+          //     → move the caret to the click point and clear
+          //     the selection. Subsequent menu actions (Add /
+          //     Edit Link, Copy as Markdown, etc.) operate on
+          //     the new cursor position. This also fixes the
+          //     "Edit Link…" flow that needs the caret on the
+          //     clicked link to read its href / text, and the
+          //     "Add Link…" flow that should ignore an
+          //     unrelated existing link the caret happened to
+          //     be inside.
+          //
+          // Matches TextEdit / Word / VS Code / Chromium's own
+          // textarea right-click behaviour.
+          const coords = view.posAtCoords({
+            left: e.clientX,
+            top: e.clientY,
+          });
+          if (coords) {
+            const pmSel = view.state.selection;
+            const clickInSelection =
+              !pmSel.empty &&
+              coords.pos >= pmSel.from &&
+              coords.pos <= pmSel.to;
+            if (!clickInSelection) {
+              const tr = view.state.tr.setSelection(
+                TextSelection.near(view.state.doc.resolve(coords.pos)),
+              );
+              view.dispatch(tr);
+            }
+          }
         });
       }
 
-      const sel = window.getSelection();
-      const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
       void window.api.contextMenu.showEditor({
         mode: 'wysiwyg',
         hasSelection,
+        isOnLink,
       });
     };
     container.addEventListener('contextmenu', handleContextMenu);
@@ -613,6 +677,12 @@ export function WysiwygEditor({
   );
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // RAISE-38: ref to the Toolbar component, created here (not in
+  // MilkdownBody) because Toolbar is rendered as a sibling to
+  // MilkdownBody in this component's tree. Forwarded into
+  // MilkdownBody as a prop so its imperative handle can route
+  // `promptLink()` into the toolbar's existing flow.
+  const toolbarRef = useRef<ToolbarHandle | null>(null);
   // Capture the initial scrollTop on mount so the restore effect (below)
   // runs against the value that was current when the component mounted.
   const initialScrollTopRef = useRef(initialScrollTop);
@@ -677,6 +747,25 @@ export function WysiwygEditor({
     const handleClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      // RAISE-38: modifier-click on a link opens it in the user's
+      // default external browser. Plain clicks fall through to
+      // ProseMirror's default (caret positioning inside the link
+      // text), matching the convention used by VS Code, iA Writer,
+      // and most other editors with contentEditable links.
+      const anchor = target.closest('a');
+      if (anchor && container.contains(anchor)) {
+        const isMac = window.api.platform === 'darwin';
+        const modifier = isMac ? e.metaKey : e.ctrlKey;
+        if (modifier) {
+          const href = anchor.getAttribute('href');
+          if (href) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.api.openExternal(href);
+            return;
+          }
+        }
+      }
       if (target.closest('[data-image-tooltip]')) return; // tooltip clicks
       if (target.tagName === 'IMG' && container.contains(target)) {
         // The NodeView writes the original markdown src to
@@ -721,7 +810,7 @@ export function WysiwygEditor({
   return (
     <MilkdownProvider>
       <div className="flex h-full w-full flex-col bg-app">
-        <Toolbar requireSavedPath={requireSavedPath} />
+        <Toolbar ref={toolbarRef} requireSavedPath={requireSavedPath} />
         <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <div className="mx-auto max-w-[720px] px-6 py-8">
             {frontmatter !== null && (
@@ -753,6 +842,7 @@ export function WysiwygEditor({
               <MilkdownBody
                 ref={ref}
                 scrollContainerRef={scrollContainerRef}
+                toolbarRef={toolbarRef}
                 initial={initialSplit.body}
                 initialCursorOffset={initialCursorOffset}
                 onMarkdownChange={handleBodyChange}

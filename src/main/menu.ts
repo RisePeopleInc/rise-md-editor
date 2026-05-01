@@ -36,6 +36,7 @@ export type MenuAction =
   | 'editor-contrast-soft'
   | 'toggle-word-wrap'
   | 'context-copy-as-markdown'
+  | 'context-add-link'
   | 'context-source-select-all'
   | 'context-preview-select-all'
   | 'font-zoom-in'

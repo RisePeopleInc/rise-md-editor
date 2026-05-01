@@ -1,20 +1,10 @@
 /// <reference types="vite/client" />
 
-// RAISE-29: `markdown-it-task-lists` ships no `.d.ts`. Declare just enough
-// for our usage — it's a default-exported markdown-it plugin function.
-declare module 'markdown-it-task-lists' {
-  import type MarkdownIt from 'markdown-it';
-  interface TaskListsOptions {
-    /** When true the rendered checkboxes are NOT disabled (interactive). */
-    enabled?: boolean;
-    /** When true, wraps the item text in a `<label>` for the checkbox. */
-    label?: boolean;
-    /** When true, places the label after the checkbox instead of around it. */
-    labelAfter?: boolean;
-  }
-  const plugin: (md: MarkdownIt, options?: TaskListsOptions) => void;
-  export default plugin;
-}
+// `declare module 'markdown-it-task-lists'` lives in a sibling
+// ambient-only file (`markdown-it-task-lists.d.ts`) so it resolves
+// before the `import` in SplitView. Putting it here didn't work —
+// this file's `export type` declarations make it a module, which
+// in turn changes how nested `declare module` is processed.
 
 export type MenuActionType =
   | 'new'
@@ -49,6 +39,11 @@ export type MenuActionType =
   | 'editor-contrast-hard'
   | 'editor-contrast-medium'
   | 'editor-contrast-soft'
+  | 'toggle-word-wrap'
+  | 'context-copy-as-markdown'
+  | 'context-add-link'
+  | 'context-source-select-all'
+  | 'context-preview-select-all'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -209,6 +204,9 @@ export interface RaiseContextMenuApi {
   showEditor: (payload: {
     mode: EditorContextMode;
     hasSelection: boolean;
+    /** RAISE-38: true when the right-click landed on an existing
+     *  link element. Surfaces an "Edit Link…" menu item. */
+    isOnLink?: boolean;
   }) => Promise<void>;
 }
 
@@ -218,6 +216,14 @@ export interface RaiseApi {
   confirmUnsavedChanges: (filename: string) => Promise<'save' | 'discard' | 'cancel'>;
   confirmFileReload: (filename: string, isDirty: boolean) => Promise<boolean>;
   showError: (title: string, message: string) => void;
+  /**
+   * RAISE-38: forward a URL to the user's default external browser
+   * via main's shell.openExternal. Main validates the URL scheme
+   * (only http / https / mailto are allowed) so the renderer can
+   * pass through whatever it sees in an `<a href>` without
+   * pre-filtering.
+   */
+  openExternal: (url: string) => void;
   notifyReady: () => void;
   closeWindow: () => void;
   files: RaiseFilesApi;

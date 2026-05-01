@@ -534,6 +534,27 @@ ipcMain.on('dialog:show-error', (_, payload: { title: string; message: string })
   });
 });
 
+// RAISE-38: open a URL in the user's default external browser instead of
+// inside the renderer's webContents. Called by the WYSIWYG modifier-click
+// handler and the Split-mode preview pane's link click handler.
+//
+// Strict scheme allowlist: only forward `http:`, `https:`, and `mailto:`.
+// Anything else (especially `javascript:`, `file:`, custom URI schemes
+// from extension links) is silently ignored — opening an arbitrary
+// scheme via shell.openExternal is a known Electron security footgun.
+ipcMain.on('shell:open-external', (_, url: unknown) => {
+  if (typeof url !== 'string' || !url) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
+  const allowedSchemes = new Set(['http:', 'https:', 'mailto:']);
+  if (!allowedSchemes.has(parsed.protocol)) return;
+  void shell.openExternal(parsed.toString());
+});
+
 ipcMain.handle('dialog:open-folder', async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {

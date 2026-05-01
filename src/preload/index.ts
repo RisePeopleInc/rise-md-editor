@@ -35,6 +35,7 @@ export type MenuActionType =
   | 'editor-contrast-soft'
   | 'toggle-word-wrap'
   | 'context-copy-as-markdown'
+  | 'context-add-link'
   | 'context-source-select-all'
   | 'context-preview-select-all'
   | 'font-zoom-in'
@@ -302,6 +303,9 @@ const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;
     hasSelection: boolean;
+    /** RAISE-38: true when the right-click landed on an existing
+     *  link element. Surfaces an "Edit Link…" menu item. */
+    isOnLink?: boolean;
   }): Promise<void> => ipcRenderer.invoke('context-menu:show-editor', payload),
 };
 
@@ -316,6 +320,17 @@ const api = {
     ipcRenderer.invoke('dialog:confirm-reload', filename, isDirty),
   showError: (title: string, message: string): void => {
     ipcRenderer.send('dialog:show-error', { title, message });
+  },
+  /**
+   * RAISE-38: open a URL in the user's default external browser.
+   * Used by the WYSIWYG modifier-click handler and the Split-mode
+   * preview pane's link click handler. Main validates the URL
+   * scheme (http / https / mailto only) before forwarding to
+   * shell.openExternal, so arbitrary `javascript:` or `file:` URLs
+   * are silently dropped.
+   */
+  openExternal: (url: string): void => {
+    ipcRenderer.send('shell:open-external', url);
   },
   notifyReady: (): void => {
     ipcRenderer.send('renderer:ready');
