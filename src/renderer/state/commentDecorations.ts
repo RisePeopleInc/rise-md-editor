@@ -9,8 +9,9 @@ import { $prose } from '@milkdown/utils';
  *
  * Two patterns:
  *
- *   1. `<!-- text -->`  (HTML-style, inline or block)
- *   2. `// text`        (line-start, after optional whitespace)
+ *   1. `<!-- text -->`  HTML-style, inline or block, single- or
+ *      multi-line.
+ *   2. `// text`        Line-start, after optional whitespace.
  *
  * Implemented via a ProseMirror inline-decoration plugin rather
  * than custom marks or nodes, because:
@@ -25,6 +26,28 @@ import { $prose } from '@milkdown/utils';
  *     problem RAISE-34 spent seven attempts wrestling with). The
  *     user can position the caret inside a comment, edit it like
  *     normal text, and the decoration follows.
+ *
+ * Two decoration paths cover the comment shapes:
+ *
+ *   **A — `html` atom branch** (parsed source). When markdown
+ *   source contains `<!-- ... -->`, the commonmark parser turns
+ *   it into Milkdown's `html` ProseMirror node (an inline atom)
+ *   carrying the literal HTML as its `value` attribute. We
+ *   detect the atom directly and decorate over its node range.
+ *   Critical that the descendants walk *enters* textblocks
+ *   (returning `true` from the textblock callback), because the
+ *   atoms live as children of paragraphs after a paste / save /
+ *   reload — without descent the atoms are invisible to the
+ *   plugin and pasted comments don't decorate.
+ *
+ *   **B — Cross-block text buffer scan** (typed input). When
+ *   the user types `<!--` directly in WYSIWYG, the chars enter
+ *   as plain text; if they hit Enter inside the comment the
+ *   text spans multiple paragraphs. We build a doc-level text
+ *   buffer with a parallel doc-position-mapping array (skipping
+ *   code blocks and inline-code-marked text), run the
+ *   `<!--...-->` regex on the buffer, and emit one inline
+ *   decoration per textblock the match overlaps.
  *
  * Skipped contexts:
  *
@@ -49,20 +72,52 @@ const commentDecorationsKey = new PluginKey<DecorationSet>(
   'raiseCommentDecorations',
 );
 
+/**
+ * Per-textblock entry collected during the doc walk so the
+ * cross-block scan can run after we know all the segments.
+ */
+interface BlockSegment {
+  /** Absolute doc position of the textblock's first inline char. */
+  start: number;
+  /** Concatenated non-code-marked text content of the block. */
+  text: string;
+  /** `positions[i]` is the doc position of `text[i]`. */
+  positions: number[];
+}
+
+function collectBlockSegment(node: ProseNode, pos: number): BlockSegment {
+  const start = pos + 1; // step past textblock open token
+  let text = '';
+  const positions: number[] = [];
+  let offset = 0;
+  node.forEach((child) => {
+    if (child.isText && child.text) {
+      const codeMarked = child.marks.some((m) => m.type.name === 'code');
+      if (!codeMarked) {
+        for (let i = 0; i < child.text.length; i++) {
+          text += child.text[i];
+          positions.push(start + offset + i);
+        }
+      }
+    }
+    offset += child.nodeSize;
+  });
+  return { start, text, positions };
+}
+
 function buildDecorations(doc: ProseNode): DecorationSet {
   const decorations: Decoration[] = [];
+  const blockSegments: BlockSegment[] = [];
 
   doc.descendants((node, pos) => {
-    // Don't descend into code blocks. Their `// ...` and
-    // `<!-- ... -->` content is literal code, not commentary.
+    // Skip code blocks entirely. Their `// ...` and `<!-- ... -->`
+    // content is literal code, not commentary.
     if (node.type.spec.code) return false;
 
-    // HTML atoms: when source contains `<!-- ... -->`, the
-    // commonmark parser turns it into an `html` ProseMirror node
-    // (an inline atom) carrying the literal HTML as its `value`
-    // attribute. Decorate the atom directly — the textContent
-    // walk below skips over atoms (they aren't text children),
-    // so they need their own branch.
+    // `html` atom branch — parsed source `<!-- ... -->` lands
+    // here as an inline atom carrying the literal HTML in
+    // `value`. Decorate over the atom's node range. Atoms have
+    // no children so we return false (no descent needed).
     if (node.type.name === 'html') {
       const value = (node.attrs as { value?: string }).value ?? '';
       if (value.startsWith('<!--') && value.endsWith('-->')) {
@@ -75,85 +130,82 @@ function buildDecorations(doc: ProseNode): DecorationSet {
       return false;
     }
 
-    if (!node.isTextblock) return true;
-
-    const text = node.textContent;
-
-    // Whole-paragraph "line comment": text starts with `//` after
-    // optional leading whitespace. Decorate the entire paragraph
-    // and don't bother scanning for HTML comments inside it (the
-    // user's intent is "this entire line is a comment", inclusive
-    // of any literal `<!--` they happened to type).
-    if (text.length > 0 && LINE_COMMENT_RE.test(text)) {
-      const start = pos + 1; // step past the textblock open token
-      const end = pos + 1 + node.content.size;
-      decorations.push(
-        Decoration.inline(start, end, { class: 'raise-comment' }),
-      );
-      return false;
+    // Textblock branch — collect a per-block segment for the
+    // cross-block scan, AND apply the line-comment fast-path
+    // here. Critical: return `true` so `descendants` enters the
+    // textblock's children — without descent, html atoms living
+    // *inside* paragraphs (the post-paste / post-reload shape)
+    // never get visited and pasted comments don't decorate.
+    if (node.isTextblock) {
+      const text = node.textContent;
+      if (text.length > 0 && LINE_COMMENT_RE.test(text)) {
+        decorations.push(
+          Decoration.inline(pos + 1, pos + 1 + node.content.size, {
+            class: 'raise-comment',
+          }),
+        );
+        // Don't collect this block for the cross-block scan —
+        // a `// note` line being interpreted as part of an
+        // unclosed `<!--` from an earlier paragraph would
+        // cause weird false-positive multi-block matches.
+        return true;
+      }
+      blockSegments.push(collectBlockSegment(node, pos));
+      return true;
     }
 
-    // Inline `<!-- ... -->` patterns in text. Build a flat
-    // text buffer of the paragraph's NON-code-marked text plus a
-    // parallel position-mapping array, then run the regex on the
-    // buffer. This lets the comment span across multiple text
-    // children with different marks — e.g. when a user types
-    // `<!-- see [link](url) -->` and Milkdown's link input rule
-    // wraps the inner `link` in a separate text child — the
-    // `<!--` and `-->` are in different children but the
-    // comment as a whole is a single contiguous range in the
-    // doc, which is what we need to decorate.
-    //
-    // Code-marked text is excluded from the buffer entirely so
-    // `<!--` inside inline code stays literal. The
-    // position-mapping ignores code-marked positions, so a
-    // match that "spans" a code-marked region wouldn't decorate
-    // (the buffer would just have the non-code text concatenated
-    // contiguously, and the regex would run on that — but the
-    // match positions wouldn't include the code chars). Edge
-    // case; very unlikely to misbehave in real content.
-    const blockStart = pos + 1;
-    let buffer = '';
-    const positions: number[] = [];
-    let offset = 0;
-    node.forEach((child) => {
-      if (child.isText && child.text) {
-        const codeMarked = child.marks.some(
-          (m) => m.type.name === 'code',
-        );
-        if (!codeMarked) {
-          for (let i = 0; i < child.text.length; i++) {
-            buffer += child.text[i];
-            positions.push(blockStart + offset + i);
-          }
-        }
-      }
-      offset += child.nodeSize;
-    });
+    return true; // container — descend
+  });
+
+  // Cross-block HTML comment scan. Concatenate every block's text
+  // with a `\n` separator (NOT pushed to the position map — the
+  // separator is purely a regex aid). Run the regex over the
+  // joined buffer; for each match, emit one inline decoration per
+  // overlapped block.
+  if (blockSegments.length > 0) {
+    let bigBuffer = '';
+    // For each block, the index in `bigBuffer` where its text starts.
+    const blockOffsets: number[] = [];
+    for (const seg of blockSegments) {
+      blockOffsets.push(bigBuffer.length);
+      bigBuffer += seg.text;
+      bigBuffer += '\n'; // synthetic separator
+    }
 
     HTML_COMMENT_RE.lastIndex = 0;
     let match: RegExpExecArray | null;
-    while ((match = HTML_COMMENT_RE.exec(buffer)) !== null) {
-      const startInBuffer = match.index;
-      const endInBuffer = match.index + match[0].length;
-      // `positions[i]` is the doc position of `buffer[i]`. The
-      // decoration's `to` argument is exclusive — pass the
-      // position immediately *after* the last buffer char.
-      if (endInBuffer <= positions.length) {
-        const startPos = positions[startInBuffer];
-        const lastChar = positions[endInBuffer - 1];
-        if (startPos != null && lastChar != null) {
-          decorations.push(
-            Decoration.inline(startPos, lastChar + 1, {
-              class: 'raise-comment',
-            }),
-          );
-        }
+    while ((match = HTML_COMMENT_RE.exec(bigBuffer)) !== null) {
+      const matchStart = match.index;
+      const matchEnd = match.index + match[0].length;
+      // Emit one inline decoration per block the match overlaps.
+      // Within a block, the decoration covers from match-start (or
+      // block-start) through match-end (or block-end). The
+      // synthetic `\n` between blocks is never decorated because
+      // it's not a real doc position.
+      for (let i = 0; i < blockSegments.length; i++) {
+        const seg = blockSegments[i];
+        const segStartInBuffer = blockOffsets[i];
+        const segEndInBuffer = segStartInBuffer + seg.text.length;
+        // Does the match overlap this block's text range?
+        if (matchEnd <= segStartInBuffer) break; // match ends before this block starts
+        if (matchStart >= segEndInBuffer) continue; // match starts after this block ends
+
+        const localStart = Math.max(matchStart, segStartInBuffer) - segStartInBuffer;
+        const localEnd = Math.min(matchEnd, segEndInBuffer) - segStartInBuffer;
+        if (localEnd <= localStart) continue;
+        if (localEnd > seg.positions.length) continue;
+
+        const startPos = seg.positions[localStart];
+        const lastChar = seg.positions[localEnd - 1];
+        if (startPos == null || lastChar == null) continue;
+        decorations.push(
+          Decoration.inline(startPos, lastChar + 1, {
+            class: 'raise-comment',
+          }),
+        );
       }
     }
-
-    return false;
-  });
+  }
 
   return DecorationSet.create(doc, decorations);
 }

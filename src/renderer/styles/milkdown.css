@@ -404,3 +404,22 @@
 .raise-prose .md-comment + .md-comment {
   margin-top: 0;
 }
+
+/*
+ * Source-view `//` line-comment decoration (RAISE-31).
+ *
+ * Applied via `inlineClassName: 'raise-source-comment'` on Monaco
+ * decorations registered in `SourceEditor.tsx`. The `!important`
+ * is necessary to override Monaco's per-token color classes
+ * (`.mtkN`) which the syntax tokenizer already paints onto every
+ * char of the line. Without `!important` the inlineClassName has
+ * the same specificity as Monaco's class and the token color wins.
+ *
+ * Italic / opacity match the WYSIWYG / preview comment style for
+ * visual consistency across the three surfaces.
+ */
+.raise-source-comment {
+  color: var(--rise-text-muted) !important;
+  font-style: italic;
+  opacity: 0.7;
+}
