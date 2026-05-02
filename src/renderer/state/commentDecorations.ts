@@ -268,7 +268,29 @@ export function unescapeCommentDelimiters(markdown: string): string {
     // Strip backslash-escape from common markdown-syntax chars
     // inside the comment. Conservative set — covers what
     // mdast-util-to-markdown's safe step actually emits.
-    result = result.replace(/\\([[\]()<>*_!#`~|])/g, '$1');
+    // Character set covers everything mdast-util-to-markdown's
+    // safe step + remark-gfm's autolink-literal extension might
+    // add a `\` in front of inside a text node:
+    //
+    //   - `[`, `]`, `(`, `)` — link syntax
+    //   - `<`, `>` — inline HTML / autolinks
+    //   - `*`, `_` — emphasis / strong
+    //   - `!` — image
+    //   - `#` — heading prefix
+    //   - `` ` `` — code span
+    //   - `~` — strikethrough
+    //   - `|` — table cell
+    //   - `:` — gfm-autolink-literal escapes `:` after `[ps]`
+    //     before `/` to break URL re-parsing (`https\://`)
+    //   - `.` — gfm-autolink-literal escapes `.` after `[Ww]`
+    //     to break `www.example.com` re-parsing
+    //   - `@` — gfm-autolink-literal escapes `@` between word
+    //     chars to break email re-parsing (`user\@host.com`)
+    //
+    // Inside an HTML comment all of these are inert content
+    // (the markdown parser treats the comment value as opaque),
+    // so stripping the `\` is always safe.
+    result = result.replace(/\\([[\]()<>*_!#`~|:.@])/g, '$1');
     return result;
   });
 }
