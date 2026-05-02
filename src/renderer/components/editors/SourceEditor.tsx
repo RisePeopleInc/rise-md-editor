@@ -252,21 +252,23 @@ export function SourceEditor({
     // standard markdown — Obsidian / iA Writer convention — and
     // Monaco's tokenizer doesn't know about it. Replacing the
     // tokenizer wholesale would mean re-implementing Monaco's
-    // entire markdown grammar; instead we layer on top via Monaco
-    // decorations.
+    // entire markdown grammar; instead we layer on top via a
+    // Monaco decorations collection.
     //
     // Apply an `inlineClassName: 'raise-source-comment'` decoration
     // to every line whose first non-whitespace chars are `//`.
     // CSS rule in `milkdown.css` paints those ranges in the muted
-    // comment colour. The deltaDecorations API diffs against the
-    // previous IDs so we don't churn the model on every change.
+    // comment colour. `editor.createDecorationsCollection()` (the
+    // non-deprecated Monaco API) tracks the decoration IDs
+    // internally and replaces them atomically on each `.set(...)`
+    // — no churn on the model when content shifts incrementally.
     //
     // Refresh on every content change. `onDidChangeModelContent`
     // fires for every keystroke / paste / programmatic edit;
     // scanning all lines is O(n) line-count and only does work on
     // matches, so the cost is dominated by Monaco's own work.
     // -----------------------------------------------------------------
-    const commentDecorationIds: string[] = [];
+    const commentDecorations = instance.createDecorationsCollection();
     const refreshCommentDecorations = (): void => {
       const model = instance.getModel();
       if (!model) return;
@@ -289,12 +291,7 @@ export function SourceEditor({
           });
         }
       }
-      const newIds = instance.deltaDecorations(
-        commentDecorationIds.slice(),
-        decorations,
-      );
-      commentDecorationIds.length = 0;
-      commentDecorationIds.push(...newIds);
+      commentDecorations.set(decorations);
     };
     refreshCommentDecorations();
     instance.onDidChangeModelContent(() => {

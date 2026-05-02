@@ -55,18 +55,98 @@ import { $prose } from '@milkdown/utils';
  *     traversal short-circuits with `return false`, so we never
  *     descend into them.
  *   - Inline code marks: when we walk a textblock's children we
- *     check each text node for the `code` mark and skip it. This
- *     keeps `` `<!-- not a comment -->` `` literal inside inline
- *     code, and `` `// also not a comment` `` literal too.
+ *     check each text node for the `spec.code` mark and skip it.
+ *     This keeps `` `<!-- not a comment -->` `` literal inside
+ *     inline code, and `` `// also not a comment` `` literal too.
  *
  * URL safety: the line-comment regex is anchored `^[ \t]*\/\/`,
  * and we apply it only to a paragraph's *textContent starts with*
  * — never mid-line. So `Visit https://example.com` never matches
  * (the `//` follows `:`, not line-start).
+ *
+ * ---
+ *
+ * ## Iteration history
+ *
+ * Every regex / branch in this file earned its place via a
+ * specific smoke-test failure across 4 rounds. Future
+ * maintainers touching these patterns can use this map to
+ * understand which input shape each branch is defending against
+ * without re-running the manual test matrix.
+ *
+ *   **Iteration 0 (initial)** — the decoration plugin scaffold,
+ *   per-textblock scan, html atom branch, line-comment fast-
+ *   path, and `unescapeCommentDelimiters` for the leading `\<`.
+ *
+ *   **Iteration 1 (first smoke test, 5 fixes)**:
+ *   1. *Links / formatting inside comments rendered verbatim
+ *      in preview* — the markdown-it inline rule was pushing a
+ *      raw text token for the inner content. Switched to
+ *      `state.md.inline.parse(innerSrc, ..., state.tokens)` so
+ *      the inline tokenizer recurses over the contents.
+ *   2. *Cross-mark text scan* — when a comment's inner content
+ *      gets a link mark on part of it (e.g., the `[link](url)`
+ *      portion gets the link mark), the `<!--` and `-->` end
+ *      up in *different* text children. Added the per-block
+ *      flat-text-buffer + position-map approach so the regex
+ *      sees the full pattern across mark boundaries.
+ *   3. *html-atom branch* — source `<!-- ... -->` parses to an
+ *      `html` ProseMirror inline atom, which the
+ *      walk-text-children approach missed entirely.
+ *   4. *Round-trip un-escape* — `\<!--` survived to disk;
+ *      added the post-process strip.
+ *   5. *CSS contrast* — the muted variable alone wasn't dim
+ *      enough; added `opacity: 0.65`.
+ *
+ *   **Iteration 2 (rebase smoke test, 3 fixes)**:
+ *   1. *Paste / reload doesn't decorate* — the textblock
+ *      callback returned `false` from `descendants`, blocking
+ *      descent into paragraph children. Pasted / reloaded
+ *      comments parse to `html` atoms living *inside*
+ *      paragraphs, never visited. Switched to `return true`.
+ *   2. *Multi-line typed comment doesn't decorate* — comment
+ *      spans multiple paragraphs after Enter. Replaced the
+ *      per-block buffer scan with a doc-level cross-block
+ *      scan (collect every block's segment, concatenate with
+ *      synthetic `\n`, run regex, emit one decoration per
+ *      overlapped block).
+ *   3. *Source `//` no styling* — added Monaco line decoration
+ *      in `SourceEditor.tsx`.
+ *
+ *   **Iteration 3 (round 2 smoke test, 3 fixes)**:
+ *   1. *Inline code styled as comment* — buffer scan was
+ *      checking `m.type.name === 'code'`. Milkdown's inline
+ *      code mark is `inlineCode` (camelCase). Switched to
+ *      `m.type.spec.code === true` — the conventional flag.
+ *   2. *Link-in-comment escapes round-trip* — typed `\[link\]
+ *      \(url\)` clutter survived. Expanded
+ *      `unescapeCommentDelimiters` to strip inner-comment
+ *      escapes, not just the leading `\<`.
+ *   3. *Indented `// note` shows as `&#x20; // note`* — added
+ *      `unescapeIndentEntities` post-process.
+ *
+ *   **Iteration 4 (round 3 smoke test, 1 fix)**:
+ *   - *`\:` survives round-trip* — `mdast-util-gfm-autolink-
+ *     literal` adds `:`, `.`, `@` to the safe-pass unsafe set.
+ *     Extended the inner-comment unescape character set to
+ *     cover the autolink-literal trio.
+ *
+ *   **Iteration 5 (review polish)**:
+ *   - Documented the cross-block false-positive risk inline.
+ *   - Added a negative-lookbehind guard so `\\<!--` (escaped
+ *     literal backslash) isn't misclassified as the
+ *     comment-delimiter escape.
+ *   - Switched Monaco source decoration to
+ *     `createDecorationsCollection()` (non-deprecated API).
+ *   - Extended html branch to also accept block-level html
+ *     nodes (`html_block` if Milkdown ever ships one), with
+ *     a comment that today this is theoretical.
+ *   - Trimmed redundant `.*` from `LINE_COMMENT_RE` and
+ *     redundant `.includes('\\<!--')` early-out check.
  */
 
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
-const LINE_COMMENT_RE = /^[ \t]*\/\/.*/;
+const LINE_COMMENT_RE = /^[ \t]*\/\//;
 
 const commentDecorationsKey = new PluginKey<DecorationSet>(
   'raiseCommentDecorations',
@@ -121,11 +201,17 @@ function buildDecorations(doc: ProseNode): DecorationSet {
     // content is literal code, not commentary.
     if (node.type.spec.code) return false;
 
-    // `html` atom branch — parsed source `<!-- ... -->` lands
-    // here as an inline atom carrying the literal HTML in
-    // `value`. Decorate over the atom's node range. Atoms have
-    // no children so we return false (no descent needed).
-    if (node.type.name === 'html') {
+    // `html` branch — parsed source `<!-- ... -->` lands here
+    // as an inline atom carrying the literal HTML in `value`.
+    // Decorate over the node's range. Atoms have no children so
+    // we return false (no descent needed).
+    //
+    // Today Milkdown's commonmark schema only registers an
+    // inline `html` node; if it ever ships a block-level
+    // `html_block` (an old proposal that hasn't landed), this
+    // branch covers that too — the value-shape check is
+    // identical.
+    if (node.type.name === 'html' || node.type.name === 'html_block') {
       const value = (node.attrs as { value?: string }).value ?? '';
       if (value.startsWith('<!--') && value.endsWith('-->')) {
         decorations.push(
@@ -169,6 +255,18 @@ function buildDecorations(doc: ProseNode): DecorationSet {
   // separator is purely a regex aid). Run the regex over the
   // joined buffer; for each match, emit one inline decoration per
   // overlapped block.
+  //
+  // **False-positive trade-off**: an unbalanced `<!--` in one
+  // paragraph and an unrelated `bar -->` in a later paragraph
+  // (no relation, no closing pair within either block) will be
+  // joined by the synthetic `\n` and matched as one comment,
+  // decorating both paragraphs. This is rare in practice (users
+  // don't usually leave dangling `<!--` between unrelated
+  // paragraphs) and visual-only — the source on disk is
+  // whatever the user actually typed, no data corruption. The
+  // cost of a precise per-block matcher (which would miss the
+  // legitimate multi-paragraph typed comment case) is judged
+  // higher than the false-positive cost.
   if (blockSegments.length > 0) {
     let bigBuffer = '';
     // For each block, the index in `bigBuffer` where its text starts.
@@ -233,41 +331,45 @@ function buildDecorations(doc: ProseNode): DecorationSet {
  *      delimiter is clean.
  *
  *   2. **Inner content escapes**. Within a comment, the same
- *      safe step also escapes `[`, `]`, `(`, `)`, `*`, `_`, etc.
- *      A typed `<!-- with [a link](http://x.com) inside -->`
- *      lands in source as
- *      `<!-- with \[a link\]\(http://x.com\) inside -->` —
- *      visually noisy, and on re-parse the html-inline node
- *      preserves the backslashes verbatim, so they round-trip
- *      back into the WYSIWYG view as visible escape clutter.
- *      HTML comments don't have backslash-escape semantics
- *      (the entire comment value is opaque to the markdown
- *      parser), so the escapes are inert noise — strip them.
+ *      safe step also escapes `[`, `]`, `(`, `)`, `*`, `_`,
+ *      `:`, `.`, `@` etc. — see the character-set comment in
+ *      the regex below. HTML comments don't have backslash-
+ *      escape semantics (the entire comment value is opaque
+ *      to the markdown parser), so the escapes are inert
+ *      noise — strip them.
  *
  * Combined into a single regex pass: find every `\<!-- ... -->`
- * or `<!-- ... -->` region and (a) drop a leading backslash,
- * (b) strip backslashes from common markdown-syntax characters
- * inside the comment.
+ * or `<!-- ... -->` region and (a) drop a leading backslash
+ * unless it itself was escaped, (b) strip backslashes from
+ * common markdown-syntax characters inside the comment.
  *
  * Outside a comment context, `\<` is preserved (the user might
  * have typed it deliberately to escape an inline-html opening
  * in prose).
  *
- * Fast-path: skip the work entirely if the input doesn't
- * contain `<!--` at all.
+ * **Escape-of-escape edge case**: `\\<!--` (two backslashes
+ * then comment) means "literal backslash, then comment open"
+ * after the markdown parser unescapes it. We must NOT treat
+ * this as `\<!--` (escape of comment open), because doing so
+ * would discard the user's literal-backslash intent. The
+ * negative-lookbehind in the regex (`(?<!\\)\\<!--`) skips the
+ * leading-`\`-strip when the `\` is itself preceded by another
+ * `\`.
  */
 export function unescapeCommentDelimiters(markdown: string): string {
-  if (!markdown) return markdown;
-  if (!markdown.includes('<!--') && !markdown.includes('\\<!--')) {
-    return markdown;
-  }
-  return markdown.replace(/\\?<!--[\s\S]*?-->/g, (comment) => {
+  // `\<!--` always contains the substring `<!--`, so checking
+  // for `<!--` alone is sufficient as the early-out — covers
+  // both escaped and unescaped forms.
+  if (!markdown || !markdown.includes('<!--')) return markdown;
+  return markdown.replace(/(?<!\\)(\\?)<!--[\s\S]*?-->/g, (comment, esc) => {
+    // `esc` is either '' (clean `<!--`) or '\\' (escaped `\<!--`,
+    // and the negative-lookbehind guarantees that backslash
+    // wasn't itself preceded by another `\`). Strip the escape.
     let result = comment;
-    // Drop leading `\` from `\<!--`.
-    if (result.startsWith('\\<!--')) result = result.slice(1);
+    if (esc === '\\') result = result.slice(1);
     // Strip backslash-escape from common markdown-syntax chars
-    // inside the comment. Conservative set — covers what
-    // mdast-util-to-markdown's safe step actually emits.
+    // inside the comment.
+    //
     // Character set covers everything mdast-util-to-markdown's
     // safe step + remark-gfm's autolink-literal extension might
     // add a `\` in front of inside a text node:
@@ -311,10 +413,14 @@ export function unescapeCommentDelimiters(markdown: string): string {
  *
  * Strip every `&#x20;` back to a literal space. Trade-off: a
  * user who typed `&#x20;` deliberately as a literal entity
- * (rare) loses it. The far more common case — Milkdown's own
- * leading-whitespace encoding — wins. Markdown renderers that
+ * (rare) loses it. We strip globally rather than only at
+ * line-start because the encoding can also appear mid-line in
+ * some Milkdown serialiser paths (trailing-space preservation
+ * uses the same entity), and the user-typed-literal case is
+ * vanishingly rare in practice. Markdown renderers that
  * encounter literal `&#x20;` decode it to a space anyway, so
- * the visible-result is unchanged either way.
+ * the visible-result is unchanged either way — only the
+ * source-view representation differs.
  */
 export function unescapeIndentEntities(markdown: string): string {
   if (!markdown || !markdown.includes('&#x20;')) return markdown;
