@@ -44,6 +44,7 @@ import {
 import {
   commentDecorationsPlugin,
   unescapeCommentDelimiters,
+  unescapeIndentEntities,
 } from '../../state/commentDecorations';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
@@ -210,13 +211,25 @@ function MilkdownBody({
           //
           // RAISE-31: `unescapeCommentDelimiters` strips the
           // backslash that remark-stringify inserts in front of
-          // `<!--` for inline-HTML safety. Comments are
-          // deliberately HTML-shaped so the escape isn't doing
+          // `<!--` for inline-HTML safety AND the per-character
+          // escapes the safe step adds inside the comment body
+          // (`\[`, `\]`, `\(`, `\)`, etc.). Comments are
+          // deliberately HTML-shaped so the escapes aren't doing
           // useful work; without this fix the source on disk
-          // shows `\<!-- foo -->` instead of `<!-- foo -->`.
-          const processed = unescapeCommentDelimiters(
-            unescapeHeadingNumberDot(
-              emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+          // shows `\<!-- with \[a link\]\(http://x\) -->` and
+          // round-trips that clutter back into WYSIWYG.
+          //
+          // RAISE-31: `unescapeIndentEntities` decodes `&#x20;`
+          // back to a literal space. mdast-util-to-markdown emits
+          // the entity for a *leading* paragraph space so commonmark
+          // doesn't re-interpret it as an indented code block; our
+          // typical case (`  // indented note`) ends up rendered as
+          // `&#x20; // indented note` in source which is jarring.
+          const processed = unescapeIndentEntities(
+            unescapeCommentDelimiters(
+              unescapeHeadingNumberDot(
+                emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+              ),
             ),
           );
           onChangeRef.current(processed);

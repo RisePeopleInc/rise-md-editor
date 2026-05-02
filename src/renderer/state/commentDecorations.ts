@@ -92,7 +92,14 @@ function collectBlockSegment(node: ProseNode, pos: number): BlockSegment {
   let offset = 0;
   node.forEach((child) => {
     if (child.isText && child.text) {
-      const codeMarked = child.marks.some((m) => m.type.name === 'code');
+      // Skip text wearing a code-flagged mark. Milkdown's inline
+      // code mark is registered as `inlineCode` (camelCase, not
+      // `code`), so checking by name was a silent miss — the
+      // mark's `spec.code` flag is the conventional indicator
+      // and catches any code-like mark regardless of name.
+      const codeMarked = child.marks.some(
+        (m) => m.type.spec.code === true,
+      );
       if (!codeMarked) {
         for (let i = 0; i < child.text.length; i++) {
           text += child.text[i];
@@ -211,38 +218,85 @@ function buildDecorations(doc: ProseNode): DecorationSet {
 }
 
 /**
- * Un-escape `\<!--` -> `<!--` in serialized markdown
+ * Un-escape comment delimiters and inner content in serialized
+ * markdown
  * ([RAISE-31](https://risepeople.atlassian.net/browse/RAISE-31) round-trip fix).
  *
- * When the user types `<!--` in WYSIWYG, the doc gains plain
- * text characters. On serialize, remark-stringify treats `<` as
- * unsafe (it's the start of inline HTML / autolinks in markdown
- * spec) and escapes it to `\<` — so the source on disk becomes
- * `\<!-- foo -->` instead of `<!-- foo -->`.
+ * Two related concerns, handled in one pass over the output:
  *
- * That's both ugly to look at in source mode AND defeats
- * round-trip: re-parsing `\<!--` produces a literal `<` text
- * character, not an HTML comment. (Our decoration plugin still
- * catches the `<!-- ... -->` pattern in text and decorates, so
- * the visual is correct — but the source is dirty.)
+ *   1. **Leading `\<!--`**. When the user types `<!--` in
+ *      WYSIWYG, the doc gains plain text characters. On
+ *      serialize, mdast-util-to-markdown's `safe` step escapes
+ *      `<` (it's in the unsafe set — start of inline HTML /
+ *      autolinks). The source on disk becomes `\<!-- foo -->`
+ *      instead of `<!-- foo -->`. Strip the leading `\` so the
+ *      delimiter is clean.
  *
- * Comments are deliberately HTML-shaped, so the escaping isn't
- * doing useful work here. Strip the leading backslash from any
- * `\<!--` sequence in the post-process pipeline (called from
- * `markdownUpdated`, alongside `emojiToShortcodes` and
- * `stripEmptyParagraphMarkers`).
+ *   2. **Inner content escapes**. Within a comment, the same
+ *      safe step also escapes `[`, `]`, `(`, `)`, `*`, `_`, etc.
+ *      A typed `<!-- with [a link](http://x.com) inside -->`
+ *      lands in source as
+ *      `<!-- with \[a link\]\(http://x.com\) inside -->` —
+ *      visually noisy, and on re-parse the html-inline node
+ *      preserves the backslashes verbatim, so they round-trip
+ *      back into the WYSIWYG view as visible escape clutter.
+ *      HTML comments don't have backslash-escape semantics
+ *      (the entire comment value is opaque to the markdown
+ *      parser), so the escapes are inert noise — strip them.
  *
- * The corresponding `-->` at end of an inline string isn't
- * escaped by remark-stringify (the `>` rule only triggers at
- * line-start for blockquotes), so we don't need a counterpart
- * unescape for the closing fence.
+ * Combined into a single regex pass: find every `\<!-- ... -->`
+ * or `<!-- ... -->` region and (a) drop a leading backslash,
+ * (b) strip backslashes from common markdown-syntax characters
+ * inside the comment.
+ *
+ * Outside a comment context, `\<` is preserved (the user might
+ * have typed it deliberately to escape an inline-html opening
+ * in prose).
  *
  * Fast-path: skip the work entirely if the input doesn't
- * contain `\<` at all.
+ * contain `<!--` at all.
  */
 export function unescapeCommentDelimiters(markdown: string): string {
-  if (!markdown || !markdown.includes('\\<')) return markdown;
-  return markdown.replace(/\\<!--/g, '<!--');
+  if (!markdown) return markdown;
+  if (!markdown.includes('<!--') && !markdown.includes('\\<!--')) {
+    return markdown;
+  }
+  return markdown.replace(/\\?<!--[\s\S]*?-->/g, (comment) => {
+    let result = comment;
+    // Drop leading `\` from `\<!--`.
+    if (result.startsWith('\\<!--')) result = result.slice(1);
+    // Strip backslash-escape from common markdown-syntax chars
+    // inside the comment. Conservative set — covers what
+    // mdast-util-to-markdown's safe step actually emits.
+    result = result.replace(/\\([[\]()<>*_!#`~|])/g, '$1');
+    return result;
+  });
+}
+
+/**
+ * Strip `&#x20;` numeric character entities from serialized
+ * markdown ([RAISE-31](https://risepeople.atlassian.net/browse/RAISE-31)
+ * indented-line fix).
+ *
+ * mdast-util-to-markdown encodes a *leading* space at the start
+ * of a paragraph as the entity `&#x20;` to prevent the
+ * commonmark parser from re-interpreting it as part of an
+ * indented-code-block (4+ leading spaces = code). For our
+ * intended use case — `  // an indented note` — the encoding
+ * is technically correct but visually horrible: the source
+ * reads `&#x20; // an indented note` instead of just
+ * `  // an indented note`.
+ *
+ * Strip every `&#x20;` back to a literal space. Trade-off: a
+ * user who typed `&#x20;` deliberately as a literal entity
+ * (rare) loses it. The far more common case — Milkdown's own
+ * leading-whitespace encoding — wins. Markdown renderers that
+ * encounter literal `&#x20;` decode it to a space anyway, so
+ * the visible-result is unchanged either way.
+ */
+export function unescapeIndentEntities(markdown: string): string {
+  if (!markdown || !markdown.includes('&#x20;')) return markdown;
+  return markdown.replace(/&#x20;/g, ' ');
 }
 
 /**
