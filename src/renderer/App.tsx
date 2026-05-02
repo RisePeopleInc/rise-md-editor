@@ -428,28 +428,33 @@ function AppContent() {
   }, [file]);
 
   // RAISE-42: open the Export → PDF modal. Captures the active
-  // editor's selection state at click time (Monaco selection in
-  // Source / Split, preview-pane DOM selection in Split's preview)
-  // and stashes it for the submit handler — that way the modal's
-  // "Selection only" radio reflects the editor's state at the
-  // moment the user invoked the export, not whatever live state
-  // exists after the modal steals focus.
+  // editor's selection state at click time and stashes it for
+  // the submit handler — the modal's "Selection only" radio
+  // reflects the editor's state at the moment the user invoked
+  // the export, not whatever live state exists after the modal
+  // steals focus.
+  //
+  // Smoke-test feedback round 1: the v1 implementation used
+  // `window.getSelection()` for Monaco source mode, which
+  // returned plain text but missed Monaco's selection because
+  // Monaco's custom-rendered DOM doesn't reliably participate in
+  // the document's selection model. Switched to Monaco's own
+  // `editor.getSelection()` + `model.getValueInRange()` via the
+  // SourceEditorHandle's `getSelectionText` method, which
+  // returns the actual markdown source slice — the same string
+  // we'd pass to `buildPrintHtml` to render the partial doc.
+  //
+  // WYSIWYG mode: still disabled. Selection-only in WYSIWYG
+  // would require ProseMirror-slice → markdown serialisation
+  // scoped to the selected range, which is a separate piece of
+  // work (tracked as a follow-up). Modal radio stays disabled
+  // when `isWysiwyg`.
   const openExportPdfModal = useCallback(() => {
     let selectionText = '';
     if (isMonacoActive) {
-      // Monaco gives us the model selection directly. Empty if
-      // the cursor is at a single point. The wrapping ref's
-      // imperative handle doesn't expose getSelection — we
-      // approximate via the DOM, since Monaco renders selected
-      // text as a real DOM range.
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed) selectionText = sel.toString();
+      selectionText = editorRef.current?.getSelectionText() ?? '';
     } else {
-      // WYSIWYG: ProseMirror manages its own selection model. For
-      // v1 we don't extract the markdown for a partial WYSIWYG
-      // selection (would need ProseMirror → markdown serialisation
-      // scoped to the slice); the modal's "Selection only" radio
-      // just stays disabled in WYSIWYG mode.
+      // WYSIWYG: see comment block above.
       selectionText = '';
     }
     setExportPdfSelectionText(selectionText);

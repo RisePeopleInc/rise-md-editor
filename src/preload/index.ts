@@ -219,6 +219,8 @@ export interface ExportPdfOptions {
     footerLeft: string;
     footerCenter: string;
     footerRight: string;
+    author: string;
+    email: string;
   } | null;
   openAfter: boolean;
 }

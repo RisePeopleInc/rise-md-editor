@@ -45,6 +45,17 @@ export interface SourceEditorHandle {
   getScrollTop: () => number;
   /** Set the scroll offset in pixels. */
   setScrollTop: (top: number) => void;
+  /**
+   * RAISE-42: read the currently-selected text from Monaco's
+   * selection model. Returns the selected source string, or
+   * empty if the selection is collapsed / nothing's selected.
+   * Used by the Export-to-PDF flow's "Selection only" range —
+   * `window.getSelection()` doesn't reach Monaco's internal
+   * selection (Monaco renders custom DOM that doesn't always
+   * map to the document selection), so the source-mode export
+   * needs this dedicated path.
+   */
+  getSelectionText: () => string;
 }
 
 interface SourceEditorProps {
@@ -205,6 +216,13 @@ export function SourceEditor({
       },
       getScrollTop: () => editorRef.current?.getScrollTop() ?? 0,
       setScrollTop: (top) => editorRef.current?.setScrollTop(top),
+      getSelectionText: () => {
+        const ed = editorRef.current;
+        const model = ed?.getModel();
+        const sel = ed?.getSelection();
+        if (!ed || !model || !sel || sel.isEmpty()) return '';
+        return model.getValueInRange(sel);
+      },
     }),
     [],
   );

@@ -63,13 +63,23 @@ export interface ExportPdfOptions {
   headerFooter: {
     showHeader: boolean;
     showFooter: boolean;
-    /** Header / footer text (per slot). Placeholders `{title}`, `{date}`, `{page}`, `{pages}` are substituted client-side and rendered into the Chromium `displayHeaderFooter` HTML templates. */
+    /** Header / footer text (per slot). Placeholders supported:
+     *  `{title}`, `{date}`, `{page}`, `{pages}` (substituted by
+     *  Chromium's display-header-footer span class system), plus
+     *  `{author}` and `{email}` (substituted by our own pass below
+     *  using the values supplied alongside this object). */
     headerLeft: string;
     headerCenter: string;
     headerRight: string;
     footerLeft: string;
     footerCenter: string;
     footerRight: string;
+    /** Author / email used for the `{author}` and `{email}`
+     *  placeholders. Empty strings disable substitution but are
+     *  passed through verbatim if the user wrote `{author}` in
+     *  the slot (renders as empty). */
+    author: string;
+    email: string;
   } | null;
   /** Open the PDF in the OS default reader after export. */
   openAfter: boolean;
@@ -131,14 +141,26 @@ function buildSlotTemplate(
   left: string,
   center: string,
   right: string,
+  author: string,
+  email: string,
 ): string {
   const escape = (s: string): string =>
     s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  // `{author}` / `{email}` are our own placeholders — substituted
+  // *before* escape so the user-supplied values are HTML-safe in
+  // the final output. Chromium's built-in placeholders
+  // (`{title}`, `{date}`, `{page}`, `{pages}`) become `<span>`
+  // markers it fills in at print time, so they're safe to
+  // substitute *after* escape.
+  const substituteUserValues = (s: string): string =>
+    s
+      .replace(/\{author\}/g, author)
+      .replace(/\{email\}/g, email);
   const substituteSpans = (s: string): string =>
-    escape(s)
+    escape(substituteUserValues(s))
       .replace(/\{title\}/g, '<span class="title"></span>')
       .replace(/\{date\}/g, '<span class="date"></span>')
       .replace(/\{page\}/g, '<span class="pageNumber"></span>')
@@ -230,10 +252,22 @@ export async function exportToPdf(
     if (opts.headerFooter) {
       const hf = opts.headerFooter;
       printOpts.headerTemplate = hf.showHeader
-        ? buildSlotTemplate(hf.headerLeft, hf.headerCenter, hf.headerRight)
+        ? buildSlotTemplate(
+            hf.headerLeft,
+            hf.headerCenter,
+            hf.headerRight,
+            hf.author,
+            hf.email,
+          )
         : '<div></div>';
       printOpts.footerTemplate = hf.showFooter
-        ? buildSlotTemplate(hf.footerLeft, hf.footerCenter, hf.footerRight)
+        ? buildSlotTemplate(
+            hf.footerLeft,
+            hf.footerCenter,
+            hf.footerRight,
+            hf.author,
+            hf.email,
+          )
         : '<div></div>';
     }
 

@@ -44,11 +44,31 @@ body.raise-prose {
    * what Typora and iA Writer print stylesheets use. */
   max-width: none;
   padding: 0 12pt;
+  /* Force a system sans-serif fallback. Smoke-test feedback
+   * round 1 showed the body rendering as Times Roman in the
+   * PDF — the Rise design system's `--font-sans` resolves to
+   * `Open Sans` via @font-face declarations that load font
+   * files from the asar / dev server. The off-screen print
+   * BrowserWindow runs from a `data:text/html` URL and has no
+   * path to fall back to, so the @font-face URLs fail silently
+   * and the browser falls through to the user-agent default
+   * (Times). Override here with a font stack that's always
+   * available without external files; matches what the live
+   * preview pane *visually* falls back to in the same case. */
+  font-family: -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue',
+    'Arial', sans-serif;
 }
 
 /* Headings: keep block-level break-after-avoid so a heading
  * doesn't end up as the last line of a page with the body text
- * overflowing onto the next page. */
+ * overflowing onto the next page. Same font-family override
+ * for the same reason as `body.raise-prose` — the design-system
+ * serif (`Source Serif Pro`) for h1/h2 also relies on
+ * @font-face files the off-screen window can't load. We match
+ * the live-preview *fallback* shape (sans-serif throughout)
+ * rather than the design-system *intent* (serif on h1/h2),
+ * which is the right call for a PDF: bold sans on a printed
+ * page reads cleaner than missing-font Times Roman. */
 .raise-prose h1,
 .raise-prose h2,
 .raise-prose h3,
@@ -57,6 +77,8 @@ body.raise-prose {
 .raise-prose h6 {
   break-after: avoid-page;
   page-break-after: avoid;
+  font-family: -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue',
+    'Arial', sans-serif;
 }
 
 /* Code blocks: print-friendly background. The editor's grey
@@ -80,21 +102,30 @@ body.raise-prose {
 
 .raise-prose code {
   font-family: 'SF Mono', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
-  font-size: 0.92em;
 }
 
 .raise-prose pre code {
   background: transparent;
   border: none;
   padding: 0;
+  font-size: inherit;
 }
 
 /* Inline code: light wash so it's distinguishable from prose
- * without being noisy. */
+ * without being noisy. Smoke-test feedback round 1: inline code
+ * was rendering at heading-large sizes when nested inside an h1
+ * / h2 because `font-size: 0.92em` is relative to the parent's
+ * computed size — inside a 24pt heading that's still 22pt code,
+ * which dominates the heading visually. Pin to an absolute pt
+ * value so code stays body-text-sized regardless of context. */
 .raise-prose :not(pre) > code {
   background: #f1f3f5;
   padding: 1pt 4pt;
   border-radius: 3px;
+  font-size: 9.5pt;
+  /* Tighten line-height so an inline-code span inside a heading
+   * doesn't push the heading's baseline. */
+  line-height: 1.3;
 }
 
 /* Tables: don't split a row across pages. Allow whole-table

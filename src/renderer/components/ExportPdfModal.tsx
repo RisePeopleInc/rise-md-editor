@@ -65,7 +65,40 @@ const DEFAULT_HEADER_FOOTER: HeaderFooter = {
   footerLeft: '',
   footerCenter: '{page} of {pages}',
   footerRight: '{date}',
+  author: '',
+  email: '',
 };
+
+// Smoke-test feedback round 1: users want their name + email
+// in the header/footer (e.g. "{author} — {email}" in the right
+// slot of the footer for printable hand-offs). Persist whatever
+// the user typed last time so the next export remembers — no
+// new app-preference UI to design.
+const AUTHOR_LS_KEY = 'raise.export.pdf.author';
+const EMAIL_LS_KEY = 'raise.export.pdf.email';
+
+function loadPersistedAuthor(): { author: string; email: string } {
+  try {
+    return {
+      author: window.localStorage.getItem(AUTHOR_LS_KEY) ?? '',
+      email: window.localStorage.getItem(EMAIL_LS_KEY) ?? '',
+    };
+  } catch {
+    // Storage access can throw in some sandbox / private-browsing
+    // configurations. Return empty defaults — re-typing on every
+    // export beats crashing the modal.
+    return { author: '', email: '' };
+  }
+}
+
+function persistAuthor(author: string, email: string): void {
+  try {
+    window.localStorage.setItem(AUTHOR_LS_KEY, author);
+    window.localStorage.setItem(EMAIL_LS_KEY, email);
+  } catch {
+    // Same reason as `loadPersistedAuthor` — non-fatal.
+  }
+}
 
 export interface ExportPdfSubmitPayload {
   pageSize: ExportPdfOptions['pageSize'];
@@ -95,7 +128,17 @@ export function ExportPdfModal({
   const [landscape, setLandscape] = useState(false);
   const [marginPresetIdx, setMarginPresetIdx] = useState(2); // Medium
   const [scale, setScale] = useState(100);
-  const [headerFooter, setHeaderFooter] = useState<HeaderFooter>(DEFAULT_HEADER_FOOTER);
+  const [headerFooter, setHeaderFooter] = useState<HeaderFooter>(() => {
+    // Hydrate the author / email fields from localStorage so the
+    // user's previous values are pre-filled. Other fields use the
+    // module-level defaults.
+    const persisted = loadPersistedAuthor();
+    return {
+      ...DEFAULT_HEADER_FOOTER,
+      author: persisted.author,
+      email: persisted.email,
+    };
+  });
   const [headerFooterExpanded, setHeaderFooterExpanded] = useState(false);
   const [range, setRange] = useState<'document' | 'selection'>('document');
   const [openAfter, setOpenAfter] = useState(true);
@@ -119,6 +162,11 @@ export function ExportPdfModal({
       left: margin,
       right: margin,
     };
+    // Persist the author / email so the next export pre-fills.
+    // Always persist (even if header/footer is off) — the user
+    // might enable it on a later export and expect their values
+    // to come back.
+    persistAuthor(headerFooter.author, headerFooter.email);
     onSubmit({
       pageSize,
       landscape,
@@ -239,8 +287,39 @@ export function ExportPdfModal({
             <div className="flex flex-col gap-2 border-t border-stroke px-3 py-2 text-sm">
               <p className="text-xs text-body">
                 Placeholders: <code>{'{title}'}</code>, <code>{'{date}'}</code>,{' '}
-                <code>{'{page}'}</code>, <code>{'{pages}'}</code>
+                <code>{'{page}'}</code>, <code>{'{pages}'}</code>,{' '}
+                <code>{'{author}'}</code>, <code>{'{email}'}</code>
               </p>
+              {/* Author / email fields. Persisted to localStorage on
+                  submit so the next export pre-fills. Smoke-test
+                  feedback round 1 — users wanted name + email in
+                  printable hand-offs. */}
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="font-semibold text-strong">Author name</span>
+                  <input
+                    type="text"
+                    value={headerFooter.author}
+                    onChange={(e) =>
+                      updateHeaderFooter({ author: e.target.value })
+                    }
+                    placeholder="Used for {author} placeholder"
+                    className="rounded border border-stroke bg-surface px-2 py-1 text-xs text-strong focus:border-interaction focus:outline-none"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="font-semibold text-strong">Author email</span>
+                  <input
+                    type="text"
+                    value={headerFooter.email}
+                    onChange={(e) =>
+                      updateHeaderFooter({ email: e.target.value })
+                    }
+                    placeholder="Used for {email} placeholder"
+                    className="rounded border border-stroke bg-surface px-2 py-1 text-xs text-strong focus:border-interaction focus:outline-none"
+                  />
+                </label>
+              </div>
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
