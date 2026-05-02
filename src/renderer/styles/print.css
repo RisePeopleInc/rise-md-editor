@@ -35,6 +35,19 @@ body {
 }
 
 /*
+ * Pin root font-size to 11pt so the rem-based heading scale in
+ * milkdown.css (h1: 1.875rem, h2: 1.5rem, etc.) scales to print
+ * proportions — h1 lands at ~20.6pt, body at 11pt, the heading
+ * rhythm matches the live preview surface relative to body
+ * size. Without this, `rem` would resolve against the browser
+ * default 16px which makes headings disproportionately huge on
+ * a 11pt body.
+ */
+html {
+  font-size: 11pt;
+}
+
+/*
  * Element-margin reset.
  *
  * Smoke-test feedback round 3: paragraph spacing in PDF didn't

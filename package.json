@@ -30,6 +30,8 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@fontsource/open-sans": "^5.2.7",
+    "@fontsource/source-serif-pro": "^5.2.5",
     "@milkdown/core": "^7.20.0",
     "@milkdown/plugin-clipboard": "^7.20.0",
     "@milkdown/plugin-cursor": "^7.20.0",
