@@ -10,6 +10,7 @@ export type MenuActionType =
   | 'close-folder'
   | 'save'
   | 'save-as'
+  | 'export-pdf'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -185,6 +186,52 @@ export interface SavedAsset {
   absPath: string;
 }
 
+/**
+ * RAISE-42: Export-to-PDF bridge.
+ *
+ * The renderer builds the full print-shell HTML (markdown-it preview
+ * output + Rise design-system CSS + print-specific overrides) and
+ * hands it to main alongside the user's modal selections. Main
+ * renders into an off-screen BrowserWindow and calls
+ * `webContents.printToPDF`, prompts the save dialog, and writes
+ * the file. The result tells the renderer whether to show a success
+ * toast (with the path), a cancellation no-op, or an error toast.
+ */
+export type ExportPdfPageSize = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';
+export interface ExportPdfCustomPageSize {
+  width: number; // inches
+  height: number; // inches
+}
+export interface ExportPdfOptions {
+  html: string;
+  defaultBaseName: string;
+  defaultDir: string | null;
+  pageSize: ExportPdfPageSize | ExportPdfCustomPageSize;
+  landscape: boolean;
+  margins: { top: number; bottom: number; left: number; right: number };
+  scale: number;
+  headerFooter: {
+    showHeader: boolean;
+    showFooter: boolean;
+    headerLeft: string;
+    headerCenter: string;
+    headerRight: string;
+    footerLeft: string;
+    footerCenter: string;
+    footerRight: string;
+  } | null;
+  openAfter: boolean;
+}
+export type ExportPdfResult =
+  | { status: 'saved'; path: string }
+  | { status: 'canceled' }
+  | { status: 'error'; message: string };
+
+const exportApi = {
+  toPdf: (opts: ExportPdfOptions): Promise<ExportPdfResult> =>
+    ipcRenderer.invoke('export:to-pdf', opts),
+};
+
 const assets = {
   saveDroppedImage: (markdownPath: string, sourcePath: string): Promise<SavedAsset> =>
     ipcRenderer.invoke('assets:save-dropped-image', { markdownPath, sourcePath }),
@@ -345,6 +392,7 @@ const api = {
   assets,
   update,
   contextMenu,
+  export: exportApi,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.

@@ -13,6 +13,7 @@ import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
 import * as templates from './templates';
 import * as themeStore from './themeStore';
+import { exportToPdf, type ExportPdfOptions, type ExportPdfResult } from './exportPdf';
 
 const APP_NAME = 'rAIse';
 
@@ -498,6 +499,21 @@ ipcMain.handle(
     const result = await fileOps.saveFileAs(mainWindow, content, suggestedName);
     if (result) markRecentlyTouched(result.path);
     return result;
+  },
+);
+
+// RAISE-42: export the active doc to PDF. The renderer builds the
+// print-shell HTML (markdown-it preview output + Rise CSS + print
+// overrides) and hands it here; we render via an off-screen
+// BrowserWindow + `webContents.printToPDF`, prompt the save dialog,
+// and write the result. See `exportPdf.ts` for the full flow.
+ipcMain.handle(
+  'export:to-pdf',
+  async (_, opts: ExportPdfOptions): Promise<ExportPdfResult> => {
+    if (!mainWindow) {
+      return { status: 'error', message: 'No active window' };
+    }
+    return exportToPdf(mainWindow, opts);
   },
 );
 

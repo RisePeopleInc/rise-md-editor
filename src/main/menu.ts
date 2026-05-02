@@ -11,6 +11,7 @@ export type MenuAction =
   | 'close-folder'
   | 'save'
   | 'save-as'
+  | 'export-pdf'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -177,6 +178,22 @@ export function buildMenu(deps: MenuDeps): Menu {
           label: 'Save As…',
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => send(deps, 'save-as'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Export',
+          submenu: [
+            // RAISE-42: PDF export. Cmd/Ctrl+Shift+E is unused
+            // elsewhere (verified against the existing accelerator
+            // map). The renderer dispatches the `export-pdf` event,
+            // opens the modal, gathers options, and routes through
+            // `window.api.export.toPdf` to main.
+            {
+              label: 'PDF…',
+              accelerator: 'CmdOrCtrl+Shift+E',
+              click: () => send(deps, 'export-pdf'),
+            },
+          ],
         },
         { type: 'separator' },
         {

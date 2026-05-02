@@ -1,0 +1,261 @@
+import { BrowserWindow, dialog, shell, type PrintToPDFOptions } from 'electron';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
+/**
+ * Export-to-PDF main-process module
+ * ([RAISE-42](https://risepeople.atlassian.net/browse/RAISE-42)).
+ *
+ * The renderer builds the print-ready HTML (markdown-it preview output
+ * wrapped in a print-shell with the Rise design-system CSS + the
+ * print-specific overrides) and hands it to us via IPC. We:
+ *
+ *   1. Create a hidden, off-screen `BrowserWindow`.
+ *   2. Load the HTML as a `data:text/html` URL.
+ *   3. Wait for `did-finish-load`.
+ *   4. Call `webContents.printToPDF()` with the layout options the
+ *      user chose in the modal.
+ *   5. Show the save dialog, write the PDF, optionally open it.
+ *   6. Always destroy the off-screen window — even on error — so
+ *      we don't leak GPU processes between exports.
+ *
+ * The render-in-renderer approach (vs render-in-main) means the PDF
+ * uses the exact same markdown-it instance + plugins (RAISE-29 task
+ * lists, RAISE-30 emoji, RAISE-31 comments, etc.) that the user sees
+ * in the split-preview pane. No separate parser to maintain.
+ */
+
+/**
+ * Standard ISO + ANSI page sizes accepted by Chromium's
+ * `printToPDF`. Custom sizes are passed through as
+ * `{ width, height }` (in microns to the API; see usage below).
+ */
+export type PageSizeName = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';
+
+export interface CustomPageSize {
+  /** Width in inches. */
+  width: number;
+  /** Height in inches. */
+  height: number;
+}
+
+export interface ExportPdfOptions {
+  /** Complete HTML document including doctype, head, and body. */
+  html: string;
+  /** Suggested file name (without extension) for the save dialog. */
+  defaultBaseName: string;
+  /** Directory the save dialog should default to. */
+  defaultDir: string | null;
+  /** Page size — built-in name or a custom width/height in inches. */
+  pageSize: PageSizeName | CustomPageSize;
+  /** Portrait or landscape orientation. */
+  landscape: boolean;
+  /** Per-side margins in inches. */
+  margins: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  };
+  /** Render scale (0.5 – 2.0). */
+  scale: number;
+  /** Header / footer template options. `null` disables both. */
+  headerFooter: {
+    showHeader: boolean;
+    showFooter: boolean;
+    /** Header / footer text (per slot). Placeholders `{title}`, `{date}`, `{page}`, `{pages}` are substituted client-side and rendered into the Chromium `displayHeaderFooter` HTML templates. */
+    headerLeft: string;
+    headerCenter: string;
+    headerRight: string;
+    footerLeft: string;
+    footerCenter: string;
+    footerRight: string;
+  } | null;
+  /** Open the PDF in the OS default reader after export. */
+  openAfter: boolean;
+}
+
+export type ExportPdfResult =
+  | { status: 'saved'; path: string }
+  | { status: 'canceled' }
+  | { status: 'error'; message: string };
+
+/**
+ * Convert our inch-denominated margins into the inch values
+ * Chromium's `printToPDF` expects (the API uses inches for both
+ * page size and margin fields).
+ */
+function inchesMargins(opts: ExportPdfOptions['margins']): PrintToPDFOptions['margins'] {
+  return {
+    top: opts.top,
+    bottom: opts.bottom,
+    left: opts.left,
+    right: opts.right,
+  };
+}
+
+/**
+ * Build the Chromium `pageSize` argument from the user's choice.
+ * Built-in names pass through; custom sizes go in as
+ * `{ width, height }` in inches.
+ */
+function pageSizeArg(
+  size: ExportPdfOptions['pageSize'],
+): PrintToPDFOptions['pageSize'] {
+  if (typeof size === 'string') return size;
+  return { width: size.width, height: size.height };
+}
+
+/**
+ * Build the Chromium header / footer template HTML from the user's
+ * left / center / right text. Chromium's `displayHeaderFooter`
+ * mode supports a tiny set of CSS classes for substitution:
+ *
+ *   - `.title`        → document title (we set via the print HTML)
+ *   - `.url`          → page URL (we don't use)
+ *   - `.pageNumber`   → current page number
+ *   - `.totalPages`   → total page count
+ *   - `.date`         → ISO date string
+ *
+ * Our user-visible placeholders (`{title}`, `{date}`, `{page}`,
+ * `{pages}`) map to these spans. The user's placeholder text is
+ * embedded in a 3-cell flex layout so left / center / right align
+ * predictably.
+ *
+ * Header / footer fonts are pinned to small (8pt) and grey (#666)
+ * because Chromium otherwise inherits the body font (whatever's
+ * in the print-shell), which produces oversized headers on a
+ * 20mm margin.
+ */
+function buildSlotTemplate(
+  left: string,
+  center: string,
+  right: string,
+): string {
+  const escape = (s: string): string =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  const substituteSpans = (s: string): string =>
+    escape(s)
+      .replace(/\{title\}/g, '<span class="title"></span>')
+      .replace(/\{date\}/g, '<span class="date"></span>')
+      .replace(/\{page\}/g, '<span class="pageNumber"></span>')
+      .replace(/\{pages\}/g, '<span class="totalPages"></span>');
+  // Inline styles — Chromium's header/footer renderer doesn't
+  // include the page's own stylesheet, so the templates have to
+  // carry every style they need.
+  const baseStyle =
+    'font-size:8pt; color:#666; width:100%; padding:0 0.5cm; ' +
+    "font-family:-apple-system, 'Segoe UI', Roboto, sans-serif;";
+  const cellStyle = 'flex:1; min-width:0;';
+  return `
+<div style="display:flex; ${baseStyle}">
+  <div style="${cellStyle} text-align:left">${substituteSpans(left)}</div>
+  <div style="${cellStyle} text-align:center">${substituteSpans(center)}</div>
+  <div style="${cellStyle} text-align:right">${substituteSpans(right)}</div>
+</div>`;
+}
+
+/**
+ * Run a single export: build off-screen window, render HTML,
+ * print to PDF buffer, save, optionally open.
+ */
+export async function exportToPdf(
+  parent: BrowserWindow,
+  opts: ExportPdfOptions,
+): Promise<ExportPdfResult> {
+  // Save dialog FIRST — if the user cancels, we don't waste a
+  // BrowserWindow + render cycle. Default to `<defaultDir>/<basename>.pdf`,
+  // falling back to whatever Electron picks (typically Downloads)
+  // when there's no associated file dir.
+  const suggestedPath = opts.defaultDir
+    ? path.join(opts.defaultDir, `${opts.defaultBaseName}.pdf`)
+    : `${opts.defaultBaseName}.pdf`;
+  const saveResult = await dialog.showSaveDialog(parent, {
+    title: 'Export to PDF',
+    defaultPath: suggestedPath,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { status: 'canceled' };
+  }
+  const outputPath = saveResult.filePath;
+
+  // Off-screen render window. `show: false` keeps the window from
+  // ever being visible; the rest of the options minimise memory
+  // and security surface (no preload, no dev tools, no node).
+  const renderWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      offscreen: false, // offscreen=true breaks printToPDF on some platforms
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      // No preload — the print-shell HTML is self-contained.
+    },
+  });
+
+  try {
+    // Load the HTML. `data:text/html` keeps the load self-contained
+    // (no temp file to clean up), with a generous size limit on
+    // modern Chromium (handles multi-megabyte HTML fine).
+    const dataUrl =
+      'data:text/html;charset=utf-8,' + encodeURIComponent(opts.html);
+    await renderWindow.loadURL(dataUrl);
+    // Wait for any pending image loads, font shaping, etc. to
+    // settle. `did-finish-load` fires when the document's load
+    // event has fired; we add a short additional pause for late-
+    // arriving image decodes which can shift layout post-load.
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+
+    const printOpts: PrintToPDFOptions = {
+      pageSize: pageSizeArg(opts.pageSize),
+      landscape: opts.landscape,
+      margins: inchesMargins(opts.margins),
+      scale: opts.scale,
+      printBackground: true,
+      // Heading-derived bookmark / outline pane in the resulting
+      // PDF. Chromium produces the outline from the document's
+      // semantic <h1>...<h6> tree when this option is set.
+      generateDocumentOutline: true,
+      // Tagged PDF improves accessibility (screen reader support)
+      // and is required for some compliance regimes — cheap to
+      // enable here so we get it for free.
+      generateTaggedPDF: true,
+      displayHeaderFooter: opts.headerFooter !== null,
+    };
+    if (opts.headerFooter) {
+      const hf = opts.headerFooter;
+      printOpts.headerTemplate = hf.showHeader
+        ? buildSlotTemplate(hf.headerLeft, hf.headerCenter, hf.headerRight)
+        : '<div></div>';
+      printOpts.footerTemplate = hf.showFooter
+        ? buildSlotTemplate(hf.footerLeft, hf.footerCenter, hf.footerRight)
+        : '<div></div>';
+    }
+
+    const pdfBuffer = await renderWindow.webContents.printToPDF(printOpts);
+    await fs.writeFile(outputPath, pdfBuffer);
+  } catch (err) {
+    return {
+      status: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    // Always destroy — `close()` would fire close handlers that
+    // could prompt; `destroy()` is the unconditional teardown.
+    if (!renderWindow.isDestroyed()) renderWindow.destroy();
+  }
+
+  if (opts.openAfter) {
+    // shell.openPath returns a string — empty on success, error
+    // message on failure. We don't surface the error: the file
+    // saved fine; only the open-after-export courtesy failed.
+    void shell.openPath(outputPath);
+  }
+
+  return { status: 'saved', path: outputPath };
+}
