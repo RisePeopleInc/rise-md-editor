@@ -168,9 +168,19 @@ function buildSlotTemplate(
   // Inline styles — Chromium's header/footer renderer doesn't
   // include the page's own stylesheet, so the templates have to
   // carry every style they need.
+  //
+  // Smoke-test feedback round 2: the previous `-apple-system`
+  // stack didn't render consistently in the header/footer
+  // context (Chromium's print-template runs in a separate
+  // browsing context where some `-apple-system` resolutions
+  // miss). Switched to a universal-OS sans-serif stack —
+  // `Helvetica Neue` (macOS / iOS), `Arial` (Windows / Linux
+  // ubiquitous), then `sans-serif` generic — which renders
+  // predictably across platforms without any `-apple-system`
+  // weirdness.
   const baseStyle =
     'font-size:8pt; color:#666; width:100%; padding:0 0.5cm; ' +
-    "font-family:-apple-system, 'Segoe UI', Roboto, sans-serif;";
+    "font-family:'Helvetica Neue', Arial, sans-serif;";
   const cellStyle = 'flex:1; min-width:0;';
   return `
 <div style="display:flex; ${baseStyle}">

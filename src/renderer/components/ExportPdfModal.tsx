@@ -421,7 +421,11 @@ export function ExportPdfModal({
           </label>
           <label
             className="flex items-center gap-2"
-            title={hasSelection ? '' : 'No active selection'}
+            title={
+              hasSelection
+                ? ''
+                : 'No active source selection (works in Source / Split mode)'
+            }
           >
             <input
               type="radio"
@@ -431,8 +435,15 @@ export function ExportPdfModal({
               onChange={() => setRange('selection')}
               disabled={!hasSelection}
             />
+            {/* Smoke-test feedback round 2: re-labelled from
+                "Selection only" to "Source selection only" so
+                the user knows the radio reflects Monaco's
+                source selection (works in Source / Split mode),
+                not a WYSIWYG / preview-pane selection (those
+                are out of scope for v1 — see the modal's
+                close-cell comment for rationale). */}
             <span className={hasSelection ? '' : 'text-body opacity-60'}>
-              Selection only
+              Source selection only
             </span>
           </label>
         </fieldset>

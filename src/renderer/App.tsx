@@ -472,9 +472,16 @@ function AppContent() {
       setShowExportPdfModal(false);
       const tab = file.activeTab;
       if (!tab) return;
+      // Selection-mode source. Trim leading / trailing whitespace so
+      // a selection that starts mid-paragraph (with a leading newline
+      // dragged in by the user) doesn't render as a blank paragraph
+      // at the top of the PDF. Internal blank lines between
+      // paragraphs are preserved — markdown-it needs `\n\n` to
+      // recognise paragraph boundaries, and `.trim()` only touches
+      // the outer edges.
       const sourceMarkdown =
         payload.range === 'selection' && exportPdfSelectionText
-          ? exportPdfSelectionText
+          ? exportPdfSelectionText.trim()
           : tab.content;
       const baseName = tab.path
         ? basenameOfPath(tab.path).replace(/\.[^.]+$/, '')

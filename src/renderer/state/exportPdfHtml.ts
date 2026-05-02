@@ -158,11 +158,27 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
   // Force the light theme regardless of the user's current setting
   // — exporting a dark-themed page wastes ink and is the consensus
   // pain point in the competitive set.
+  //
+  // Smoke-test feedback round 2: the live editor loads Source Serif
+  // Pro + Open Sans from Google Fonts via a `<link>` in
+  // `src/renderer/index.html`. The off-screen print BrowserWindow
+  // loads from a `data:text/html` URL with no such link, so neither
+  // brand font is available — h1/h2 fall back to Georgia / Times
+  // (sans of `-apple-system` for body), which doesn't match what
+  // the user sees in the preview pane.
+  //
+  // Mirroring the same `<link>` here makes the print window fetch
+  // the same fonts, so the PDF body matches the preview. Network
+  // dependency is acceptable for now — RAISE-16 tracks bundling
+  // the woff2 files locally, which would also benefit this path.
   return `<!doctype html>
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(opts.title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Source+Serif+Pro:wght@700&display=swap">
 <style>
 ${themesCss}
 ${proseCss}

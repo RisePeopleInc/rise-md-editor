@@ -44,31 +44,28 @@ body.raise-prose {
    * what Typora and iA Writer print stylesheets use. */
   max-width: none;
   padding: 0 12pt;
-  /* Force a system sans-serif fallback. Smoke-test feedback
-   * round 1 showed the body rendering as Times Roman in the
-   * PDF — the Rise design system's `--font-sans` resolves to
-   * `Open Sans` via @font-face declarations that load font
-   * files from the asar / dev server. The off-screen print
-   * BrowserWindow runs from a `data:text/html` URL and has no
-   * path to fall back to, so the @font-face URLs fail silently
-   * and the browser falls through to the user-agent default
-   * (Times). Override here with a font stack that's always
-   * available without external files; matches what the live
-   * preview pane *visually* falls back to in the same case. */
-  font-family: -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue',
-    'Arial', sans-serif;
+  /* Inherit `var(--font-sans)` from `.raise-prose` (defined in
+   * milkdown.css) — `Open Sans, -apple-system, …, Arial,
+   * sans-serif`. Open Sans now loads via the Google Fonts <link>
+   * in the print HTML head (round 2 fix), so body matches the
+   * live preview. Earlier round-1 forced an explicit system
+   * fallback because no Google Fonts link was present and the
+   * design system relies on font-loading mechanisms the
+   * `data:text/html` URL can't reach; loading the link upstream
+   * means we can drop the override and let the design-system
+   * cascade run naturally. */
 }
 
 /* Headings: keep block-level break-after-avoid so a heading
  * doesn't end up as the last line of a page with the body text
- * overflowing onto the next page. Same font-family override
- * for the same reason as `body.raise-prose` — the design-system
- * serif (`Source Serif Pro`) for h1/h2 also relies on
- * @font-face files the off-screen window can't load. We match
- * the live-preview *fallback* shape (sans-serif throughout)
- * rather than the design-system *intent* (serif on h1/h2),
- * which is the right call for a PDF: bold sans on a printed
- * page reads cleaner than missing-font Times Roman. */
+ * overflowing onto the next page. Font-family inherits from the
+ * design-system rules in milkdown.css — h1/h2 use
+ * `var(--font-serif)` (Source Serif Pro → Source Serif 4 →
+ * Georgia → Times New Roman → serif) and h3-h6 use
+ * `var(--font-sans)`. The live-preview Source Serif Pro now
+ * loads via the Google Fonts <link> in the print HTML head
+ * (round 2 fix), so the PDF h1/h2 match what the user sees in
+ * the preview pane — bold serif in the brand colour. */
 .raise-prose h1,
 .raise-prose h2,
 .raise-prose h3,
@@ -77,8 +74,6 @@ body.raise-prose {
 .raise-prose h6 {
   break-after: avoid-page;
   page-break-after: avoid;
-  font-family: -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue',
-    'Arial', sans-serif;
 }
 
 /* Code blocks: print-friendly background. The editor's grey
