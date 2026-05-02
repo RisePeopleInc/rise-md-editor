@@ -34,6 +34,50 @@ body {
   print-color-adjust: exact;
 }
 
+/*
+ * Element-margin reset.
+ *
+ * Smoke-test feedback round 3: paragraph spacing in PDF didn't
+ * match the live preview pane. Root cause: the live renderer
+ * runs Tailwind's preflight (in `index.css`) which normalises
+ * default browser margins on `<p>`, `<h1>`-`<h6>`, `<ul>`,
+ * `<pre>`, etc. to `0`. milkdown.css then layers on its own
+ * `.raise-prose > * + * { margin-top: 0.85em }` rule for
+ * inter-block spacing, plus heading-specific `margin-top`s
+ * (`h1` 1.5em, `h2` 1.4em, etc.).
+ *
+ * The off-screen print BrowserWindow loads from a
+ * `data:text/html` URL without Tailwind preflight, so default
+ * browser margins (`p { margin: 1em 0 }`, similar for headings,
+ * lists, blockquotes, pre) apply on TOP of our 0.85em rule.
+ * The default `1em margin-bottom` from a paragraph + 1em
+ * `margin-top` from the next paragraph collapse to 1em — but
+ * milkdown.css's `0.85em` rule loses to that 1em because it's
+ * the smaller value during margin collapse. Net: PDF inter-
+ * paragraph spacing is wider than preview, and inconsistent
+ * across heading levels because each heading has different
+ * default margins.
+ *
+ * Reset all the relevant element margins to 0 here so the
+ * milkdown.css rules drive the spacing exclusively, matching
+ * the live preview surface 1:1.
+ */
+.raise-prose p,
+.raise-prose h1,
+.raise-prose h2,
+.raise-prose h3,
+.raise-prose h4,
+.raise-prose h5,
+.raise-prose h6,
+.raise-prose ul,
+.raise-prose ol,
+.raise-prose blockquote,
+.raise-prose pre,
+.raise-prose figure,
+.raise-prose table {
+  margin: 0;
+}
+
 body.raise-prose {
   font-size: 11pt;
   line-height: 1.55;

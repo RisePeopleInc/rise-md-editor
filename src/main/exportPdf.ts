@@ -238,9 +238,33 @@ export async function exportToPdf(
       'data:text/html;charset=utf-8,' + encodeURIComponent(opts.html);
     await renderWindow.loadURL(dataUrl);
     // Wait for any pending image loads, font shaping, etc. to
-    // settle. `did-finish-load` fires when the document's load
-    // event has fired; we add a short additional pause for late-
-    // arriving image decodes which can shift layout post-load.
+    // settle. Two stages:
+    //
+    //   1. `document.fonts.ready` — the Font Loading API
+    //      Promise that resolves when all `@font-face` /
+    //      <link> stylesheet font fetches have completed AND
+    //      every face referenced by the rendered DOM has been
+    //      shaped. Critical for the Google-Fonts <link> in the
+    //      print HTML (round 2 fix): `Source Serif Pro` for
+    //      h1/h2 + `Open Sans` for body. Smoke-test feedback
+    //      round 3 found that small selection-mode docs were
+    //      printing before the fonts loaded — body fell back
+    //      to the system serif default, headers were wrong.
+    //      Awaiting the Promise pins the print to post-load.
+    //
+    //      Wrapped in `Promise.race` against a 5s ceiling so a
+    //      hung font CDN doesn't hold the export indefinitely
+    //      (fall through to whatever's loaded; better than a
+    //      stuck export window).
+    //
+    //   2. Short timer pause for late image decodes that can
+    //      shift layout after the load event fires.
+    await renderWindow.webContents.executeJavaScript(
+      `Promise.race([
+        document.fonts.ready,
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]).then(() => 'ok')`,
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
     const printOpts: PrintToPDFOptions = {
