@@ -244,6 +244,61 @@ export function SourceEditor({
     });
 
     // -----------------------------------------------------------------
+    // RAISE-31: source-view `// line comment` highlighting.
+    //
+    // Monaco's built-in markdown tokenizer already handles
+    // `<!-- ... -->` (inherited from the embedded HTML grammar), so
+    // those render as comments out of the box. `// foo` is *not*
+    // standard markdown — Obsidian / iA Writer convention — and
+    // Monaco's tokenizer doesn't know about it. Replacing the
+    // tokenizer wholesale would mean re-implementing Monaco's
+    // entire markdown grammar; instead we layer on top via a
+    // Monaco decorations collection.
+    //
+    // Apply an `inlineClassName: 'raise-source-comment'` decoration
+    // to every line whose first non-whitespace chars are `//`.
+    // CSS rule in `milkdown.css` paints those ranges in the muted
+    // comment colour. `editor.createDecorationsCollection()` (the
+    // non-deprecated Monaco API) tracks the decoration IDs
+    // internally and replaces them atomically on each `.set(...)`
+    // — no churn on the model when content shifts incrementally.
+    //
+    // Refresh on every content change. `onDidChangeModelContent`
+    // fires for every keystroke / paste / programmatic edit;
+    // scanning all lines is O(n) line-count and only does work on
+    // matches, so the cost is dominated by Monaco's own work.
+    // -----------------------------------------------------------------
+    const commentDecorations = instance.createDecorationsCollection();
+    const refreshCommentDecorations = (): void => {
+      const model = instance.getModel();
+      if (!model) return;
+      const lineCount = model.getLineCount();
+      const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+      for (let line = 1; line <= lineCount; line++) {
+        const text = model.getLineContent(line);
+        // Match the same shape as the WYSIWYG plugin:
+        // `^[ \t]*//` — leading whitespace allowed, `//` mid-line
+        // is NOT a comment (URL guard).
+        if (/^[ \t]*\/\//.test(text)) {
+          decorations.push({
+            range: new monaco.Range(line, 1, line, text.length + 1),
+            options: {
+              inlineClassName: 'raise-source-comment',
+              stickiness:
+                monaco.editor.TrackedRangeStickiness
+                  .AlwaysGrowsWhenTypingAtEdges,
+            },
+          });
+        }
+      }
+      commentDecorations.set(decorations);
+    };
+    refreshCommentDecorations();
+    instance.onDidChangeModelContent(() => {
+      refreshCommentDecorations();
+    });
+
+    // -----------------------------------------------------------------
     // RAISE-11: image drop + paste interception in Source mode.
     //
     // Capture-phase listeners on Monaco's root DOM so we win against

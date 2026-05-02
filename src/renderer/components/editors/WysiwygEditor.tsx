@@ -41,6 +41,11 @@ import {
   getMarkdownFromClipboard,
   unescapeHeadingNumberDot,
 } from '../../state/clipboardPaste';
+import {
+  commentDecorationsPlugin,
+  unescapeCommentDelimiters,
+  unescapeIndentEntities,
+} from '../../state/commentDecorations';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import {
@@ -203,8 +208,29 @@ function MilkdownBody({
           // round-trip re-introduces it via mdast-util-to-
           // markdown's safe-escape patterns; this is the
           // belt-and-braces strip on the way to disk.
-          const processed = unescapeHeadingNumberDot(
-            emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+          //
+          // RAISE-31: `unescapeCommentDelimiters` strips the
+          // backslash that remark-stringify inserts in front of
+          // `<!--` for inline-HTML safety AND the per-character
+          // escapes the safe step adds inside the comment body
+          // (`\[`, `\]`, `\(`, `\)`, etc.). Comments are
+          // deliberately HTML-shaped so the escapes aren't doing
+          // useful work; without this fix the source on disk
+          // shows `\<!-- with \[a link\]\(http://x\) -->` and
+          // round-trips that clutter back into WYSIWYG.
+          //
+          // RAISE-31: `unescapeIndentEntities` decodes `&#x20;`
+          // back to a literal space. mdast-util-to-markdown emits
+          // the entity for a *leading* paragraph space so commonmark
+          // doesn't re-interpret it as an indented code block; our
+          // typical case (`  // indented note`) ends up rendered as
+          // `&#x20; // indented note` in source which is jarring.
+          const processed = unescapeIndentEntities(
+            unescapeCommentDelimiters(
+              unescapeHeadingNumberDot(
+                emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
+              ),
+            ),
           );
           onChangeRef.current(processed);
         });
@@ -518,7 +544,14 @@ function MilkdownBody({
       // that lands at the end of the doc, so the user can navigate
       // out of the code block via Down arrow / click / End rather
       // than being trapped inside it. See state/trailingParagraph.ts.
-      .use(trailingParagraphPlugin),
+      .use(trailingParagraphPlugin)
+      // RAISE-31: visually grey out review-style comments —
+      // `<!-- text -->` (inline or block) and `// text` (line-
+      // start). Pure decoration, no model change, so the source
+      // round-trips with the literal characters intact. Code
+      // blocks and inline-code text are skipped. See
+      // state/commentDecorations.ts.
+      .use(commentDecorationsPlugin),
   );
 
   // Bridge the imperative handle to Milkdown's history commands. The menu's
