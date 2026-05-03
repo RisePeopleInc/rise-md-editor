@@ -1,0 +1,44 @@
+/*
+ * Font-family CSS variables — single source of truth.
+ *
+ * Two consumers, two cascades, one set of values:
+ *
+ *   1. **Live renderer** — index.css imports this file and Tailwind
+ *      processes the whole CSS chain. Tailwind v4 utility generation
+ *      reads `themes.css`'s `@theme inline { … }` block (which now
+ *      references the `--rise-font-*` vars defined here via `var()`),
+ *      so `font-sans` / `font-serif` Tailwind utilities resolve
+ *      correctly and stay in sync if these values change.
+ *
+ *   2. **Off-screen PDF print window** — `exportPdfHtml.ts` inlines
+ *      this file's raw CSS at the top of the print `<style>` block,
+ *      ahead of `themes.css`. The print BrowserWindow doesn't run
+ *      Tailwind, so the `@theme inline { … }` block in themes.css
+ *      is silently DROPPED by the browser (Tailwind v4 directive,
+ *      not standard CSS). Without this file's plain `:root`
+ *      declarations, `var(--font-sans)` references in milkdown.css
+ *      would resolve to nothing and the PDF body would fall back to
+ *      Times Roman — the bug that took 9 smoke-test rounds to
+ *      diagnose ([RAISE-42](https://risepeople.atlassian.net/browse/RAISE-42)).
+ *
+ * **Layering rule**: only define values for `--rise-font-*` here;
+ * `--font-sans` / `--font-serif` are derived via `var()`. That way
+ * a future change to the brand fonts touches one declaration in
+ * one file. themes.css's `@theme inline` aliases through the same
+ * `--rise-font-*` source so Tailwind utilities and bare CSS vars
+ * can never drift apart.
+ */
+:root {
+  --rise-font-sans:
+    'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --rise-font-serif:
+    'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  /* Canonical aliases consumed by raw `var(--font-sans)` /
+   * `var(--font-serif)` references in milkdown.css, index.css,
+   * and the print stylesheet. Defined here in plain `:root` (not
+   * inside `@theme inline`) so the print context — which strips
+   * `@theme inline` — still resolves them correctly. */
+  --font-sans: var(--rise-font-sans);
+  --font-serif: var(--rise-font-serif);
+}

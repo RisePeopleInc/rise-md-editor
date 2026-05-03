@@ -11,6 +11,11 @@ import {
   type SourceEditorHandle,
 } from './components/editors/SourceEditor';
 import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
+import {
+  ExportPdfModal,
+  type ExportPdfSubmitPayload,
+} from './components/ExportPdfModal';
+import { buildPrintHtml } from './state/exportPdfHtml';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, useFileState, type EditorMode } from './state/fileState';
@@ -77,6 +82,18 @@ function AppContent() {
   // creates the file via this banner OR via File → New CLAUDE.md).
   const [showMissingClaudeBanner, setShowMissingClaudeBanner] =
     useState<boolean>(false);
+  // RAISE-42: Export-to-PDF modal state. The modal opens via the
+  // `export-pdf` menu action (File → Export → PDF…, the
+  // Cmd/Ctrl+Shift+E accelerator, or context-menu later). The
+  // open boolean drives mount; submit handler builds the print
+  // HTML, calls main, dismisses the modal.
+  const [showExportPdfModal, setShowExportPdfModal] = useState(false);
+  // Captured at modal-open time. The modal needs to know whether
+  // there's a non-empty selection in the active editor to enable
+  // the "Selection only" radio. Sourced from the Monaco / preview
+  // selection at click time rather than recomputed live.
+  const [exportPdfHasSelection, setExportPdfHasSelection] = useState(false);
+  const [exportPdfSelectionText, setExportPdfSelectionText] = useState('');
 
   const isWysiwyg = file.activeTab?.editorMode === 'wysiwyg';
   // Source-style editor (Monaco) drives undo/redo for both Source AND Split.
@@ -410,6 +427,92 @@ function AppContent() {
     file.newFile();
   }, [file]);
 
+  // RAISE-42: open the Export → PDF modal. Captures the active
+  // editor's selection state at click time and stashes it for
+  // the submit handler — the modal's "Selection only" radio
+  // reflects the editor's state at the moment the user invoked
+  // the export, not whatever live state exists after the modal
+  // steals focus.
+  //
+  // Smoke-test feedback round 1: the v1 implementation used
+  // `window.getSelection()` for Monaco source mode, which
+  // returned plain text but missed Monaco's selection because
+  // Monaco's custom-rendered DOM doesn't reliably participate in
+  // the document's selection model. Switched to Monaco's own
+  // `editor.getSelection()` + `model.getValueInRange()` via the
+  // SourceEditorHandle's `getSelectionText` method, which
+  // returns the actual markdown source slice — the same string
+  // we'd pass to `buildPrintHtml` to render the partial doc.
+  //
+  // WYSIWYG mode: still disabled. Selection-only in WYSIWYG
+  // would require ProseMirror-slice → markdown serialisation
+  // scoped to the selected range, which is a separate piece of
+  // work (tracked as a follow-up). Modal radio stays disabled
+  // when `isWysiwyg`.
+  const openExportPdfModal = useCallback(() => {
+    let selectionText = '';
+    if (isMonacoActive) {
+      selectionText = editorRef.current?.getSelectionText() ?? '';
+    } else {
+      // WYSIWYG: see comment block above.
+      selectionText = '';
+    }
+    setExportPdfSelectionText(selectionText);
+    setExportPdfHasSelection(selectionText.trim().length > 0);
+    setShowExportPdfModal(true);
+  }, [isMonacoActive]);
+
+  // RAISE-42: submit-handler for the export modal. Builds the
+  // print-shell HTML in the renderer (so we get the same markdown-
+  // it pipeline the preview pane uses), then ships it to main for
+  // the off-screen render + save-dialog flow. Dismisses the modal
+  // unconditionally — main shows its own success / error UI.
+  const handleExportPdfSubmit = useCallback(
+    async (payload: ExportPdfSubmitPayload) => {
+      setShowExportPdfModal(false);
+      const tab = file.activeTab;
+      if (!tab) return;
+      // Selection-mode source. Trim leading / trailing whitespace so
+      // a selection that starts mid-paragraph (with a leading newline
+      // dragged in by the user) doesn't render as a blank paragraph
+      // at the top of the PDF. Internal blank lines between
+      // paragraphs are preserved — markdown-it needs `\n\n` to
+      // recognise paragraph boundaries, and `.trim()` only touches
+      // the outer edges.
+      const sourceMarkdown =
+        payload.range === 'selection' && exportPdfSelectionText
+          ? exportPdfSelectionText.trim()
+          : tab.content;
+      const baseName = tab.path
+        ? basenameOfPath(tab.path).replace(/\.[^.]+$/, '')
+        : 'Untitled';
+      const docDir = tab.path
+        ? tab.path.replace(/[\\/][^\\/]*$/, '')
+        : null;
+      const html = buildPrintHtml({
+        title: baseName,
+        markdownSource: sourceMarkdown,
+        markdownPath: tab.path,
+        stripComments: payload.stripComments,
+      });
+      const result = await window.api.export.toPdf({
+        html,
+        defaultBaseName: baseName,
+        defaultDir: docDir,
+        pageSize: payload.pageSize,
+        landscape: payload.landscape,
+        margins: payload.margins,
+        scale: payload.scale,
+        headerFooter: payload.headerFooter,
+        openAfter: payload.openAfter,
+      });
+      if (result.status === 'error') {
+        window.api.showError('Export to PDF failed', result.message);
+      }
+    },
+    [file.activeTab, exportPdfSelectionText],
+  );
+
   const handleCloseActive = useCallback(() => {
     void file.closeActiveTab();
   }, [file]);
@@ -518,6 +621,12 @@ function AppContent() {
           break;
         case 'save-as':
           void file.saveAs();
+          break;
+        case 'export-pdf':
+          // RAISE-42: open the modal. The submit handler runs the
+          // markdown-it render, ships HTML to main, kicks the save
+          // dialog flow.
+          openExportPdfModal();
           break;
         case 'close-tab':
           handleCloseActive();
@@ -684,6 +793,7 @@ function AppContent() {
     handlePrevTab,
     handleCycleMode,
     handleModeChange,
+    openExportPdfModal,
   ]);
 
   // External-change reload prompt: when chokidar reports a content change
@@ -874,6 +984,18 @@ function AppContent() {
           />
         )}
       </div>
+      {/* RAISE-42: Export-to-PDF modal. Mounted here (top-level
+          App layout) rather than inside the editor surfaces so a
+          single instance survives mode swaps and tab switches. */}
+      {showExportPdfModal && (
+        <ExportPdfModal
+          hasSelection={exportPdfHasSelection}
+          onCancel={() => setShowExportPdfModal(false)}
+          onSubmit={(payload) => {
+            void handleExportPdfSubmit(payload);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ export type MenuActionType =
   | 'close-folder'
   | 'save'
   | 'save-as'
+  | 'export-pdf'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -210,6 +211,47 @@ export interface RaiseContextMenuApi {
   }) => Promise<void>;
 }
 
+export type ExportPdfPageSize =
+  | 'Letter'
+  | 'Legal'
+  | 'Tabloid'
+  | 'A3'
+  | 'A4'
+  | 'A5';
+export interface ExportPdfCustomPageSize {
+  width: number;
+  height: number;
+}
+export interface ExportPdfOptions {
+  html: string;
+  defaultBaseName: string;
+  defaultDir: string | null;
+  pageSize: ExportPdfPageSize | ExportPdfCustomPageSize;
+  landscape: boolean;
+  margins: { top: number; bottom: number; left: number; right: number };
+  scale: number;
+  headerFooter: {
+    showHeader: boolean;
+    showFooter: boolean;
+    headerLeft: string;
+    headerCenter: string;
+    headerRight: string;
+    footerLeft: string;
+    footerCenter: string;
+    footerRight: string;
+    author: string;
+    email: string;
+  } | null;
+  openAfter: boolean;
+}
+export type ExportPdfResult =
+  | { status: 'saved'; path: string }
+  | { status: 'canceled' }
+  | { status: 'error'; message: string };
+export interface RaiseExportApi {
+  toPdf: (opts: ExportPdfOptions) => Promise<ExportPdfResult>;
+}
+
 export interface RaiseApi {
   platform: NodeJS.Platform;
   openFolder: () => Promise<string | null>;
@@ -233,6 +275,8 @@ export interface RaiseApi {
   assets: RaiseAssetsApi;
   update: RaiseUpdateApi;
   contextMenu: RaiseContextMenuApi;
+  /** RAISE-42: Export-to-PDF bridge. */
+  export: RaiseExportApi;
   pushFileMeta: (meta: {
     path: string | null;
     isDirty: boolean;
