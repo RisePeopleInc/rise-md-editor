@@ -28,6 +28,96 @@ import { pathToFileURL } from 'node:url';
  */
 
 /**
+ * Read a bundled woff2 font from `node_modules/@fontsource/...` and
+ * return a `data:font/woff2;base64,...` data URI.
+ *
+ * Smoke-test feedback round 6 surfaced that the renderer-side
+ * `fetch('/assets/foo.woff2')` approach doesn't work in production
+ * builds: `mainWindow.loadFile()` gives the renderer a `file://`
+ * origin where root-relative paths resolve to the filesystem root,
+ * not the renderer's bundle directory. Production exports got an
+ * empty @font-face block and body fell back to system serif.
+ *
+ * Reading from the main process via Node's `fs` works in both
+ * dev (resolves `node_modules/...` directly) and prod (Electron's
+ * asar reader transparently handles the asar-packed path returned
+ * by `require.resolve`). Cached at module-load time so each
+ * export doesn't re-decode the same files.
+ */
+const fontDataUriCache = new Map<string, string>();
+async function readBundledFontDataUri(
+  packageRelativePath: string,
+): Promise<string> {
+  const cached = fontDataUriCache.get(packageRelativePath);
+  if (cached) return cached;
+  const absolute = require.resolve(packageRelativePath);
+  const buffer = await fs.readFile(absolute);
+  const dataUri = `data:font/woff2;base64,${buffer.toString('base64')}`;
+  fontDataUriCache.set(packageRelativePath, dataUri);
+  return dataUri;
+}
+
+/**
+ * Build the @font-face declarations for the four Rise brand
+ * fonts (Open Sans 400 / 600 / 700, Source Serif Pro 700) with
+ * the woff2 contents inlined as data URIs.
+ *
+ * Why bundle into the print HTML rather than load via @import:
+ * The off-screen print BrowserWindow loads from a temp `file://`
+ * URL, so cross-origin font fetches (Google Fonts, etc.) face
+ * CORS friction. Inlining as data URIs makes the fonts present
+ * the moment the @font-face declarations parse — no async wait,
+ * no network dependency, no CORS surface.
+ */
+async function buildPrintFontCss(): Promise<string> {
+  const [openSans400, openSans600, openSans700, sourceSerifPro700] =
+    await Promise.all([
+      readBundledFontDataUri(
+        '@fontsource/open-sans/files/open-sans-latin-400-normal.woff2',
+      ),
+      readBundledFontDataUri(
+        '@fontsource/open-sans/files/open-sans-latin-600-normal.woff2',
+      ),
+      readBundledFontDataUri(
+        '@fontsource/open-sans/files/open-sans-latin-700-normal.woff2',
+      ),
+      readBundledFontDataUri(
+        '@fontsource/source-serif-pro/files/source-serif-pro-latin-700-normal.woff2',
+      ),
+    ]);
+  return `
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+  src: url(${openSans400}) format('woff2');
+}
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+  src: url(${openSans600}) format('woff2');
+}
+@font-face {
+  font-family: 'Open Sans';
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+  src: url(${openSans700}) format('woff2');
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+  src: url(${sourceSerifPro700}) format('woff2');
+}
+`;
+}
+
+/**
  * Standard ISO + ANSI page sizes accepted by Chromium's
  * `printToPDF`. Custom sizes are passed through as
  * `{ width, height }` (in microns to the API; see usage below).
@@ -193,6 +283,15 @@ function buildSlotTemplate(
 }
 
 /**
+ * The renderer-side `buildPrintHtml` drops this sentinel in place
+ * of the @font-face block; main substitutes the actual font CSS
+ * (read from disk via `buildPrintFontCss`) just before writing
+ * the print HTML to a temp file. Must match the constant of the
+ * same name in `src/renderer/state/exportPdfHtml.ts`.
+ */
+const PRINT_FONT_PLACEHOLDER = '<!-- RAISE_PRINT_FONTS -->';
+
+/**
  * Run a single export: build off-screen window, render HTML,
  * print to PDF buffer, save, optionally open.
  */
@@ -254,7 +353,22 @@ export async function exportToPdf(
       tempDir,
       `print-${randomUUID()}.html`,
     );
-    await fs.writeFile(tempHtmlPath, opts.html, 'utf-8');
+    // Substitute the renderer's font-placeholder marker with the
+    // actual @font-face block (woff2 files inlined as data URIs).
+    // Reading happens here in main so the print HTML works in
+    // dev AND asar-packed production builds — fetch() from the
+    // renderer's `file://` origin couldn't reach the bundled
+    // font assets reliably.
+    const fontCss = await buildPrintFontCss();
+    // Use a function replacement so base64 chars in `fontCss`
+    // can't accidentally be interpreted as String.prototype.replace's
+    // `$1` / `$&` patterns. (base64 doesn't contain `$` but the
+    // function form is unambiguously safe.)
+    const finalHtml = opts.html.replace(
+      PRINT_FONT_PLACEHOLDER,
+      () => fontCss,
+    );
+    await fs.writeFile(tempHtmlPath, finalHtml, 'utf-8');
     await renderWindow.loadURL(pathToFileURL(tempHtmlPath).toString());
     // Wait for fonts to finish loading. With `file://` origin
     // and inlined data-URI fonts in the print HTML's <style>,

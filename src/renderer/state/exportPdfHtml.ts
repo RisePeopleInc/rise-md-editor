@@ -50,106 +50,26 @@ import printCss from '../styles/print.css?inline';
 import proseCss from '../styles/milkdown.css?inline';
 import themesCss from '../styles/themes.css?inline';
 
-// Bundled font woff2 files. Vite's `?url` returns the runtime URL
-// for the asset; we then `fetch` it at build time (well, at module
-// init in the renderer) and rewrite to a `data:` URI before
-// embedding in the print HTML.
-//
-// Why bundle: smoke-test rounds 2 + 3 tried loading these via a
-// Google Fonts <link> in the print HTML head. That worked
-// inconsistently — small selection-mode docs printed before
-// Google Fonts had finished fetching, and the off-screen
-// BrowserWindow's `data:text/html` origin had CORS friction with
-// the cross-origin font loads. Bundling eliminates the network
-// dependency entirely: the fonts are present in the DOM before
-// the first paint, no waiting required.
-//
-// Three weights of Open Sans (400 / 600 / 700) cover body
-// (regular), h3-h6 (semibold), and bold marks. One weight of
-// Source Serif Pro (700) covers h1 / h2 — the Rise design
-// system uses the bold weight for both.
-import openSans400Url from '@fontsource/open-sans/files/open-sans-latin-400-normal.woff2?url';
-import openSans600Url from '@fontsource/open-sans/files/open-sans-latin-600-normal.woff2?url';
-import openSans700Url from '@fontsource/open-sans/files/open-sans-latin-700-normal.woff2?url';
-import sourceSerifPro700Url from '@fontsource/source-serif-pro/files/source-serif-pro-latin-700-normal.woff2?url';
-
 /**
- * Read a woff2 asset URL and convert to a `data:font/woff2;base64,...`
- * URI for embedding in the print HTML's @font-face declarations.
+ * Sentinel marker the renderer drops into the print HTML; the
+ * main process replaces it with the actual @font-face CSS block
+ * (woff2 files inlined as data URIs) just before writing the
+ * print HTML to a temp file.
  *
- * Cached lazily — the fetch + base64 encode runs once per font on
- * first export, then reuses the result for all subsequent exports
- * in the same session.
+ * Smoke-test feedback round 7: previous rounds tried bundling
+ * the fonts in the renderer via Vite's `?url` import + fetch().
+ * In dev (renderer at `http://localhost:5173`) the relative
+ * `/assets/foo.woff2` URL resolved fine. In prod (renderer at
+ * `file://...index.html`), `fetch('/assets/foo.woff2')` resolves
+ * against the filesystem root, not the renderer's bundle dir,
+ * so the fetch fails silently — body fell back to system serif.
+ *
+ * Solution: main process reads font files via Node's `fs` (works
+ * uniformly in dev and asar-packed prod) and substitutes them
+ * into the placeholder. Renderer just emits the marker. See
+ * `buildPrintFontCss` in `src/main/exportPdf.ts`.
  */
-const fontDataCache = new Map<string, Promise<string>>();
-function fontAsDataUri(url: string): Promise<string> {
-  const cached = fontDataCache.get(url);
-  if (cached) return cached;
-  const promise = (async (): Promise<string> => {
-    const response = await fetch(url);
-    const buffer = await response.arrayBuffer();
-    // Convert ArrayBuffer → base64. Browser-side `btoa` requires
-    // a binary string, so chunk-encode to avoid call-stack
-    // overflow on large fonts (Open Sans 700 is ~30KB but stays
-    // well under the threshold; this is defensive for future
-    // bigger fonts).
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray(i, i + chunkSize);
-      binary += String.fromCharCode(...chunk);
-    }
-    return `data:font/woff2;base64,${btoa(binary)}`;
-  })();
-  fontDataCache.set(url, promise);
-  return promise;
-}
-
-/**
- * Build the @font-face CSS that bundles the four Rise brand
- * fonts as data URIs in the print HTML. Returns a `<style>`-
- * embeddable CSS string; called once per export.
- */
-async function buildBundledFontsCss(): Promise<string> {
-  const [openSans400, openSans600, openSans700, sourceSerifPro700] =
-    await Promise.all([
-      fontAsDataUri(openSans400Url),
-      fontAsDataUri(openSans600Url),
-      fontAsDataUri(openSans700Url),
-      fontAsDataUri(sourceSerifPro700Url),
-    ]);
-  return `
-@font-face {
-  font-family: 'Open Sans';
-  font-weight: 400;
-  font-style: normal;
-  font-display: block;
-  src: url(${openSans400}) format('woff2');
-}
-@font-face {
-  font-family: 'Open Sans';
-  font-weight: 600;
-  font-style: normal;
-  font-display: block;
-  src: url(${openSans600}) format('woff2');
-}
-@font-face {
-  font-family: 'Open Sans';
-  font-weight: 700;
-  font-style: normal;
-  font-display: block;
-  src: url(${openSans700}) format('woff2');
-}
-@font-face {
-  font-family: 'Source Serif Pro';
-  font-weight: 700;
-  font-style: normal;
-  font-display: block;
-  src: url(${sourceSerifPro700}) format('woff2');
-}
-`;
-}
+export const PRINT_FONT_PLACEHOLDER = '<!-- RAISE_PRINT_FONTS -->';
 
 interface BuildHtmlOptions {
   /** Document title — used for the print header `{title}` placeholder and the HTML `<title>`. */
@@ -237,14 +157,17 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Build the complete print-shell HTML document. The off-screen
- * BrowserWindow loads this via `data:text/html`; nothing further
- * is fetched once the document parses.
+ * Build the complete print-shell HTML document. The print font
+ * @font-face declarations are filled in by the main process
+ * (substituting the `PRINT_FONT_PLACEHOLDER` marker) — main has
+ * Node `fs` access in both dev and asar-packed prod, where
+ * renderer-side `fetch()` of relative paths is unreliable.
  *
- * Async because the bundled fonts pass needs to read the woff2
- * URLs and base64-encode them. Cached after first call.
+ * Force the light theme regardless of the user's current setting
+ * — exporting a dark-themed page wastes ink and is the consensus
+ * pain point in the competitive set.
  */
-export async function buildPrintHtml(opts: BuildHtmlOptions): Promise<string> {
+export function buildPrintHtml(opts: BuildHtmlOptions): string {
   const md = buildMarkdownIt(opts.markdownPath);
 
   // Reuse SplitView's frontmatter handling: split YAML off the
@@ -259,33 +182,13 @@ export async function buildPrintHtml(opts: BuildHtmlOptions): Promise<string> {
       bodyHtml;
   }
 
-  // Force the light theme regardless of the user's current setting
-  // — exporting a dark-themed page wastes ink and is the consensus
-  // pain point in the competitive set.
-  //
-  // Smoke-test feedback rounds 2 + 3 chased a moving target:
-  //   - Round 2: added a Google Fonts <link>. Worked for the
-  //     full-doc case but selection-mode docs printed before
-  //     Google Fonts loaded.
-  //   - Round 3: awaited `document.fonts.ready`. Still racy —
-  //     the off-screen `data:text/html` origin had CORS friction
-  //     with cross-origin font fetches.
-  //
-  // Round 4 (this commit): bundle the woff2 files at build time
-  // via @fontsource and embed them inline as `data:font/woff2;
-  // base64,...` URIs in the print HTML's @font-face block. No
-  // network, no async loading, no CORS — fonts are part of the
-  // document the moment it parses. Matches what the live preview
-  // renders (the live editor uses the same fonts via Google
-  // Fonts; visually identical) without depending on the network.
-  const bundledFontsCss = await buildBundledFontsCss();
   return `<!doctype html>
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(opts.title)}</title>
 <style>
-${bundledFontsCss}
+${PRINT_FONT_PLACEHOLDER}
 ${themesCss}
 ${proseCss}
 ${printCss}

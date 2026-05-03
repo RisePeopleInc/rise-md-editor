@@ -489,7 +489,7 @@ function AppContent() {
       const docDir = tab.path
         ? tab.path.replace(/[\\/][^\\/]*$/, '')
         : null;
-      const html = await buildPrintHtml({
+      const html = buildPrintHtml({
         title: baseName,
         markdownSource: sourceMarkdown,
         markdownPath: tab.path,
