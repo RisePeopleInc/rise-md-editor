@@ -359,7 +359,21 @@ export async function exportToPdf(
     // dev AND asar-packed production builds — fetch() from the
     // renderer's `file://` origin couldn't reach the bundled
     // font assets reliably.
-    const fontCss = await buildPrintFontCss();
+    let fontCss: string;
+    try {
+      fontCss = await buildPrintFontCss();
+    } catch (err) {
+      // Fail loudly: a missing-fonts export is precisely the
+      // bug we're trying to surface. Smoke-test feedback rounds
+      // 4–7 lost a lot of cycles to silent fallbacks.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[exportPdf] buildPrintFontCss failed:', message);
+      return {
+        status: 'error',
+        message: `Failed to load print fonts: ${message}`,
+      };
+    }
+    const placeholderInHtml = opts.html.includes(PRINT_FONT_PLACEHOLDER);
     // Use a function replacement so base64 chars in `fontCss`
     // can't accidentally be interpreted as String.prototype.replace's
     // `$1` / `$&` patterns. (base64 doesn't contain `$` but the
@@ -367,6 +381,18 @@ export async function exportToPdf(
     const finalHtml = opts.html.replace(
       PRINT_FONT_PLACEHOLDER,
       () => fontCss,
+    );
+    // Diagnostic logging to track down lingering font-loading
+    // bugs. Logs to the main-process stdout (visible in
+    // `npm run dev`'s terminal) so we can verify the
+    // substitution path on a smoke-test export. Cheap.
+    console.log(
+      '[exportPdf] fontCss bytes:',
+      fontCss.length,
+      'placeholder found:',
+      placeholderInHtml,
+      'final HTML has @font-face:',
+      finalHtml.includes('@font-face'),
     );
     await fs.writeFile(tempHtmlPath, finalHtml, 'utf-8');
     await renderWindow.loadURL(pathToFileURL(tempHtmlPath).toString());
