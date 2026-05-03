@@ -6,19 +6,16 @@
     <title>rAIse</title>
 
     <!--
-      Rise brand fonts via Google Fonts.
-        - Source Serif Pro Bold 700 for H1 / H2 in WYSIWYG + welcome.
-        - Open Sans 400 / 600 / 700 for body and UI.
-      Preconnect shaves ~100-200ms off first-byte; font-display=swap on
-      both stylesheets so the app renders with system fallbacks if the
-      network is slow or absent (Electron offline launch).
+      Rise brand fonts ([RAISE-16](https://risepeople.atlassian.net/browse/RAISE-16))
+      are bundled via `@fontsource` (woff2 files imported from
+      `src/renderer/main.tsx` and processed by Vite's asset pipeline).
+      Previous incarnation pulled them from Google Fonts CDN with
+      preconnect + font-display=swap; on a cold offline launch that
+      meant a brief flash of the system serif fallback (Georgia)
+      before the network fetch completed and the swap kicked in.
+      Bundling makes first paint hit Source Serif Pro / Open Sans
+      immediately, no flash, no network dependency.
     -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Source+Serif+Pro:wght@700&display=swap"
-    />
 
     <!--
       Bootstrap script: read the persisted theme preference (set by main
