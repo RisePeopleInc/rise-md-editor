@@ -53,6 +53,7 @@ import {
   splitFrontmatter,
   type FrontmatterSplit,
 } from '../../state/markdown';
+import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
 export interface WysiwygEditorHandle {
@@ -525,6 +526,13 @@ function MilkdownBody({
       })
       .use(commonmark)
       .use(gfm)
+      // RAISE-47: revert filename-shaped autolinks
+      // (`file.md` → `link { url: 'http://file.md' }`) back to plain
+      // text on parse, so notes that reference `file.md` don't get
+      // wrapped in a clickable-but-broken link. Real URLs (text has
+      // explicit scheme) and emails (url has `mailto:` prefix)
+      // survive untouched. See state/remarkUnautolink.ts.
+      .use(remarkUnautolinkPlugin)
       .use(listener)
       .use(history)
       .use(clipboard)
