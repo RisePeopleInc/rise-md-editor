@@ -96,10 +96,37 @@ function remarkStripAutolinkLiteralToMarkdown(this: {
   const data = this.data();
   const tme = data.toMarkdownExtensions;
   if (!Array.isArray(tme)) return;
+  // `mdast-util-gfm`'s `gfmToMarkdown()` factory wraps the five
+  // sub-extensions (autolink-literal, footnote, strikethrough,
+  // table, task-list-item) inside an outer `{ extensions: [...] }`
+  // object — so `tme[i]` is one outer wrapper rather than five
+  // peer entries. We have to recurse into each wrapper's nested
+  // `.extensions` array, filter out the autolink-literal entry by
+  // fingerprint, and leave the wrapper otherwise intact. Single
+  // pass over the data array; in-place splice mutates the array
+  // the wrapper holds (the wrapper's `.extensions` reference is
+  // exposed to mdast-util-to-markdown's flatten-extensions step,
+  // so mutation is observable downstream).
+  //
   // Splice in place rather than re-assigning, in case the unified
   // processor or another plugin holds a reference to the original
   // array. `unified.data()` returns the live data object — mutating
   // its array preserves identity.
+  for (const ext of tme) {
+    if (typeof ext !== 'object' || ext === null) continue;
+    const nested = (ext as { extensions?: unknown }).extensions;
+    if (Array.isArray(nested)) {
+      // Wrapper case (mdast-util-gfm): walk inner extensions.
+      for (let j = nested.length - 1; j >= 0; j--) {
+        if (isAutolinkLiteralToMarkdown(nested[j])) {
+          nested.splice(j, 1);
+        }
+      }
+    }
+  }
+  // Also handle the unwrapped case in case some other code path
+  // pushes the autolink-literal extension as a peer entry (e.g.
+  // a unit test or an alternative gfm composition).
   for (let i = tme.length - 1; i >= 0; i--) {
     if (isAutolinkLiteralToMarkdown(tme[i])) {
       tme.splice(i, 1);
