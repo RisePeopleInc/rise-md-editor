@@ -373,7 +373,6 @@ export async function exportToPdf(
         message: `Failed to load print fonts: ${message}`,
       };
     }
-    const placeholderInHtml = opts.html.includes(PRINT_FONT_PLACEHOLDER);
     // Use a function replacement so base64 chars in `fontCss`
     // can't accidentally be interpreted as String.prototype.replace's
     // `$1` / `$&` patterns. (base64 doesn't contain `$` but the
@@ -381,18 +380,6 @@ export async function exportToPdf(
     const finalHtml = opts.html.replace(
       PRINT_FONT_PLACEHOLDER,
       () => fontCss,
-    );
-    // Diagnostic logging to track down lingering font-loading
-    // bugs. Logs to the main-process stdout (visible in
-    // `npm run dev`'s terminal) so we can verify the
-    // substitution path on a smoke-test export. Cheap.
-    console.log(
-      '[exportPdf] fontCss bytes:',
-      fontCss.length,
-      'placeholder found:',
-      placeholderInHtml,
-      'final HTML has @font-face:',
-      finalHtml.includes('@font-face'),
     );
     await fs.writeFile(tempHtmlPath, finalHtml, 'utf-8');
     await renderWindow.loadURL(pathToFileURL(tempHtmlPath).toString());
@@ -479,4 +466,62 @@ export async function exportToPdf(
   }
 
   return { status: 'saved', path: outputPath };
+}
+
+/**
+ * Sweep stale `print-*.html` files from `<userData>/pdf-export-tmp/`.
+ *
+ * The export flow's `finally` block is supposed to unlink the temp
+ * HTML before the function returns, but it can miss in two cases:
+ *
+ *   1. **Renderer / main crash mid-export** — process exits before
+ *      the cleanup line runs. The next launch finds the stale file.
+ *   2. **`fs.unlink` fails** (locked by virus scanner, EPERM, etc.)
+ *      — non-fatal at write time, deliberately swallowed, but the
+ *      file lingers.
+ *
+ * Each leftover is tiny (<200KB) so this isn't a disk-pressure
+ * issue, but heavy users get a slow accumulation in their userData
+ * dir over months. Cheap to run on `app.whenReady` — single
+ * `readdir` plus a stat per entry. Async + fire-and-forget so
+ * startup isn't blocked.
+ *
+ * Threshold of 24h is intentionally generous: any file older than
+ * a day cannot be in active use (an export takes seconds), and the
+ * cushion avoids a race where a sweep deletes a temp file mid-
+ * export from a near-simultaneous launch.
+ *
+ * Errors are logged once and swallowed — sweep is best-effort and
+ * a failed sweep should never block the app from opening.
+ */
+export async function sweepStaleTempFiles(): Promise<void> {
+  const tempDir = path.join(app.getPath('userData'), 'pdf-export-tmp');
+  const ttlMs = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  let entries: string[];
+  try {
+    entries = await fs.readdir(tempDir);
+  } catch (err) {
+    // Directory doesn't exist yet (no exports ever run) — nothing
+    // to sweep. Any other readdir error gets logged once.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('[exportPdf] sweepStaleTempFiles readdir failed:', err);
+    }
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter((name) => name.startsWith('print-') && name.endsWith('.html'))
+      .map(async (name) => {
+        const full = path.join(tempDir, name);
+        try {
+          const stats = await fs.stat(full);
+          if (now - stats.mtimeMs > ttlMs) {
+            await fs.unlink(full);
+          }
+        } catch {
+          // Per-file errors swallowed — sweep continues for the rest.
+        }
+      }),
+  );
 }

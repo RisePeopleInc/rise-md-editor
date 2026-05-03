@@ -46,39 +46,6 @@ html {
 }
 
 /*
- * Font-family CSS vars.
- *
- * The Rise design system defines `--font-sans` and `--font-serif`
- * inside themes.css's `@theme inline { … }` block — a Tailwind v4
- * directive that gets PROCESSED at build time into proper :root
- * CSS variables. In the live renderer, Tailwind's Vite plugin
- * runs against the imported CSS and generates the resolved vars.
- *
- * In the off-screen print window, we inline themes.css via
- * `?inline` which gives us the *raw* source — the unprocessed
- * `@theme inline { … }` block. Browsers don't recognise that
- * directive and silently DROP the whole block, including the
- * font-family vars. Result through smoke-test rounds 1–8: body
- * `font-family: var(--font-sans)` resolved to nothing → reverted
- * to browser-default Times Roman → PDF body kept rendering as
- * serif despite all the font-loading work.
- *
- * Fix: duplicate the font-family vars here in plain `:root`.
- * Print HTML only includes themes.css + milkdown.css + this file,
- * so this redefinition only affects the print context — the live
- * renderer continues to source the vars from `@theme inline` (and
- * keeps the `font-sans` / `font-serif` Tailwind utility classes
- * Tailwind generates from them).
- */
-:root {
-  --font-sans:
-    'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
-  --font-serif:
-    'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', serif;
-}
-
-/*
  * Element-margin reset to substitute for Tailwind's preflight,
  * which is loaded in the live renderer (via `index.css`) but
  * not in the off-screen print window.

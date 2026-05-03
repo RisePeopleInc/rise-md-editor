@@ -139,12 +139,14 @@
   --color-danger: var(--rise-danger);
   --color-warning: var(--rise-warning);
 
-  /* Font families — used via Tailwind's `font-*` utilities */
-  --font-serif:
-    'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', serif;
-  --font-sans:
-    'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  /* Font families — used via Tailwind's `font-*` utilities. The
+   * literal stacks live in `font-tokens.css` (single source of
+   * truth, also consumed by the off-screen PDF print window where
+   * `@theme inline` gets dropped by the browser). Aliasing through
+   * `var(--rise-font-*)` keeps Tailwind utility output and bare
+   * `var(--font-sans)` references in lockstep. */
+  --font-serif: var(--rise-font-serif);
+  --font-sans: var(--rise-font-sans);
 }
 
 /* -------------------------------------------------------------------------

@@ -13,7 +13,12 @@ import * as lastFolderStore from './lastFolderStore';
 import * as recentStore from './recentFilesStore';
 import * as templates from './templates';
 import * as themeStore from './themeStore';
-import { exportToPdf, type ExportPdfOptions, type ExportPdfResult } from './exportPdf';
+import {
+  exportToPdf,
+  sweepStaleTempFiles,
+  type ExportPdfOptions,
+  type ExportPdfResult,
+} from './exportPdf';
 
 const APP_NAME = 'rAIse';
 
@@ -455,6 +460,13 @@ if (!gotLock) {
     // (macOS uses app.on('open-file') instead — handled below).
     const filePath = findFileArg(process.argv);
     if (filePath) dispatchMenuAction('open-path', { path: filePath });
+
+    // RAISE-42: sweep `<userData>/pdf-export-tmp/` for stale `print-*.html`
+    // leftovers older than 24h. Each export's finally-block usually
+    // unlinks them, but a renderer/main crash mid-export — or a transient
+    // EPERM during cleanup — leaves files behind. Async + best-effort:
+    // fire-and-forget so startup isn't blocked, errors swallowed inside.
+    void sweepStaleTempFiles();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

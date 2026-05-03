@@ -49,6 +49,17 @@ import { markdownItComments } from './markdownItComments';
 import printCss from '../styles/print.css?inline';
 import proseCss from '../styles/milkdown.css?inline';
 import themesCss from '../styles/themes.css?inline';
+/**
+ * Font-family CSS vars (`--font-sans`, `--font-serif`) live in a
+ * dedicated tokens file so this off-screen print window can include
+ * them as plain `:root` declarations. Inlining themes.css alone
+ * doesn't cut it: themes.css declares the fonts inside Tailwind v4's
+ * `@theme inline { … }` block, which the browser silently drops
+ * when it sees raw (no Tailwind processing in the print window).
+ * That dropped block was the smoking gun behind RAISE-42 smoke-test
+ * rounds 1-9 where the PDF body kept rendering as Times Roman.
+ */
+import fontTokensCss from '../styles/font-tokens.css?inline';
 
 /**
  * Sentinel marker the renderer drops into the print HTML; the
@@ -257,6 +268,7 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
 <title>${escapeHtml(opts.title)}</title>
 <style>
 ${PRINT_FONT_PLACEHOLDER}
+${fontTokensCss}
 ${themesCss}
 ${proseCss}
 ${printCss}
