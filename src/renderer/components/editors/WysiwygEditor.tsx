@@ -54,6 +54,7 @@ import {
   type FrontmatterSplit,
 } from '../../state/markdown';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
+import { stripBrowserAutolinkPlugin } from '../../state/stripBrowserAutolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
 export interface WysiwygEditorHandle {
@@ -533,6 +534,17 @@ function MilkdownBody({
       // explicit scheme) and emails (url has `mailto:` prefix)
       // survive untouched. See state/remarkUnautolink.ts.
       .use(remarkUnautolinkPlugin)
+      // RAISE-47: Chromium's contenteditable URL auto-detector
+      // wraps typed URL-shaped text in `<a href>` tags, which the
+      // link mark schema picks up via parseDOM. The detection is
+      // partial and adds synthesised-scheme `href` attrs that
+      // would serialise as ugly `[text](http://text)` link syntax
+      // surrounded by the unmarked half of the URL. This plugin
+      // strips those marks at the appendTransaction layer so only
+      // user-intent link marks (toolbar, paste, parsed `[text](url)`
+      // syntax) make it to the model. See
+      // state/stripBrowserAutolink.ts.
+      .use(stripBrowserAutolinkPlugin)
       .use(listener)
       .use(history)
       .use(clipboard)
