@@ -127,7 +127,31 @@ function remarkUnautolink(): (tree: Root) => void {
   };
 }
 
-export const remarkUnautolinkPlugin: MilkdownPlugin = $remark(
+// `$remark` returns a tuple-with-extras `[options, plugin]` — BOTH
+// halves need to be registered. The options half is created via
+// `$ctx(...)`; if it's not added to `.use()` the slice never gets
+// `ctx.inject`-ed, and the plugin's async handler throws when it
+// reads `ctx.get(options.key)`. That promise rejection bubbles up
+// through `Promise.all([sysPlugins, usrPlugins])` in the editor's
+// `create()`, leaves the editor in `OnCreate` forever, and silently
+// breaks the toolbar / context menu / link mark wiring downstream.
+//
+// Earlier export was `$remark(...).plugin` (just the plugin half),
+// which hit exactly this failure mode in user testing — toolbar
+// formatting, "Add Link" command, and image insert all no-op'd.
+// Mirroring how `state/gemojiNode.ts` exports `remarkGemojiPlugin`:
+// surface the full `[options, plugin]` tuple as a `MilkdownPlugin[]`
+// so `.use(...)` flattens both halves into the editor's plugin chain.
+//
+// The `as unknown as MilkdownPlugin[]` cast is the same one the
+// gemoji and other `$remark`/`$inputRule` plugins in the codebase
+// use — Milkdown's factory return shape is a tuple-with-extras that
+// `.use()` accepts at runtime but doesn't structurally satisfy
+// `MilkdownPlugin[]` for the typechecker.
+const remarkUnautolinkResult = $remark(
   'remarkUnautolink',
   () => remarkUnautolink,
-).plugin;
+);
+export const remarkUnautolinkPlugin: MilkdownPlugin[] = [
+  ...remarkUnautolinkResult,
+] as unknown as MilkdownPlugin[];
