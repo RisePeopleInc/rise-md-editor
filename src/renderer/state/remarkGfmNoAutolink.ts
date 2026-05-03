@@ -1,84 +1,51 @@
-import type { MilkdownPlugin } from '@milkdown/ctx';
-import { $remark } from '@milkdown/utils';
+import { remarkCtx, SchemaReady } from '@milkdown/core';
+import type { MilkdownPlugin, Ctx } from '@milkdown/ctx';
 
 /**
- * Surgically remove the `mdast-util-gfm-autolink-literal` toMarkdown
- * extension after `remark-gfm` has already registered it
- * ([RAISE-47](https://risepeople.atlassian.net/browse/RAISE-47)).
+ * Surgically remove the `mdast-util-gfm-autolink-literal`
+ * toMarkdown extension after `remark-gfm` has already registered
+ * it, by mutating `remarkCtx`'s processor data once the parser is
+ * built ([RAISE-47](https://risepeople.atlassian.net/browse/RAISE-47)).
  *
- * The bundled `remark-gfm` plugin (used by `@milkdown/preset-gfm`)
- * registers FIVE GFM extensions with micromark / from-markdown /
- * to-markdown. We want to keep four of them and just drop one
- * specific behaviour:
+ * **Why we can't use `$remark`**: `$remark`-style plugins all
+ * `await ctx.wait(InitReady)` and then push to `remarkPluginsCtx`.
+ * Milkdown's editor loader runs all plugins via `Promise.all`,
+ * so the order plugins finish their await is racy. If our filter
+ * pushes BEFORE gfm's `remarkGFMPlugin`, the unified processor's
+ * `reduce` runs our filter first (against an empty data pile),
+ * finds nothing to filter, and exits — then gfm runs and adds
+ * the autolink-literal extension we wanted to drop. Net effect:
+ * the filter does nothing, escapes still corrupt the source.
  *
- *   - **Parse side** (micromark + from-markdown) — KEEP all five.
- *     Real URLs (`https://example.com`) and emails
- *     (`user@example.com`) need the autolink-literal extension's
- *     parse logic to become `link` mdast nodes, which then become
- *     clickable link marks in WYSIWYG via Milkdown's `linkSchema`.
+ * **The fix**: hook into `SchemaReady` instead. By that point
+ * (line 137-140 of @milkdown/core), every `$remark` plugin has
+ * pushed to `remarkPluginsCtx`, the reduce has run, and the
+ * processor in `remarkCtx` has all its extensions installed. We
+ * can grab the processor and mutate its `data().toMarkdownExtensions`
+ * directly to splice out the autolink-literal entry.
  *
- *   - **Serialize side** (to-markdown) — DROP the autolink-literal
- *     extension specifically. Its `gfmAutolinkLiteralToMarkdown`
- *     factory adds `unsafe` rules that escape `:` (after `[ps]`,
- *     before `\/`), `@` (between word chars), and `.` (after
- *     `[Ww]`) in any *plain-text* occurrence. After our
- *     `remarkUnautolinkPlugin` reverts a filename-shaped autolink
- *     (`file.md`) back to text — and any time a URL-shaped string
- *     lives as plain text in the doc rather than inside a link
- *     mark — those `unsafe` rules would corrupt the saved source
- *     to `https\://example.com` / `user\@example.com` / `www\.x.y`.
- *     The escape prevents the next parse from re-autolinking,
- *     which defeats the purpose of having parse-side autolink-
- *     literal in the first place.
+ * The autolink-literal extension is identifiable by its unique
+ * `unsafe` rule for `:` after `[ps]`, before `\/` (the
+ * `https?:/...` autolink trigger). No other GFM extension carries
+ * that combination. Match on it as a fingerprint so the filter is
+ * resilient to future micro-changes in the extension shape.
  *
- * Two design alternatives were tried before this approach:
+ * `mdast-util-gfm`'s `gfmToMarkdown()` factory wraps all five
+ * sub-extensions inside `{ extensions: [...] }`, so the
+ * autolink-literal entry is one level nested. Walk into each
+ * top-level entry's `.extensions` array, splice the match. Also
+ * handle the unwrapped peer-entry case as defensive fallback.
  *
- *   1. **Replace `remark-gfm` wholesale** — write a custom plugin
- *      that registers four GFM extensions (footnote, strikethrough,
- *      table, task-list-item) and skips autolink-literal entirely.
- *      Side effect: real URLs no longer autolinked in WYSIWYG.
- *      Failed AC requirement.
- *   2. **Replace `remark-gfm` with parse-side autolink-literal but
- *      no serialize-side**. Achieves the same effect as this
- *      filter approach but requires reaching deep into Milkdown's
- *      preset-gfm bundle and re-assembling the ProseMirror plugin
- *      chain by hand — broke the link-mark toolbar / right-click
- *      command wiring in user testing.
- *
- * This filter approach is structurally lighter: it pairs with a
- * normal `.use(gfm)` (so all of preset-gfm's ProseMirror plumbing
- * stays in the chain unchanged) and just splices out one entry
- * from `data.toMarkdownExtensions` after registration. Identified
- * by fingerprint: the autolink-literal extension's `unsafe` array
- * has the distinctive rule `{ character: ':', before: '[ps]',
- * after: '\\/' }` that no other GFM extension carries.
- *
- * Registered AFTER `gfm` in the editor's `.use()` chain so the
- * gfm preset's `remarkGFMPlugin` populates the data pile before
- * we filter it.
+ * **Parse side stays intact** — the autolink-literal *parser*
+ * (micromark + mdast-util-from-markdown) is untouched, so bare
+ * `https://example.com` and `user@example.com` still produce
+ * `link` mdast nodes that Milkdown's link mark schema converts to
+ * clickable link marks. Only the *serialiser*'s aggressive escape
+ * rules are removed. Plain-text URL-shaped strings (typed in
+ * WYSIWYG before they get a link mark) round-trip byte-faithfully
+ * to the source file.
  */
 
-/**
- * Identify `gfmAutolinkLiteralToMarkdown`'s output by its unique
- * `unsafe` rules. The extension contributes exactly three entries:
- *
- *   - `@` between word chars (email autolink trigger)
- *   - `.` after `[Ww]` (`www.` autolink trigger)
- *   - `:` after `[ps]`, before `\/` (`http:` / `https:` autolink trigger)
- *
- * The third rule's combination of character, before, and after is
- * unique — no other GFM extension carries an `unsafe` rule with a
- * `:` character and a `[ps]` before-pattern. Match on that single
- * rule rather than the whole array shape so the fingerprint stays
- * narrow and resilient to future micro-changes in the extension.
- *
- * Typed `unknown` because mdast-util-to-markdown's `Options` type
- * (which is what `data.toMarkdownExtensions` actually contains) is
- * deeply nested and overlapping but not structurally identical to
- * the simple `{ unsafe?: { character, before, after }[] }` shape we
- * care about for fingerprinting. Casting to a narrow record at
- * the call site keeps the rest of the pipeline's typing clean.
- */
 function isAutolinkLiteralToMarkdown(ext: unknown): boolean {
   if (typeof ext !== 'object' || ext === null) return false;
   const unsafe = (ext as { unsafe?: unknown }).unsafe;
@@ -90,33 +57,23 @@ function isAutolinkLiteralToMarkdown(ext: unknown): boolean {
   });
 }
 
-function remarkStripAutolinkLiteralToMarkdown(this: {
-  data(): { toMarkdownExtensions?: unknown[] };
-}): undefined {
-  const data = this.data();
-  const tme = data.toMarkdownExtensions;
+function stripAutolinkLiteralFromProcessor(processor: unknown): void {
+  if (typeof processor !== 'object' || processor === null) return;
+  const dataFn = (processor as { data?: unknown }).data;
+  if (typeof dataFn !== 'function') return;
+  const data = (dataFn as () => unknown).call(processor);
+  if (typeof data !== 'object' || data === null) return;
+  const tme = (data as { toMarkdownExtensions?: unknown }).toMarkdownExtensions;
   if (!Array.isArray(tme)) return;
-  // `mdast-util-gfm`'s `gfmToMarkdown()` factory wraps the five
-  // sub-extensions (autolink-literal, footnote, strikethrough,
-  // table, task-list-item) inside an outer `{ extensions: [...] }`
-  // object — so `tme[i]` is one outer wrapper rather than five
-  // peer entries. We have to recurse into each wrapper's nested
-  // `.extensions` array, filter out the autolink-literal entry by
-  // fingerprint, and leave the wrapper otherwise intact. Single
-  // pass over the data array; in-place splice mutates the array
-  // the wrapper holds (the wrapper's `.extensions` reference is
-  // exposed to mdast-util-to-markdown's flatten-extensions step,
-  // so mutation is observable downstream).
-  //
-  // Splice in place rather than re-assigning, in case the unified
-  // processor or another plugin holds a reference to the original
-  // array. `unified.data()` returns the live data object — mutating
-  // its array preserves identity.
+  // Walk the wrapper structure produced by `mdast-util-gfm`'s
+  // `gfmToMarkdown()` factory: each top-level entry is
+  // `{ extensions: [autolinkLiteral, footnote, strikethrough,
+  // table, taskListItem] }`. Recurse one level into `.extensions`
+  // and splice the autolink-literal entry by fingerprint.
   for (const ext of tme) {
     if (typeof ext !== 'object' || ext === null) continue;
     const nested = (ext as { extensions?: unknown }).extensions;
     if (Array.isArray(nested)) {
-      // Wrapper case (mdast-util-gfm): walk inner extensions.
       for (let j = nested.length - 1; j >= 0; j--) {
         if (isAutolinkLiteralToMarkdown(nested[j])) {
           nested.splice(j, 1);
@@ -124,9 +81,9 @@ function remarkStripAutolinkLiteralToMarkdown(this: {
       }
     }
   }
-  // Also handle the unwrapped case in case some other code path
-  // pushes the autolink-literal extension as a peer entry (e.g.
-  // a unit test or an alternative gfm composition).
+  // Defensive fallback for the unwrapped case (e.g. an
+  // alternative gfm composition or a unit test that pushes the
+  // sub-extensions as peer entries rather than via the wrapper).
   for (let i = tme.length - 1; i >= 0; i--) {
     if (isAutolinkLiteralToMarkdown(tme[i])) {
       tme.splice(i, 1);
@@ -134,7 +91,31 @@ function remarkStripAutolinkLiteralToMarkdown(this: {
   }
 }
 
-export const remarkGfmNoAutolinkPlugin: MilkdownPlugin = $remark(
-  'remarkGfmStripAutolinkLiteralSerialize',
-  () => remarkStripAutolinkLiteralToMarkdown,
-).plugin;
+/**
+ * Milkdown plugin: at `SchemaReady`, grab the unified processor
+ * from `remarkCtx` and strip the autolink-literal toMarkdown
+ * extension from its data pile. Returns a no-op cleanup so the
+ * editor's lifecycle is satisfied.
+ *
+ * Uses the bare-plugin form rather than `$remark` because:
+ *
+ *   1. We need to run AFTER the `remarkPluginsCtx` reduce has
+ *      built the final processor. `$remark` plugins push to
+ *      `remarkPluginsCtx` (and thus run during the reduce); we
+ *      want to mutate after the reduce completes, which means
+ *      operating on the live processor in `remarkCtx`.
+ *   2. The bare plugin form lets us pick our own timer
+ *      (`SchemaReady`), which is the first timer that fires after
+ *      the reduce in line 137-140 of @milkdown/core.
+ */
+export const remarkGfmNoAutolinkPlugin: MilkdownPlugin = (ctx: Ctx) =>
+  async () => {
+    await ctx.wait(SchemaReady);
+    const processor = ctx.get(remarkCtx);
+    stripAutolinkLiteralFromProcessor(processor);
+    return () => {
+      // No persistent state to tear down — the data array we
+      // mutated lives on the processor that the editor itself
+      // owns, and the processor is disposed when the editor is.
+    };
+  };
