@@ -18,7 +18,35 @@ import {
 } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { commonmark, insertImageCommand } from '@milkdown/preset-commonmark';
-import { gfm } from '@milkdown/preset-gfm';
+import {
+  // RAISE-47: pull each gfm preset part individually instead of the
+  // bundled `gfm` export. We're swapping the bundle's bundled
+  // `remarkGFMPlugin` (which registers all five GFM extensions
+  // including autolink-literal) for our own `remarkGfmNoAutolink`
+  // variant — keeping tables / strikethrough / task-list / footnote
+  // round-trip behaviour but dropping the autolink-literal extension
+  // entirely. The autolink-literal extension's serialiser-side
+  // `unsafe` rules escape `:`, `@`, `.` in plain-text autolink-shaped
+  // strings, corrupting `https://example.com` to `https\://example.com`
+  // and `user@example.com` to `user\@example.com` on every save —
+  // the fingerprint behind the user-reported regression on case 2/3
+  // of the smoke test.
+  //
+  // Re-assembled below in the Editor.make().use() chain. The plugin
+  // bundle is also exported from `@milkdown/preset-gfm` as `gfm`,
+  // but `gfm` is just `[schema, inputRules, pasteRules, markInputRules,
+  // keymap, commands, plugins].flat()` — the only piece we need to
+  // swap is `plugins` (which contains `remarkGFMPlugin`).
+  schema as gfmSchema,
+  inputRules as gfmInputRules,
+  pasteRules as gfmPasteRules,
+  markInputRules as gfmMarkInputRules,
+  keymap as gfmKeymap,
+  commands as gfmCommands,
+  keepTableAlignPlugin,
+  autoInsertSpanPlugin,
+  tableEditingPlugin,
+} from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history, undoCommand, redoCommand } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
@@ -53,6 +81,7 @@ import {
   splitFrontmatter,
   type FrontmatterSplit,
 } from '../../state/markdown';
+import { remarkGfmNoAutolinkPlugin } from '../../state/remarkGfmNoAutolink';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
@@ -525,13 +554,33 @@ function MilkdownBody({
         }));
       })
       .use(commonmark)
-      .use(gfm)
-      // RAISE-47: revert GFM autolink-literal output for filename-
-      // shaped text (`file.md`, `notes.md`, `example.app`, etc.).
-      // Registered after `gfm` so it sees the link nodes that
-      // remark-gfm-autolink-literal just produced and walks them
-      // back to plain text before the WYSIWYG editor (or the
-      // serializer round-trip) treats them as real links. See
+      // RAISE-47: re-assemble the gfm preset *without* the bundled
+      // `remarkGFMPlugin` (which would re-introduce the autolink-
+      // literal extension we're trying to drop). Same shape as
+      // `@milkdown/preset-gfm`'s `gfm` bundle: schema + inputRules
+      // + pasteRules + markInputRules + keymap + commands + the
+      // three non-remark plugins (`keepTableAlignPlugin`,
+      // `autoInsertSpanPlugin`, `tableEditingPlugin`), plus our
+      // `remarkGfmNoAutolinkPlugin` standing in for `remarkGFMPlugin`.
+      .use(gfmSchema)
+      .use(gfmInputRules)
+      .use(gfmPasteRules)
+      .use(gfmMarkInputRules)
+      .use(gfmKeymap)
+      .use(gfmCommands)
+      .use(keepTableAlignPlugin)
+      .use(autoInsertSpanPlugin)
+      .use(tableEditingPlugin)
+      .use(remarkGfmNoAutolinkPlugin)
+      // RAISE-47: belt-and-suspenders for docs that already have the
+      // bug-corrupted form `[file.md](http://file.md)` saved on disk.
+      // The new `remarkGfmNoAutolinkPlugin` above prevents NEW corruption
+      // by dropping the autolink-literal extension entirely, but EXISTING
+      // corrupted source still produces a regular `link` mdast node when
+      // remark-parse encounters the explicit `[text](url)` syntax. This
+      // plugin walks those bug-shaped link nodes (where url ===
+      // `http://text` or `https://text`) back to plain text on load, so
+      // the next save writes the un-corrupted form. See
       // state/remarkUnautolink.ts.
       .use(remarkUnautolinkPlugin)
       .use(listener)
