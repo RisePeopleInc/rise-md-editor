@@ -49,10 +49,25 @@ import type { MilkdownPlugin } from '@milkdown/ctx';
  *     autolink-literal extension) wanted this as a real link.
  *
  * Runs as an `appendTransaction` so it sees the post-mutation
- * doc state, synthesises a corrective transaction that removes
- * the offending marks, and (via `addToHistory: false`) stays out
- * of the user's undo/redo stack — undo skips back over the
- * stripped-mark step rather than restoring it.
+ * doc state and synthesises a corrective transaction that
+ * removes the offending marks before the dispatch cycle ends.
+ *
+ * **Why we DON'T set `addToHistory: false`** — that meta would
+ * normally be the right call (the strip is implicit, not a user
+ * edit, shouldn't pollute the undo stack). But Milkdown's
+ * listener plugin's `state.apply` short-circuits on
+ * `tr.getMeta("addToHistory") === false`, so a strip flagged
+ * out-of-history is also flagged out-of-update — the listener
+ * keeps `latestTr` pointing at the PRE-strip state, debounces
+ * the markdown serialisation off that, and the listener fires
+ * `markdownUpdated` with the unmodified link mark still in the
+ * doc. Result: source on disk has `[example.com](http://example.com)`
+ * even though the editor's actual model state has been cleaned.
+ *
+ * Leaving the meta unset costs us a separate undo step (the
+ * strip becomes its own history entry, so Ctrl-Z first reverts
+ * the strip and then the typing). The trade is worth it — the
+ * alternative is a corrupted save that propagates to disk.
  */
 
 const SCHEME_RE = /^(?:https?:\/\/|mailto:)/i;
@@ -99,7 +114,14 @@ export const stripBrowserAutolinkPlugin: MilkdownPlugin = $prose(() => {
       for (const { from, to, mark } of offending) {
         tr.removeMark(from, to, mark);
       }
-      tr.setMeta('addToHistory', false);
+      // Intentionally NOT setting `tr.setMeta('addToHistory',
+      // false)`. See the doc comment at the top of this file —
+      // Milkdown's listener plugin treats `addToHistory: false`
+      // as "skip this transaction", so the markdownUpdated
+      // listener would see the pre-strip state and serialise the
+      // corrupted form to disk. Adding to history is the lesser
+      // evil; undo just becomes two-step (revert strip → revert
+      // typing).
       return tr;
     },
   });
