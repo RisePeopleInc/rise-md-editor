@@ -420,6 +420,25 @@
 }
 
 /*
+ * Reader-view toggle — applied to `.raise-prose-hide-comments`
+ * (set by the SplitView preview pane's "Hide comments" button)
+ * to mirror what a PDF recipient sees when "Strip comments
+ * before export" is on (the default).
+ *
+ * `display: none` on the comment elements removes them from
+ * layout entirely — surrounding prose flows naturally past
+ * them, matching the "comments are invisible to the reader"
+ * convention that every surveyed competitor (Obsidian, iA
+ * Writer, Typora, Marked 2, VSCode-markdown-pdf) follows by
+ * default. Toggle persists to localStorage so the author's
+ * choice carries across sessions.
+ */
+.raise-prose-hide-comments .raise-comment,
+.raise-prose-hide-comments .md-comment {
+  display: none;
+}
+
+/*
  * Source-view `//` line-comment decoration (RAISE-31).
  *
  * Applied via `inlineClassName: 'raise-source-comment'` on Monaco

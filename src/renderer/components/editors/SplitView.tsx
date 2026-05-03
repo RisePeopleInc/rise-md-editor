@@ -69,6 +69,30 @@ export function SplitView({
   const containerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
+  // RAISE-31 + RAISE-42 follow-up: per-user preference for hiding
+  // review-style comments in the preview pane. Default OFF (show)
+  // — preview's purpose is author-mode review where seeing the
+  // comments matters; the toggle lets the author flip to a
+  // reader-view to see what an exported recipient would see, or
+  // to skim past comment clutter when proofreading. Persisted
+  // in localStorage so the choice survives reloads / sessions.
+  const HIDE_COMMENTS_LS_KEY = 'raise.preview.hideComments';
+  const [hideComments, setHideComments] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(HIDE_COMMENTS_LS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(HIDE_COMMENTS_LS_KEY, hideComments ? '1' : '0');
+    } catch {
+      // localStorage can throw in private-browsing / sandboxed
+      // contexts; non-fatal — the toggle just won't persist.
+    }
+  }, [hideComments]);
+
   // Stable ref to the current markdown path so the markdown-it image
   // rule (registered once per md instance) reads the latest value
   // without forcing an md rebuild on every keystroke.
@@ -425,21 +449,57 @@ export function SplitView({
       {/*
        * `min-w-0` here too — same flex floor applies if Milkdown ever
        * produces wide content (long unbroken code blocks, very wide tables).
+       *
+       * Wrapping div: `relative` so the comment-visibility toggle
+       * button can absolute-position into the top-right corner
+       * without altering preview layout. Was a single `.raise-prose`
+       * div before the RAISE-42 follow-up that added the toggle.
        */}
       <div
-        ref={previewRef}
-        onScroll={handlePreviewScroll}
-        className="raise-prose min-h-0 min-w-0 flex-1 overflow-auto px-6 py-8"
+        className="relative min-h-0 min-w-0 flex-1"
         style={{ width: `${100 - splitPercent}%` }}
-        // RAISE-28: identity attribute used by App.tsx's
-        // `context-preview-select-all` handler to scope a programmatic
-        // text selection to this node — `webContents.selectAll()` would
-        // otherwise select the entire renderer document.
-        data-raise-preview-pane
-        // markdown-it is configured with html:false so user-inline HTML is
-        // escaped before reaching the DOM; safe to inject the rendered HTML.
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      >
+        {/*
+         * Comment-visibility toggle — flips `.raise-prose-hide-comments`
+         * on the preview node. Default OFF (comments visible) so the
+         * author sees their review notes muted-italic per RAISE-31; ON
+         * gives a reader-view that matches what a recipient sees in
+         * an exported PDF (where "Strip comments before export" is on
+         * by default, mirroring the dominant convention across
+         * Obsidian / iA Writer / Typora / Marked 2 / VSCode-markdown-pdf).
+         *
+         * Positioned absolute top-right with a small backdrop so it
+         * stays readable over content without committing to a full
+         * preview-pane toolbar (which would steal vertical space and
+         * doesn't match the rest of the app's chrome-light aesthetic).
+         */}
+        <button
+          type="button"
+          onClick={() => setHideComments((v) => !v)}
+          title={
+            hideComments
+              ? 'Comments are hidden in this preview. Click to show.'
+              : 'Comments are visible. Click to hide (matches what a PDF recipient sees).'
+          }
+          aria-pressed={hideComments}
+          className="absolute right-3 top-3 z-10 rounded border border-stroke bg-app/90 px-2 py-1 text-[11px] font-semibold text-body shadow-[var(--rise-shadow-depth-1)] backdrop-blur transition hover:bg-elevated hover:text-strong"
+        >
+          {hideComments ? 'Show comments' : 'Hide comments'}
+        </button>
+        <div
+          ref={previewRef}
+          onScroll={handlePreviewScroll}
+          className={`raise-prose h-full overflow-auto px-6 py-8 ${hideComments ? 'raise-prose-hide-comments' : ''}`}
+          // RAISE-28: identity attribute used by App.tsx's
+          // `context-preview-select-all` handler to scope a programmatic
+          // text selection to this node — `webContents.selectAll()` would
+          // otherwise select the entire renderer document.
+          data-raise-preview-pane
+          // markdown-it is configured with html:false so user-inline HTML is
+          // escaped before reaching the DOM; safe to inject the rendered HTML.
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
     </div>
   );
 }
