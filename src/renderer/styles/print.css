@@ -35,13 +35,11 @@ body {
 }
 
 /*
- * Pin root font-size to 11pt so the rem-based heading scale in
- * milkdown.css (h1: 1.875rem, h2: 1.5rem, etc.) scales to print
- * proportions — h1 lands at ~20.6pt, body at 11pt, the heading
- * rhythm matches the live preview surface relative to body
- * size. Without this, `rem` would resolve against the browser
- * default 16px which makes headings disproportionately huge on
- * a 11pt body.
+ * Pin root font-size to 11pt so px-based heading sizes in
+ * milkdown.css scale appropriately on a printed page. Without
+ * this, the renderer-default 16px root would dominate and
+ * headings would print noticeably larger relative to body
+ * than they appear in the live preview pane.
  */
 html {
   font-size: 11pt;

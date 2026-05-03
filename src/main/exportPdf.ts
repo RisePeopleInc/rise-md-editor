@@ -1,6 +1,8 @@
-import { BrowserWindow, dialog, shell, type PrintToPDFOptions } from 'electron';
+import { app, BrowserWindow, dialog, shell, type PrintToPDFOptions } from 'electron';
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /**
  * Export-to-PDF main-process module
@@ -230,35 +232,35 @@ export async function exportToPdf(
     },
   });
 
+  let tempHtmlPath: string | null = null;
   try {
-    // Load the HTML. `data:text/html` keeps the load self-contained
-    // (no temp file to clean up), with a generous size limit on
-    // modern Chromium (handles multi-megabyte HTML fine).
-    const dataUrl =
-      'data:text/html;charset=utf-8,' + encodeURIComponent(opts.html);
-    await renderWindow.loadURL(dataUrl);
-    // Wait for any pending image loads, font shaping, etc. to
-    // settle. Two stages:
+    // Write the HTML to a temp file in the OS temp dir and load
+    // via `file://`. Smoke-test feedback rounds 2 + 3 + 4 chased
+    // a font-loading bug where the off-screen window's
+    // `data:text/html` origin (null origin) had inconsistent
+    // behaviour around @font-face data URIs and cross-origin
+    // CSS imports. Loading from a real `file://` URL gives the
+    // window a normal local origin where every modern font-
+    // loading mechanism (data URIs in @font-face, relative
+    // paths, etc.) just works.
     //
-    //   1. `document.fonts.ready` — the Font Loading API
-    //      Promise that resolves when all `@font-face` /
-    //      <link> stylesheet font fetches have completed AND
-    //      every face referenced by the rendered DOM has been
-    //      shaped. Critical for the Google-Fonts <link> in the
-    //      print HTML (round 2 fix): `Source Serif Pro` for
-    //      h1/h2 + `Open Sans` for body. Smoke-test feedback
-    //      round 3 found that small selection-mode docs were
-    //      printing before the fonts loaded — body fell back
-    //      to the system serif default, headers were wrong.
-    //      Awaiting the Promise pins the print to post-load.
-    //
-    //      Wrapped in `Promise.race` against a 5s ceiling so a
-    //      hung font CDN doesn't hold the export indefinitely
-    //      (fall through to whatever's loaded; better than a
-    //      stuck export window).
-    //
-    //   2. Short timer pause for late image decodes that can
-    //      shift layout after the load event fires.
+    // Temp file is created in the app's userData dir (which is
+    // always writeable) so the print window can also resolve
+    // any same-directory relative references the HTML might
+    // contain in the future. Cleaned up in the finally block.
+    const tempDir = path.join(app.getPath('userData'), 'pdf-export-tmp');
+    await fs.mkdir(tempDir, { recursive: true });
+    tempHtmlPath = path.join(
+      tempDir,
+      `print-${randomUUID()}.html`,
+    );
+    await fs.writeFile(tempHtmlPath, opts.html, 'utf-8');
+    await renderWindow.loadURL(pathToFileURL(tempHtmlPath).toString());
+    // Wait for fonts to finish loading. With `file://` origin
+    // and inlined data-URI fonts in the print HTML's <style>,
+    // `document.fonts.ready` resolves once the CSS parses and
+    // the data URIs are decoded — typically <100ms but capped
+    // at 5s in case of unexpected delays.
     await renderWindow.webContents.executeJavaScript(
       `Promise.race([
         document.fonts.ready,
@@ -316,6 +318,17 @@ export async function exportToPdf(
     // Always destroy — `close()` would fire close handlers that
     // could prompt; `destroy()` is the unconditional teardown.
     if (!renderWindow.isDestroyed()) renderWindow.destroy();
+    // Clean up the temp HTML file. Errors here are non-fatal —
+    // userData/pdf-export-tmp gets stale entries on rare crashes
+    // but they're tiny (<200KB each) and can be swept on a
+    // future export pass if needed.
+    if (tempHtmlPath) {
+      try {
+        await fs.unlink(tempHtmlPath);
+      } catch {
+        // ignore — see comment above
+      }
+    }
   }
 
   if (opts.openAfter) {
