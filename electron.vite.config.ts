@@ -26,6 +26,20 @@ export default defineConfig({
     resolve: {
       alias: {
         '@renderer': resolve(__dirname, 'src/renderer'),
+        // RAISE-47: replace `mdast-util-gfm` (which `remark-gfm`
+        // imports internally) with a shim that drops the
+        // autolink-literal toMarkdown extension. The shim keeps
+        // every other GFM serialiser behaviour intact and keeps
+        // autolink-literal's PARSER side (so bare URLs and emails
+        // still become `link` mdast nodes on read). Dropping just
+        // the toMarkdown extension is what stops the unsafe-escape
+        // rules from corrupting `https://example.com` into
+        // `https\://example.com` on save. See
+        // `src/renderer/shims/mdastUtilGfmNoAutolinkSerialize.ts`.
+        'mdast-util-gfm': resolve(
+          __dirname,
+          'src/renderer/shims/mdastUtilGfmNoAutolinkSerialize.ts',
+        ),
       },
     },
     build: {
