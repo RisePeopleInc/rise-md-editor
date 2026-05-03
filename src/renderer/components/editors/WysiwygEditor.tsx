@@ -53,7 +53,6 @@ import {
   splitFrontmatter,
   type FrontmatterSplit,
 } from '../../state/markdown';
-import { remarkGfmNoAutolinkPlugin } from '../../state/remarkGfmNoAutolink';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
@@ -527,23 +526,30 @@ function MilkdownBody({
       })
       .use(commonmark)
       .use(gfm)
-      // RAISE-47: surgically remove the autolink-literal toMarkdown
-      // extension that `remark-gfm` (inside the gfm preset) just
-      // registered. The parse side stays intact — bare URLs and
-      // emails still become `link` mdast nodes that Milkdown renders
-      // as clickable link marks. The serialize side loses the
-      // `unsafe` rules that would escape `:`, `@`, `.` in plain
-      // text on save (`https://x.com` → `https\://x.com`, etc.).
-      // Order matters: must run AFTER `gfm` so the data pile is
-      // populated before we filter it. See
-      // state/remarkGfmNoAutolink.ts.
-      .use(remarkGfmNoAutolinkPlugin)
       // RAISE-47: revert filename-shaped autolinks
       // (`file.md` → `link { url: 'http://file.md' }`) back to plain
       // text on load, so notes that reference `file.md` don't get
       // wrapped in a clickable-but-broken link. Real URLs (text has
       // explicit scheme) and emails (url has `mailto:` prefix)
       // survive untouched. See state/remarkUnautolink.ts.
+      //
+      // **Known limitation**: a typed-but-not-yet-promoted URL
+      // (`https://x.com` typed in Edit, never round-tripped through
+      // a parse cycle) gets serialized via remark-stringify with
+      // `mdast-util-gfm-autolink-literal`'s `unsafe` rules active
+      // — so `:` after `[ps]`, `@` between word chars, and `.`
+      // after `[Ww]` get backslash-escaped in the saved source.
+      // The escape prevents the next parse from re-autolinking, so
+      // the text stays as plain text on reload (which IS what the
+      // RAISE-47 AC asks for `file.md`-shaped strings, just an
+      // unfortunate side effect for real URLs typed in WYSIWYG).
+      // The cleaner fix would be to remove the autolink-literal
+      // serializer extension at the unified-processor level, but
+      // every approach we tried (replacing `remark-gfm`, splitting
+      // the gfm preset, post-filtering `data.toMarkdownExtensions`,
+      // hooking SchemaReady) either hit Milkdown's plugin-loader
+      // race condition or broke the toolbar / link mark wiring.
+      // Tracked separately for follow-up.
       .use(remarkUnautolinkPlugin)
       .use(listener)
       .use(history)
