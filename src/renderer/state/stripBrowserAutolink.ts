@@ -75,7 +75,23 @@ function isSyntheticAutolinkMark(textRun: string, href: string): boolean {
   if (!href || !textRun) return false;
   if (href.startsWith('mailto:')) return false;
   if (SCHEME_RE.test(textRun)) return false;
-  return href === `http://${textRun}` || href === `https://${textRun}`;
+  // Common case: text run is exactly the URL body (Chromium
+  // scoped its `<a>` to just the URL, no surrounding text).
+  if (href === `http://${textRun}` || href === `https://${textRun}`) {
+    return true;
+  }
+  // Looser case: href is a synthesised-scheme URL whose body
+  // appears in the text run (Chromium scoped the `<a>` to a
+  // wider range than just the URL — a known quirk where the
+  // link mark covers e.g. `www.example.com a lot.` instead of
+  // just `www.example.com`). The fingerprint is still robust:
+  // legitimate `<a href="http://X">click</a>` paste has href
+  // body `X` that doesn't appear in the visible text.
+  const schemeMatch = /^https?:\/\/(.+)$/.exec(href);
+  if (!schemeMatch) return false;
+  const hostBody = schemeMatch[1];
+  if (!hostBody) return false;
+  return textRun.includes(hostBody);
 }
 
 export const stripBrowserAutolinkPlugin: MilkdownPlugin = $prose(() => {
@@ -86,13 +102,16 @@ export const stripBrowserAutolinkPlugin: MilkdownPlugin = $prose(() => {
       const linkType = newState.schema.marks['link'];
       if (!linkType) return null;
       const offending: MarkRange[] = [];
+      const allLinkMarks: Array<{ text: string; href: string; matched: boolean }> = [];
       newState.doc.descendants((node: ProseNode, pos: number) => {
         if (!node.isText) return;
         for (const mark of node.marks) {
           if (mark.type !== linkType) continue;
           const href = mark.attrs['href'];
           if (typeof href !== 'string') continue;
-          if (isSyntheticAutolinkMark(node.text ?? '', href)) {
+          const matched = isSyntheticAutolinkMark(node.text ?? '', href);
+          allLinkMarks.push({ text: node.text ?? '', href, matched });
+          if (matched) {
             offending.push({
               from: pos,
               to: pos + node.nodeSize,
@@ -101,6 +120,14 @@ export const stripBrowserAutolinkPlugin: MilkdownPlugin = $prose(() => {
           }
         }
       });
+      if (allLinkMarks.length > 0) {
+        // Diagnostic: dump every link mark we saw and whether we
+        // matched it. Helps debug cases where Chromium injects a
+        // mark with an unexpected text/href shape that our
+        // fingerprint doesn't catch. Should be removed before
+        // merging.
+        console.log('[stripBrowserAutolink] saw link marks:', allLinkMarks);
+      }
       if (offending.length === 0) return null;
       const tr = newState.tr;
       for (const { from, to, mark } of offending) {
