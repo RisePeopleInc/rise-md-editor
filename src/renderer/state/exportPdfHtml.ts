@@ -78,6 +78,66 @@ interface BuildHtmlOptions {
   markdownSource: string;
   /** Filesystem path of the active document, if saved. Used to resolve relative image references. */
   markdownPath: string | null;
+  /** Strip review-style comments (`<!-- … -->`, `// …`) before rendering. Matches the dominant convention across competitor markdown editors (Obsidian, iA Writer, Typora, Marked 2 all hide comments in exports). Code-region aware — comments inside fenced code blocks survive verbatim. */
+  stripComments: boolean;
+}
+
+/**
+ * Match a fenced or inline code region the comment strip must
+ * skip — so a literal `<!--` or `//` inside a markdown tutorial's
+ * code sample stays in the exported PDF.
+ *
+ * Mirrors the same pattern used in `emptyParagraphMarker.ts` and
+ * `gemojiNode.ts`. Pragmatic, not 100% commonmark-correct (no
+ * indented-code-block handling, no support for arbitrary backtick-
+ * fence lengths beyond 1/2/3+) — covers the realistic shapes well
+ * enough that the comment strip preserves user code samples.
+ */
+const CODE_REGION_RE = /^```[\s\S]*?^```$|^~~~[\s\S]*?^~~~$|``[^`\n]+``|`[^`\n]+`/gm;
+
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+const LINE_COMMENT_RE = /^[ \t]*\/\/.*(?:\r?\n)?/gm;
+
+function stripCommentsInPlainText(text: string): string {
+  return text.replace(HTML_COMMENT_RE, '').replace(LINE_COMMENT_RE, '');
+}
+
+/**
+ * Strip review-style comments (`<!-- ... -->` HTML and `// ...`
+ * line comments) from a markdown source, code-region aware.
+ *
+ * Splits the input into [text, code, text, code, …] segments via
+ * `CODE_REGION_RE` and runs the strip only on the text segments;
+ * code regions pass through verbatim. Net effect: comments in
+ * prose disappear; comments shown inside a markdown tutorial's
+ * code sample (`\`\`\`html\n<!-- example -->\n\`\`\``) survive.
+ *
+ * Collapses 3+ consecutive newlines back to 2 after the strip,
+ * since a comment-only paragraph becomes an empty line that
+ * adjacent blank lines collapse to a paragraph break — without
+ * the collapse the source would gain runs of blank lines where
+ * comments used to be.
+ */
+function stripComments(markdown: string): string {
+  if (!markdown) return markdown;
+  if (!markdown.includes('<!--') && !/^[ \t]*\/\//m.test(markdown)) {
+    return markdown;
+  }
+  let result = '';
+  let cursor = 0;
+  CODE_REGION_RE.lastIndex = 0;
+  let codeMatch: RegExpExecArray | null;
+  while ((codeMatch = CODE_REGION_RE.exec(markdown)) !== null) {
+    if (codeMatch.index > cursor) {
+      result += stripCommentsInPlainText(markdown.slice(cursor, codeMatch.index));
+    }
+    result += codeMatch[0];
+    cursor = codeMatch.index + codeMatch[0].length;
+  }
+  if (cursor < markdown.length) {
+    result += stripCommentsInPlainText(markdown.slice(cursor));
+  }
+  return result.replace(/\n{3,}/g, '\n\n');
 }
 
 /**
@@ -173,7 +233,15 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
   // Reuse SplitView's frontmatter handling: split YAML off the
   // top, render the body, prepend a styled metadata block.
   const { frontmatter, body } = splitFrontmatter(opts.markdownSource);
-  const bodyHtml = md.render(body);
+  // Strip review-style comments before rendering when the
+  // toggle is on (default). Matches Obsidian / iA Writer /
+  // Typora / Marked 2 / VSCode-markdown-pdf — every surveyed
+  // competitor hides comments in exports by default. Source-
+  // level strip (vs CSS-hiding) keeps the resulting PDF byte-
+  // clean: no invisible comment text dragged along in the PDF
+  // for a recipient to extract.
+  const renderSource = opts.stripComments ? stripComments(body) : body;
+  const bodyHtml = md.render(renderSource);
   let bodyContent = bodyHtml;
   if (frontmatter !== null) {
     const escapedFm = escapeHtml(frontmatter);

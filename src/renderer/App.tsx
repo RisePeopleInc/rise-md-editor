@@ -493,6 +493,7 @@ function AppContent() {
         title: baseName,
         markdownSource: sourceMarkdown,
         markdownPath: tab.path,
+        stripComments: payload.stripComments,
       });
       const result = await window.api.export.toPdf({
         html,

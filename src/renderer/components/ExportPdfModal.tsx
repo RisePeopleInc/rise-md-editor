@@ -108,6 +108,8 @@ export interface ExportPdfSubmitPayload {
   headerFooter: ExportPdfOptions['headerFooter'];
   range: 'document' | 'selection';
   openAfter: boolean;
+  /** Strip review-style comments (`<!-- … -->`, `// …`) before rendering. */
+  stripComments: boolean;
 }
 
 interface ExportPdfModalProps {
@@ -142,6 +144,13 @@ export function ExportPdfModal({
   const [headerFooterExpanded, setHeaderFooterExpanded] = useState(false);
   const [range, setRange] = useState<'document' | 'selection'>('document');
   const [openAfter, setOpenAfter] = useState(true);
+  // Default ON to match competitor convention — Obsidian, iA Writer,
+  // Typora, Marked 2, and VSCode-markdown-pdf all hide review-style
+  // comments in exports by default. The author's preview keeps them
+  // visible (muted-italic per RAISE-31), but the PDF heads to a
+  // recipient who shouldn't see the author's own review notes
+  // unless they're explicitly opted in.
+  const [stripComments, setStripComments] = useState(true);
 
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -178,6 +187,7 @@ export function ExportPdfModal({
           : null,
       range: range === 'selection' && hasSelection ? 'selection' : 'document',
       openAfter,
+      stripComments,
     });
   };
 
@@ -447,6 +457,23 @@ export function ExportPdfModal({
             </span>
           </label>
         </fieldset>
+
+        {/* Strip comments. Default ON — matches every surveyed
+            competitor (Obsidian / iA Writer / Typora / Marked 2 /
+            VSCode-markdown-pdf all hide review-style comments
+            in exports by default). The preview keeps them visible
+            for the author's benefit; the PDF goes to a recipient. */}
+        <label
+          className="flex items-center gap-2 text-sm"
+          title="Removes <!-- … --> and // … comments from the rendered PDF (preview keeps them visible)."
+        >
+          <input
+            type="checkbox"
+            checked={stripComments}
+            onChange={(e) => setStripComments(e.target.checked)}
+          />
+          <span>Strip comments before export</span>
+        </label>
 
         {/* Open after */}
         <label className="flex items-center gap-2 text-sm">
