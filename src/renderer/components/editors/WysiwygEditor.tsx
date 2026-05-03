@@ -53,6 +53,7 @@ import {
   splitFrontmatter,
   type FrontmatterSplit,
 } from '../../state/markdown';
+import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
 export interface WysiwygEditorHandle {
@@ -525,6 +526,14 @@ function MilkdownBody({
       })
       .use(commonmark)
       .use(gfm)
+      // RAISE-47: revert GFM autolink-literal output for filename-
+      // shaped text (`file.md`, `notes.md`, `example.app`, etc.).
+      // Registered after `gfm` so it sees the link nodes that
+      // remark-gfm-autolink-literal just produced and walks them
+      // back to plain text before the WYSIWYG editor (or the
+      // serializer round-trip) treats them as real links. See
+      // state/remarkUnautolink.ts.
+      .use(remarkUnautolinkPlugin)
       .use(listener)
       .use(history)
       .use(clipboard)

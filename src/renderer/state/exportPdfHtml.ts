@@ -193,6 +193,12 @@ function buildMarkdownIt(markdownPath: string | null): MarkdownIt {
     typographer: true,
     breaks: false,
   });
+  // RAISE-47: same `fuzzyLink: false` tightening as SplitView so
+  // filename-shaped text (`file.md`, etc.) doesn't autolink to
+  // `http://file.md` in the PDF. Without the parallel setting,
+  // the preview pane and PDF export would diverge — preview shows
+  // plain text, PDF shows a broken link to a non-existent host.
+  md.linkify.set({ fuzzyLink: false });
   // Match SplitView's plugin set — keeps the PDF visually identical
   // to what the user sees in the split-preview pane.
   md.use(markdownItTaskLists, { enabled: false, label: true });

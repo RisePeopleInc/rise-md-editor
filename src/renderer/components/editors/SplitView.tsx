@@ -101,8 +101,9 @@ export function SplitView({
 
   // markdown-it: html disabled (escape any raw HTML in input — local notes
   // don't tend to need it and we'd rather not let arbitrary tags through),
-  // linkify on for bare URLs, breaks off so single newlines don't become
-  // <br> (matches CommonMark / Milkdown behaviour).
+  // linkify on for explicit-scheme URLs and email autolinks, breaks off so
+  // single newlines don't become <br> (matches CommonMark / Milkdown
+  // behaviour).
   const md = useMemo(() => {
     const instance = new MarkdownIt({
       html: false,
@@ -110,6 +111,27 @@ export function SplitView({
       typographer: true,
       breaks: false,
     });
+    // RAISE-47: tighten linkify so filename-shaped text (`file.md`,
+    // `notes.md`, `example.app`, etc.) doesn't auto-link as
+    // `http://file.md`. linkify-it's `fuzzyLink: true` (the default
+    // when `linkify` is enabled) treats anything matching
+    // `<host>.<TLD>` as a bare URL, which trips on every markdown
+    // doc that references another markdown file by name. With
+    // `fuzzyLink: false` we still autolink:
+    //
+    //   - explicit-scheme URLs (`https://example.com`,
+    //     `http://github.com/foo`) — linkify still recognises any
+    //     URL with a scheme prefix
+    //   - email autolinks (`user@example.com` → `mailto:`) —
+    //     unaffected by `fuzzyLink`, gated separately on `fuzzyEmail`
+    //
+    // Bare hostnames (`example.com` without scheme) no longer
+    // autolink. That's a deliberate trade — a markdown editor's
+    // primary user content is dev / product notes that reference
+    // local files, not bare URLs typed in passing. Users who want
+    // a bare URL linked can write `<https://example.com>` (CommonMark
+    // autolink syntax) or `[example.com](https://example.com)`.
+    instance.linkify.set({ fuzzyLink: false });
     // RAISE-29: render `* [ ]` / `* [x]` GFM task lists as checkboxes
     // in the preview. `enabled: true` removes the `disabled` attribute
     // on the input so the user can click to toggle — a click handler
