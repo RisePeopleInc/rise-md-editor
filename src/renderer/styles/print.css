@@ -46,46 +46,39 @@ html {
 }
 
 /*
- * Element-margin reset.
+ * Element-margin reset to substitute for Tailwind's preflight,
+ * which is loaded in the live renderer (via `index.css`) but
+ * not in the off-screen print window.
  *
- * Smoke-test feedback round 3: paragraph spacing in PDF didn't
- * match the live preview pane. Root cause: the live renderer
- * runs Tailwind's preflight (in `index.css`) which normalises
- * default browser margins on `<p>`, `<h1>`-`<h6>`, `<ul>`,
- * `<pre>`, etc. to `0`. milkdown.css then layers on its own
- * `.raise-prose > * + * { margin-top: 0.85em }` rule for
- * inter-block spacing, plus heading-specific `margin-top`s
- * (`h1` 1.5em, `h2` 1.4em, etc.).
+ * Without preflight, browser-default `p { margin: 1em 0 }` and
+ * heading defaults apply on top of our spacing rules and confuse
+ * the inter-block rhythm. Reset to zero so milkdown.css's
+ * `.raise-prose > * + * { margin-top: 0.85em }` plus heading-
+ * specific `margin-top` values can drive spacing alone.
  *
- * The off-screen print BrowserWindow loads from a
- * `data:text/html` URL without Tailwind preflight, so default
- * browser margins (`p { margin: 1em 0 }`, similar for headings,
- * lists, blockquotes, pre) apply on TOP of our 0.85em rule.
- * The default `1em margin-bottom` from a paragraph + 1em
- * `margin-top` from the next paragraph collapse to 1em — but
- * milkdown.css's `0.85em` rule loses to that 1em because it's
- * the smaller value during margin collapse. Net: PDF inter-
- * paragraph spacing is wider than preview, and inconsistent
- * across heading levels because each heading has different
- * default margins.
- *
- * Reset all the relevant element margins to 0 here so the
- * milkdown.css rules drive the spacing exclusively, matching
- * the live preview surface 1:1.
+ * **Specificity matters**: this reset uses bare element selectors
+ * (specificity 0,0,1) so milkdown.css's class-based rules
+ * (`.raise-prose > * + *` at 0,1,0; `.raise-prose h1` at 0,1,1)
+ * beat it. Round-3 wrote this as `.raise-prose p { … }` etc.
+ * which is 0,1,1 — same as `.raise-prose h1`, but appearing
+ * earlier in the cascade — so the reset *won* against
+ * milkdown.css's `> * + *` rule and PDFs ended up with zero
+ * paragraph spacing where the live preview shows the proper
+ * 0.85em gap.
  */
-.raise-prose p,
-.raise-prose h1,
-.raise-prose h2,
-.raise-prose h3,
-.raise-prose h4,
-.raise-prose h5,
-.raise-prose h6,
-.raise-prose ul,
-.raise-prose ol,
-.raise-prose blockquote,
-.raise-prose pre,
-.raise-prose figure,
-.raise-prose table {
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+ul,
+ol,
+blockquote,
+pre,
+figure,
+table {
   margin: 0;
 }
 
