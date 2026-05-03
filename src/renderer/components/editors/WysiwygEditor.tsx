@@ -53,6 +53,7 @@ import {
   splitFrontmatter,
   type FrontmatterSplit,
 } from '../../state/markdown';
+import { autolinkOnTypePlugin } from '../../state/autolinkOnType';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { stripBrowserAutolinkPlugin } from '../../state/stripBrowserAutolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
@@ -545,6 +546,13 @@ function MilkdownBody({
       // syntax) make it to the model. See
       // state/stripBrowserAutolink.ts.
       .use(stripBrowserAutolinkPlugin)
+      // RAISE-47 UX follow-up: typed URLs and emails autolink
+      // immediately as the user finishes them (anchored on whitespace,
+      // end-of-node, or sentence punctuation). Without this, a typed
+      // URL would only become a link after a parse cycle (mode
+      // switch, doc reload) — friction-heavy. See
+      // state/autolinkOnType.ts.
+      .use(autolinkOnTypePlugin)
       .use(listener)
       .use(history)
       .use(clipboard)
