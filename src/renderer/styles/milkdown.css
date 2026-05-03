@@ -78,10 +78,23 @@
   margin-top: 0;
 }
 
-/* Paragraphs */
-.raise-prose p {
-  margin: 0;
-}
+/*
+ * Paragraphs.
+ *
+ * NOTE: previously this had a defensive `.raise-prose p { margin: 0 }`
+ * rule, but its specificity (0,1,1) beat the inter-block spacing
+ * rule above (`.raise-prose > * + *`, specificity 0,1,0) — which
+ * zeroed paragraph margins in the preview pane and the PDF
+ * export but NOT in WYSIWYG (because there `.raise-prose
+ * .ProseMirror > * + *` at 0,2,0 wins). Result: preview /
+ * PDF paragraphs flowed together with no gap; WYSIWYG had the
+ * proper 0.85em rhythm. Removed — Tailwind v4's preflight
+ * already resets the browser-default `p { margin: 1em 0 }` to
+ * 0 in the live renderer, and `print.css`'s bare-element
+ * `p { margin: 0 }` (specificity 0,0,1) does the same in the
+ * off-screen print window without competing with the spacing
+ * rules above.
+ */
 
 /* Inline marks */
 .raise-prose strong {
