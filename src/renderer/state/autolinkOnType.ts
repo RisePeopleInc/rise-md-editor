@@ -57,24 +57,85 @@ import type { MilkdownPlugin } from '@milkdown/ctx';
 
 const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
 
-// URL pattern: explicit http(s) scheme, followed by non-whitespace,
-// terminated by whitespace, end-of-text, or sentence punctuation.
-// The lookahead `(?=[\s.,!?;:)\]]|$)` ensures we only match
-// "completed" URLs — the user has either moved past them with
-// whitespace/punctuation or hit the end of the text. Avoids
-// flickering autolinks as they're being typed.
+// URL pattern: explicit http(s) scheme + greedy run of
+// non-whitespace chars that excludes a few markdown-meaningful
+// delimiters (`<>"'\``).
 //
-// `\S+?` (lazy) plus the lookahead means the URL is the shortest
-// run of non-whitespace that ends at a boundary char. Trailing
-// punctuation isn't included in the URL — `https://x.com.` autolinks
-// `https://x.com` not `https://x.com.`.
-const URL_RE = /https?:\/\/[^\s<>"'`]+?(?=[\s.,!?;:)\]]|$)/g;
+// **Why greedy + post-process** rather than a clever lazy regex
+// with a lookahead: an earlier draft used
+// `https?:\/\/[^\s]+?(?=[\s.,!?;:)\]]|$)` — `+?` lazy + lookahead
+// allowing `$` at end-of-text. That fires on every partial URL
+// as the user types it. Because Milkdown's link mark is `inclusive`,
+// the mark added on the partial URL (e.g. `https://w` with href
+// `https://w`) auto-extends as the user keeps typing. Each new
+// keystroke fires the plugin again, adds *another* mark with a
+// different href, and the result is a single URL run with multiple
+// marks accumulated and the original (truncated) href winning the
+// serializer. Saved source ends up as
+// `[https://www.example.com today](https://w)` — link text is the
+// whole accumulated run, href is whatever the very first keystroke
+// landed.
+//
+// Fix: never match while the URL is still being typed. The match
+// is only valid when the URL run is *terminated* in the text —
+// either by whitespace OR by sentence punctuation followed by
+// whitespace / end. We do this in `findCompletedUrls` below by
+// running the greedy regex and filtering matches that don't have a
+// trailing whitespace boundary. URLs at the very end of a text
+// node (with no trailing whitespace) stay unlinked until the user
+// types a space or a parse cycle re-reads them; that's acceptable
+// friction.
+const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 
 // Email pattern: standard local@host.tld. Anchored on word
 // boundaries so it doesn't match parts of unrelated text.
 // Conservative — doesn't try to match every legal email syntax,
 // just the common-case shapes that show up in markdown notes.
+//
+// Same "must be followed by whitespace" boundary check applies
+// in `findCompletedEmails` for the same partial-typing reason.
 const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g;
+
+// Trailing characters to strip from a matched URL — markdown
+// sentences often end with `.`, `,`, `!`, `?`, `;`, `:`, `)`, `]`,
+// and the user means those as sentence punctuation, not part of
+// the URL. We strip them off the right edge until the URL ends in
+// a safe URL char.
+const TRAILING_PUNCT_RE = /[.,!?;:)\]]+$/;
+
+interface Hit {
+  index: number;
+  length: number;
+  href: string;
+}
+
+function findCompletedHits(
+  text: string,
+  re: RegExp,
+  hrefFn: (match: string) => string,
+): Hit[] {
+  const hits: Hit[] = [];
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const fullMatch = m[0];
+    let trimmed = fullMatch;
+    // Strip trailing punctuation off the right edge.
+    const punctMatch = TRAILING_PUNCT_RE.exec(trimmed);
+    if (punctMatch) {
+      trimmed = trimmed.slice(0, trimmed.length - punctMatch[0].length);
+    }
+    const matchEnd = m.index + trimmed.length;
+    // The URL must be followed by whitespace IN THE TEXT for us
+    // to consider it "completed". This is what stops the plugin
+    // from firing on partial URLs as the user types.
+    if (matchEnd >= text.length) continue;
+    if (!/\s/.test(text.charAt(matchEnd))) continue;
+    if (trimmed.length === 0) continue;
+    hits.push({ index: m.index, length: trimmed.length, href: hrefFn(trimmed) });
+  }
+  return hits;
+}
 
 interface MarkAdd {
   from: number;
@@ -106,26 +167,25 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         const text = node.text ?? '';
         if (!text) return;
 
-        // URLs.
-        URL_RE.lastIndex = 0;
-        let m: RegExpExecArray | null;
-        while ((m = URL_RE.exec(text)) !== null) {
-          const url = m[0];
+        const urlHits = findCompletedHits(text, URL_RE, (m) => m);
+        for (const hit of urlHits) {
           adds.push({
-            from: pos + m.index,
-            to: pos + m.index + url.length,
-            href: url,
+            from: pos + hit.index,
+            to: pos + hit.index + hit.length,
+            href: hit.href,
           });
         }
 
-        // Emails.
-        EMAIL_RE.lastIndex = 0;
-        while ((m = EMAIL_RE.exec(text)) !== null) {
-          const email = m[0];
+        const emailHits = findCompletedHits(
+          text,
+          EMAIL_RE,
+          (m) => `mailto:${m}`,
+        );
+        for (const hit of emailHits) {
           adds.push({
-            from: pos + m.index,
-            to: pos + m.index + email.length,
-            href: `mailto:${email}`,
+            from: pos + hit.index,
+            to: pos + hit.index + hit.length,
+            href: hit.href,
           });
         }
       });
