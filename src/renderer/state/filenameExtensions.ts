@@ -31,6 +31,30 @@
  * The list is conservative — we'd rather miss a file-extension
  * autolink than break a real-URL autolink. Users can extend this
  * list when they encounter common-but-missed extensions.
+ *
+ * ## Policy for additions and removals
+ *
+ * **To add an extension** (text ends in `.X`, autolink should be
+ * suppressed): the entry must be unambiguously a file extension
+ * — i.e. you would NEVER expect a URL to end in `.X`. If `.X` is
+ * also an ICANN-recognised TLD that real domains use, you risk
+ * breaking existing user URLs that end with that TLD. Mitigation:
+ * add to `KNOWN_TLDS` AS WELL if there's a real-URL collision;
+ * the gate logic resolves the conflict via the more-specific
+ * autolink-on-type path.
+ *
+ * **To remove an extension**: only if a user reports a real-domain
+ * URL ending in that extension is being false-positive treated as
+ * a file. ICANN-retiring a TLD is rare; we'd rather autolink a
+ * legacy URL than break the convention.
+ *
+ * **When in doubt**: leave the extension OUT. The user can wrap
+ * the URL in `<>` (CommonMark autolink) or `[](url)` (explicit
+ * link) to force a link. Conversely, file references render fine
+ * as plain text. Ambiguous extensions (e.g. `.app` — TLD and
+ * macOS bundle suffix) lean toward the TLD reading.
+ *
+ * Maintain alphabetically by section.
  */
 export const FILE_EXTENSION_TLDS: ReadonlySet<string> = new Set([
   // Markdown / docs
@@ -201,4 +225,171 @@ export function looksLikeFilenameExtension(text: string): boolean {
   const ext = stripped.slice(dotIdx + 1).toLowerCase();
   if (!ext) return false;
   return FILE_EXTENSION_TLDS.has(ext);
+}
+
+/**
+ * Allowlist of "TLDs we recognise as real domains" — used to gate
+ * autolink-on-type for `www.X` and bare-hostname patterns. Without
+ * this, the autolink-on-type regex matches natural-language
+ * abbreviation patterns like `e.g.something`, `i.e.foobar`,
+ * `etc.something` whose suffix isn't a TLD AND isn't in the file-
+ * extension blocklist — they fall through to autolink and produce
+ * broken `http://e.g.something` links.
+ *
+ * Composition rationale:
+ *
+ *   - Generic TLDs that show up in personal / dev / company URLs
+ *     across English-speaking markdown notes (com, org, net, edu,
+ *     gov, io, dev, app, ai, etc.).
+ *   - Two-letter country TLDs for the locales the team and
+ *     industry tend to interact with most. Not exhaustive — adding
+ *     a country TLD is one line if a real URL fails to autolink.
+ *
+ * **Policy for additions** — only add a string to this set if:
+ *
+ *   1. It's a real ICANN-recognised TLD
+ *      ([list](https://www.iana.org/domains/root/db)), AND
+ *   2. It's NOT also a common file extension or natural-language
+ *      abbreviation (e.g. don't add `.txt`, `.app` if it's
+ *      ambiguous with a macOS bundle, etc.). When in doubt, prefer
+ *      "real domain wins" — but be aware the entry may surface
+ *      false positives in user docs.
+ *
+ * **Policy for removals** — only remove if the entry is generating
+ * false positives in user docs. ICANN-retiring a TLD is rare, and
+ * we'd rather autolink a legacy URL than break the convention.
+ *
+ * The list is maintained alphabetically by section. Country TLDs
+ * appear after the generic block.
+ */
+export const KNOWN_TLDS: ReadonlySet<string> = new Set([
+  // Generic TLDs (most common in dev / product notes).
+  'com',
+  'org',
+  'net',
+  'gov',
+  'edu',
+  'mil',
+  'int',
+  'biz',
+  'info',
+  'name',
+  'pro',
+  'asia',
+  'jobs',
+  'travel',
+  'mobi',
+  'tel',
+  // Newer generic TLDs commonly appearing in URLs.
+  'io',
+  'co',
+  'ai',
+  'app',
+  'dev',
+  'gg',
+  'tv',
+  'me',
+  'ly',
+  'sh',
+  'cc',
+  'so',
+  'xyz',
+  'page',
+  'site',
+  'shop',
+  'store',
+  'tech',
+  'cloud',
+  'online',
+  'news',
+  'agency',
+  'studio',
+  'guru',
+  // Country TLDs — North America.
+  'ca',
+  'mx',
+  'us',
+  // Country TLDs — Europe.
+  'uk',
+  'ie',
+  'fr',
+  'de',
+  'it',
+  'es',
+  'pt',
+  'nl',
+  'be',
+  'lu',
+  'ch',
+  'at',
+  'se',
+  'no',
+  'fi',
+  'dk',
+  'is',
+  'pl',
+  'cz',
+  'sk',
+  'hu',
+  'ro',
+  'bg',
+  'gr',
+  'tr',
+  'ru',
+  'ua',
+  'lt',
+  'lv',
+  'ee',
+  'si',
+  'hr',
+  'rs',
+  // Country TLDs — Asia / Pacific.
+  'jp',
+  'cn',
+  'kr',
+  'in',
+  'au',
+  'nz',
+  'sg',
+  'hk',
+  'tw',
+  'th',
+  'id',
+  'my',
+  'ph',
+  'vn',
+  // Country TLDs — Middle East / Africa.
+  'il',
+  'ae',
+  'sa',
+  'za',
+  // Country TLDs — South America.
+  'br',
+  'ar',
+  'cl',
+  'co',
+  'pe',
+]);
+
+/**
+ * Returns true if the given text's "TLD" (suffix after the last
+ * `.`) matches a known real-domain TLD per `KNOWN_TLDS`. Strips
+ * scheme prefix and path/query/fragment before checking, same as
+ * `looksLikeFilenameExtension`.
+ *
+ * Used to gate autolink-on-type for schemeless URL shapes
+ * (`www.X`, `bare.host.tld`) so that natural-language abbreviation
+ * patterns (`e.g.something`, `i.e.foo`) don't false-positive into
+ * autolinks.
+ */
+export function looksLikeKnownTld(text: string): boolean {
+  const stripped = text
+    .replace(/^https?:\/\//, '')
+    .split(/[/?#]/, 1)[0];
+  if (!stripped) return false;
+  const dotIdx = stripped.lastIndexOf('.');
+  if (dotIdx < 0) return false;
+  const tld = stripped.slice(dotIdx + 1).toLowerCase();
+  if (!tld) return false;
+  return KNOWN_TLDS.has(tld);
 }

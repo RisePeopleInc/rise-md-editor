@@ -104,8 +104,24 @@ function isSyntheticAutolinkMark(textRun: string, href: string): boolean {
   // synthesised-scheme link" — the strict form (text run is
   // exactly the URL body) and the looser form (text run
   // contains the URL body, in case Chromium scoped the `<a>`
-  // wider than just the URL). Either way, only strip if the
-  // URL body is filename-shaped.
+  // wider than just the URL).
+  //
+  // Either way, only strip if the URL body is filename-shaped
+  // (`hostBody` ends with a known file extension). That last
+  // gate is what keeps us from over-triggering on a legitimate
+  // pasted link like `<a href="http://example.com">click</a>`:
+  // hostBody is `example.com`, suffix `com` isn't a file
+  // extension, fingerprint exits false, mark survives.
+  //
+  // **Pathological-paste edge case**: if a pasted `<a href="X">`
+  // has X = `http://config.json` (filename-shaped) AND visible
+  // text contains `config.json`, we'd strip the mark even though
+  // it's "explicit" content from the paste. Acceptable: a real
+  // link with `http://config.json` as the destination is
+  // semantically broken anyway (`config.json` isn't a host); the
+  // common case is that this only fires for browser-injected
+  // marks and the few weird-paste cases collapse to "the user
+  // gets plain text, which is what they probably wanted".
   const exactMatch =
     href === `http://${textRun}` || href === `https://${textRun}`;
   const containsMatch = textRun.includes(hostBody);

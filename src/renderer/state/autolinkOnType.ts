@@ -2,7 +2,10 @@ import { Plugin, PluginKey } from '@milkdown/prose/state';
 import type { Node as ProseNode } from '@milkdown/prose/model';
 import { $prose } from '@milkdown/utils';
 import type { MilkdownPlugin } from '@milkdown/ctx';
-import { looksLikeFilenameExtension } from './filenameExtensions';
+import {
+  looksLikeFilenameExtension,
+  looksLikeKnownTld,
+} from './filenameExtensions';
 
 /**
  * Autolink URLs and emails as the user types
@@ -117,9 +120,15 @@ const BARE_HOSTNAME_RE = /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:[/
 // Conservative — doesn't try to match every legal email syntax,
 // just the common-case shapes that show up in markdown notes.
 //
+// **TLD slot constraint** — the right-most segment requires `[a-z]{2,}`
+// (2+ alphabetic chars) to avoid matching partial addresses like
+// `steve@sslf.c` while the user is mid-typing the `a` in `.ca`.
+// All real TLDs are at least 2 characters; the same constraint
+// rules out single-letter typos sliding through as autolinks.
+//
 // Same "must be followed by whitespace" boundary check applies
 // in `findCompletedHits` for the same partial-typing reason.
-const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g;
+const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi;
 
 // Trailing characters to strip from a matched URL — markdown
 // sentences often end with `.`, `,`, `!`, `?`, `;`, `:`, `)`, `]`,
@@ -140,6 +149,17 @@ function findCompletedHits(
   hrefFn: (match: string) => string,
   options: {
     skipFilenameExtension?: boolean;
+    /**
+     * For schemeless URL shapes (`www.X`, bare hostnames),
+     * additionally require the match's TLD to be in
+     * `KNOWN_TLDS`. Without this, the bare-hostname regex
+     * matches natural-language abbreviation patterns
+     * (`e.g.something`, `i.e.foobar`, `etc.something`) whose
+     * suffix isn't a real TLD AND isn't in the file-extension
+     * blocklist — they'd fall through to autolink and produce
+     * broken `http://e.g.something` links.
+     */
+    requireKnownTld?: boolean;
     treatEndAsBoundary?: boolean;
     /** Doc-relative position of the start of the text node. */
     nodeStart?: number;
@@ -194,6 +214,12 @@ function findCompletedHits(
     if (options.skipFilenameExtension && looksLikeFilenameExtension(trimmed)) {
       continue;
     }
+    // Belt-and-suspenders for schemeless shapes: also require the
+    // TLD to be a real one. Catches natural-language patterns the
+    // file-extension blocklist would miss (`e.g.something`).
+    if (options.requireKnownTld && !looksLikeKnownTld(trimmed)) {
+      continue;
+    }
     hits.push({ index: m.index, length: trimmed.length, href: hrefFn(trimmed) });
   }
   return hits;
@@ -219,6 +245,17 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
 
       const adds: MarkAdd[] = [];
       const cursorPos = newState.selection.from;
+      // TODO(perf): this walks the ENTIRE doc on every doc-changing
+      // transaction — full descendants traversal + 4 regex scans per
+      // text node, per keystroke. Fine for small notes (the regex
+      // scans are µs and the descendants iterator is allocation-free)
+      // but quadratic-ish on very large docs. The cheap optimisation
+      // is to use the transactions' `mapping` info to scan only the
+      // text nodes whose content was modified, since autolink
+      // candidates can only appear where the user just typed. Hold
+      // off until a real perf complaint surfaces — premature
+      // optimisation here would complicate the doc-walk for an
+      // efficiency gain we can't currently measure.
       newState.doc.descendants((node: ProseNode, pos: number, parent) => {
         if (!node.isText) return;
         // Skip text runs that already have a link mark — could be
@@ -298,7 +335,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           WWW_URL_RE,
           (m) => `http://${m}`,
-          { ...baseOpts, skipFilenameExtension: true },
+          { ...baseOpts, skipFilenameExtension: true, requireKnownTld: true },
         );
         for (const hit of wwwHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
@@ -318,7 +355,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           BARE_HOSTNAME_RE,
           (m) => `http://${m}`,
-          { ...baseOpts, skipFilenameExtension: true },
+          { ...baseOpts, skipFilenameExtension: true, requireKnownTld: true },
         );
         for (const hit of hostHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
