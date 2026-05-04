@@ -19,7 +19,6 @@ import {
   type ExportPdfOptions,
   type ExportPdfResult,
 } from './exportPdf';
-import { migrateUserDataIfNeeded } from './userDataMigration';
 
 const APP_NAME = 'Rise MD Editor';
 
@@ -405,14 +404,7 @@ if (!gotLock) {
     if (filePath) dispatchMenuAction('open-path', { path: filePath });
   });
 
-  app.whenReady().then(async () => {
-    // RAISE-43: one-shot migration from the pre-rename
-    // `raise-editor` userData path to the current `Rise MD Editor`
-    // path. Awaited BEFORE any state-reading code (theme bootstrap,
-    // recents, last-folder, etc.) so the rest of startup sees the
-    // migrated state. No-op once the new path has any contents.
-    await migrateUserDataIfNeeded();
-
+  app.whenReady().then(() => {
     // Apply the persisted theme preference to nativeTheme before any
     // window opens, so window-chrome (titlebar tint on macOS, scrollbars,
     // form-control defaults) match from the first frame.

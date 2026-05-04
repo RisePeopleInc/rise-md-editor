@@ -8,8 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
-- **Renamed app to Rise MD Editor** ([RAISE-43](https://risepeople.atlassian.net/browse/RAISE-43)). The display name in the dock / start menu / About dialog / window title now reads "Rise MD Editor" (was "rAIse"). The `appId`, `productName`, npm-package `name`, and GitHub repo are all renamed to match. The `RAISE-` Jira ticket prefix and the `--rise-*` Rise design-system CSS variables stay unchanged.
-- **One-shot user-data migration** on first launch of the renamed binary copies state from the old `raise-editor` userData path to the new `Rise MD Editor` path so existing settings, recent files, and workspace state survive the rename. The old path is left in place for downgrade-safety.
+- **Renamed app to Rise MD Editor** ([RAISE-43](https://risepeople.atlassian.net/browse/RAISE-43)). The display name in the dock / start menu / About dialog / window title now reads "Rise MD Editor" (was "rAIse"). The `appId`, `productName`, npm-package `name`, and GitHub repo are all renamed to match. The `RAISE-` Jira ticket prefix and the `--rise-*` Rise design-system CSS variables stay unchanged. No user-data migration is shipped — the app is pre-release and there are no installed users with state to preserve.
 
 ## [0.1.2] — 2026-04-27
 
