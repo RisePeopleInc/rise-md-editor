@@ -138,7 +138,20 @@ function findCompletedHits(
   text: string,
   re: RegExp,
   hrefFn: (match: string) => string,
-  options: { skipFilenameExtension?: boolean; treatEndAsBoundary?: boolean } = {},
+  options: {
+    skipFilenameExtension?: boolean;
+    treatEndAsBoundary?: boolean;
+    /** Doc-relative position of the start of the text node. */
+    nodeStart?: number;
+    /** Doc-relative caret position. End-as-boundary fires only when
+     *  the caret has moved past the match (NOT still touching the
+     *  match's right edge); without this the plugin would fire on
+     *  partial matches like `steve@sslf.c` while the user is still
+     *  typing the address, which then anchors a truncated href that
+     *  link-mark inclusivity propagates over the rest of the typed
+     *  text. */
+    cursorPos?: number;
+  } = {},
 ): Hit[] {
   const hits: Hit[] = [];
   re.lastIndex = 0;
@@ -155,17 +168,22 @@ function findCompletedHits(
     if (trimmed.length === 0) continue;
     // The URL is "completed" when the next character is whitespace
     // OR when we're at the end of a TEXT NODE that's followed by a
-    // block boundary (Enter/paragraph break). The block-boundary
-    // case is signalled by `treatEndAsBoundary: true` from the
-    // caller — set when the text node we're scanning is the LAST
-    // child of its parent block. End-of-doc and end-of-paragraph
-    // both satisfy this.
-    //
-    // Without the end-as-boundary case, hitting Enter after a typed
-    // URL would never trigger autolinking — the URL stays plain
-    // until the user types a space somewhere.
+    // block boundary (Enter/paragraph break) AND the caret has
+    // already moved past the match. The caret-past gate is what
+    // distinguishes "user finished the URL and pressed Enter / left
+    // the line" from "user is mid-typing the URL and would hit a
+    // partial match like `steve@sslf.c` that anchors a truncated
+    // href as the typing continues".
     if (matchEnd >= text.length) {
       if (!options.treatEndAsBoundary) continue;
+      // End-of-text-node match — only fire if the caret has moved
+      // past the match's right edge. We don't have the caret pos
+      // when nodeStart is missing; fall back to declining the match
+      // in that case (safer to not autolink than to autolink with a
+      // truncated href).
+      if (options.nodeStart == null || options.cursorPos == null) continue;
+      const absoluteMatchEnd = options.nodeStart + matchEnd;
+      if (options.cursorPos <= absoluteMatchEnd) continue;
     } else if (!/\s/.test(text.charAt(matchEnd))) {
       continue;
     }
@@ -200,6 +218,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
       if (!linkType) return null;
 
       const adds: MarkAdd[] = [];
+      const cursorPos = newState.selection.from;
       newState.doc.descendants((node: ProseNode, pos: number, parent) => {
         if (!node.isText) return;
         // Skip text runs that already have a link mark — could be
@@ -223,6 +242,15 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           const lastChild = parent.lastChild;
           if (lastChild === node) treatEndAsBoundary = true;
         }
+        // findCompletedHits also needs the caret position to gate
+        // the end-as-boundary case: only fire when the caret has
+        // moved past the match's right edge (i.e. the user is no
+        // longer mid-typing the URL).
+        const baseOpts = {
+          treatEndAsBoundary,
+          nodeStart: pos,
+          cursorPos,
+        };
 
         // Track ranges already claimed by a previous pattern so a
         // single substring isn't double-marked (e.g. an
@@ -234,7 +262,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         const claim = (start: number, end: number) => claimed.push([start, end]);
 
         // Explicit-scheme URLs first (most specific pattern wins).
-        const urlHits = findCompletedHits(text, URL_RE, (m) => m, { treatEndAsBoundary });
+        const urlHits = findCompletedHits(text, URL_RE, (m) => m, baseOpts);
         for (const hit of urlHits) {
           adds.push({
             from: pos + hit.index,
@@ -249,7 +277,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           EMAIL_RE,
           (m) => `mailto:${m}`,
-          { treatEndAsBoundary },
+          baseOpts,
         );
         for (const hit of emailHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
@@ -270,7 +298,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           WWW_URL_RE,
           (m) => `http://${m}`,
-          { skipFilenameExtension: true, treatEndAsBoundary },
+          { ...baseOpts, skipFilenameExtension: true },
         );
         for (const hit of wwwHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
@@ -290,7 +318,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           BARE_HOSTNAME_RE,
           (m) => `http://${m}`,
-          { skipFilenameExtension: true, treatEndAsBoundary },
+          { ...baseOpts, skipFilenameExtension: true },
         );
         for (const hit of hostHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
