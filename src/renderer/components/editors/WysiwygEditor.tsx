@@ -17,6 +17,7 @@ import {
   serializerCtx,
 } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
+import { Fragment, Slice, type Node as ProseNode, type ResolvedPos } from '@milkdown/prose/model';
 import { commonmark, insertImageCommand } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
@@ -115,6 +116,101 @@ interface WysiwygEditorProps {
 // are wired and downstream features (e.g., a /-command menu) can plug in.
 const tooltipPlugin = tooltipFactory('raise-tooltip');
 const slashPlugin = slashFactory('raise-slash');
+
+/**
+ * RAISE-46: container types whose content schema is *inline-only*
+ * — pasting a top-level block (e.g. a `paragraph` produced by
+ * markdown parse) into one of these breaks the surrounding
+ * structure. Detected by walking up the resolved-pos path; any
+ * match means the paste destination is "inline-only" and a
+ * block-shaped slice would need to be flattened to inline content
+ * before insertion.
+ *
+ * `table_cell` / `table_header` are the bug-report's worst case —
+ * dropping a paragraph into a cell ejects the cell content as a
+ * top-level paragraph, fragmenting the surrounding table.
+ *
+ * `heading` is included on the same shape: ProseMirror's heading
+ * schema is inline-only; pasting a paragraph into the middle of
+ * an `<h2>` would split the heading. The bug report's AC names
+ * this case explicitly.
+ */
+const INLINE_ONLY_CONTAINERS = new Set([
+  'table_cell',
+  'table_header',
+  'heading',
+]);
+
+/**
+ * Inspect the resolved-pos chain to decide whether the paste
+ * destination's container only allows inline content. Walks from
+ * the deepest enclosing node outward; the first match wins.
+ */
+function isInlineOnlyContext(from: ResolvedPos): boolean {
+  for (let depth = from.depth; depth >= 0; depth--) {
+    if (INLINE_ONLY_CONTAINERS.has(from.node(depth).type.name)) return true;
+  }
+  return false;
+}
+
+/**
+ * Flatten a parsed-doc node into a Fragment of inline-only content
+ * suitable for splicing into a table cell / heading without
+ * fragmenting the surrounding block structure (RAISE-46).
+ *
+ * Walks the parsed doc gathering text and inline atoms (image,
+ * hard_break, etc.), inserting a `hard_break` between adjacent
+ * paragraphs so a multi-paragraph paste lands as
+ * "line one<br>line two" inside a cell — matches the AC's
+ * "preferred" outcome for multi-line cell paste, instead of
+ * either fragmenting the table or silently dropping all but the
+ * first paragraph.
+ *
+ * Block-only content (tables, code_block, lists nested inside the
+ * paste) gets flattened to its inner text. That's a deliberate
+ * trade — pasting a fenced code block into a table cell can't
+ * produce a `<code>` block inside the cell (schema rejects it),
+ * so we keep the visible text and drop the formatting. Same for
+ * nested tables / lists. Out-of-scope edge cases for this bug;
+ * the dominant flow is "user types text in another app and
+ * pastes it into a single cell".
+ */
+function flattenToInline(
+  parsed: ProseNode,
+  schema: ProseNode['type']['schema'],
+): Fragment {
+  const inlineNodes: ProseNode[] = [];
+  const breakType = schema.nodes['hard_break'];
+  let firstParagraph = true;
+
+  parsed.content.forEach((blockNode) => {
+    // Insert a hard_break between paragraphs so the user's
+    // line structure survives as visible breaks in the cell.
+    if (!firstParagraph && breakType) {
+      inlineNodes.push(breakType.create());
+    }
+    firstParagraph = false;
+    blockNode.descendants((node) => {
+      if (node.isText) {
+        inlineNodes.push(node);
+        return false;
+      }
+      // Inline atoms (image, hard_break, mention, etc.) ride
+      // through unchanged.
+      if (node.isInline && !node.isText) {
+        inlineNodes.push(node);
+        return false;
+      }
+      // For nested block content (e.g. a table cell pasted into
+      // another table cell — pathological but possible), recurse;
+      // the descendants() walk reaches the leaf inline content
+      // eventually.
+      return true;
+    });
+  });
+
+  return Fragment.from(inlineNodes);
+}
 
 interface MilkdownBodyProps {
   ref?: Ref<WysiwygEditorHandle>;
@@ -513,13 +609,53 @@ function MilkdownBody({
               const parser = ctx.get(parserCtx);
               const parsed = parser(markdown);
               if (!parsed) return;
-              // The parser returns a doc-level node. To insert at
-              // the selection, slice its full content as a Slice —
-              // open ends 0 means a clean cut on both sides, which
-              // gives us the closest behaviour to "insert this
-              // content here, preserving block structure where it
-              // makes sense".
-              const slice = parsed.slice(0, parsed.content.size);
+              // RAISE-46: shape the slice based on whether the
+              // destination is an inline-only container (table cell,
+              // heading) or the document body.
+              //
+              //   - **Inline-only destination** — flatten the parsed
+              //     doc to a `Fragment` of inline nodes (text + inline
+              //     atoms + hard_break between paragraphs) and insert
+              //     it as `Slice(fragment, 0, 0)`. The cell / heading
+              //     keeps its block-level wrapper; only its inline
+              //     content changes. Table structure stays intact.
+              //
+              //   - **Body destination** — use the parsed doc's
+              //     content with `openStart: 1, openEnd: 1` when the
+              //     content opens / closes with a paragraph, so the
+              //     pasted paragraph's inline content merges with the
+              //     destination paragraph rather than nesting as a
+              //     sibling block. Multi-paragraph / heading / code
+              //     paste still gets the right block structure between
+              //     the open ends.
+              //
+              // Pre-fix the slice was always
+              // `parsed.slice(0, parsed.content.size)` — `openStart=0,
+              // openEnd=0`. Inserting that block-shaped slice into a
+              // table cell ejected the cell's existing paragraph as a
+              // top-level node and fragmented the surrounding table.
+              const $from = view.state.selection.$from;
+              let slice: Slice;
+              if (isInlineOnlyContext($from)) {
+                const inlineFragment = flattenToInline(
+                  parsed,
+                  view.state.schema,
+                );
+                slice = new Slice(inlineFragment, 0, 0);
+              } else {
+                // Best-effort open-ends: only "open" the boundary
+                // when the slice's outermost node on that side is a
+                // paragraph (the case where merging into the
+                // destination makes sense). Other shapes (heading,
+                // code_block, list) stay as discrete blocks.
+                const firstChild = parsed.content.firstChild;
+                const lastChild = parsed.content.lastChild;
+                const openStart =
+                  firstChild?.type.name === 'paragraph' ? 1 : 0;
+                const openEnd =
+                  lastChild?.type.name === 'paragraph' ? 1 : 0;
+                slice = new Slice(parsed.content, openStart, openEnd);
+              }
               view.dispatch(view.state.tr.replaceSelection(slice));
             });
             return true;
