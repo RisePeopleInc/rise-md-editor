@@ -1,11 +1,11 @@
 /*
  * Prose / preview theming. Used in two places:
  *   1. The Milkdown WYSIWYG editor — content lives inside
- *      `.raise-prose > .ProseMirror`.
+ *      `.rise-md-prose > .ProseMirror`.
  *   2. The Split-mode preview pane — markdown-it rendered HTML lives
- *      directly inside `.raise-prose`.
+ *      directly inside `.rise-md-prose`.
  *
- * Selectors target `.raise-prose ELEM` (descendant) so they apply in both
+ * Selectors target `.rise-md-prose ELEM` (descendant) so they apply in both
  * contexts. Tailwind's preflight resets headings/paragraph margins, so
  * without explicit rules here the preview would render h1 / strong / etc.
  * as undifferentiated body text.
@@ -17,7 +17,7 @@
  * swap with [data-theme].
  */
 
-.raise-prose {
+.rise-md-prose {
   color: var(--rise-text-body);
   font-size: 16px;
   line-height: 1.6;
@@ -25,7 +25,7 @@
 }
 
 /* The Milkdown editable surface */
-.raise-prose .ProseMirror {
+.rise-md-prose .ProseMirror {
   outline: none;
   min-height: 300px;
   white-space: pre-wrap;
@@ -34,10 +34,10 @@
 
 /* Block spacing — handle both nesting layouts:
  *   - Milkdown: blocks are direct children of `.ProseMirror`
- *   - Preview:  blocks are direct children of `.raise-prose`
+ *   - Preview:  blocks are direct children of `.rise-md-prose`
  */
-.raise-prose .ProseMirror > * + *,
-.raise-prose > * + * {
+.rise-md-prose .ProseMirror > * + *,
+.rise-md-prose > * + * {
   margin-top: 0.85em;
 }
 
@@ -47,45 +47,45 @@
  * in the strong-text color so they read as section labels rather than
  * branded chrome.
  */
-.raise-prose h1,
-.raise-prose h2 {
+.rise-md-prose h1,
+.rise-md-prose h2 {
   font-family: var(--font-serif);
   font-weight: 700;
   line-height: 1.2;
   color: var(--rise-brand);
 }
-.raise-prose h3,
-.raise-prose h4,
-.raise-prose h5,
-.raise-prose h6 {
+.rise-md-prose h3,
+.rise-md-prose h4,
+.rise-md-prose h5,
+.rise-md-prose h6 {
   font-family: var(--font-sans);
   font-weight: 600;
   line-height: 1.3;
   color: var(--rise-text-primary);
 }
 /* Heading sizes + top margins. */
-.raise-prose h1 { font-size: 32px; margin-top: 1.5em; }
-.raise-prose h2 { font-size: 24px; margin-top: 1.4em; }
-.raise-prose h3 { font-size: 20px; margin-top: 1.3em; }
-.raise-prose h4 { font-size: 18px; }
-.raise-prose h5 { font-size: 16px; }
-.raise-prose h6 { font-size: 14px; }
+.rise-md-prose h1 { font-size: 32px; margin-top: 1.5em; }
+.rise-md-prose h2 { font-size: 24px; margin-top: 1.4em; }
+.rise-md-prose h3 { font-size: 20px; margin-top: 1.3em; }
+.rise-md-prose h4 { font-size: 18px; }
+.rise-md-prose h5 { font-size: 16px; }
+.rise-md-prose h6 { font-size: 14px; }
 
 /* First block at the top of the document shouldn't get extra margin-top
  * — looks weird right against the padded container. */
-.raise-prose > :first-child,
-.raise-prose .ProseMirror > :first-child {
+.rise-md-prose > :first-child,
+.rise-md-prose .ProseMirror > :first-child {
   margin-top: 0;
 }
 
 /*
  * Paragraphs.
  *
- * NOTE: previously this had a defensive `.raise-prose p { margin: 0 }`
+ * NOTE: previously this had a defensive `.rise-md-prose p { margin: 0 }`
  * rule, but its specificity (0,1,1) beat the inter-block spacing
- * rule above (`.raise-prose > * + *`, specificity 0,1,0) — which
+ * rule above (`.rise-md-prose > * + *`, specificity 0,1,0) — which
  * zeroed paragraph margins in the preview pane and the PDF
- * export but NOT in WYSIWYG (because there `.raise-prose
+ * export but NOT in WYSIWYG (because there `.rise-md-prose
  * .ProseMirror > * + *` at 0,2,0 wins). Result: preview /
  * PDF paragraphs flowed together with no gap; WYSIWYG had the
  * proper 0.85em rhythm. Removed — Tailwind v4's preflight
@@ -97,19 +97,19 @@
  */
 
 /* Inline marks */
-.raise-prose strong {
+.rise-md-prose strong {
   color: var(--rise-text-primary);
   font-weight: 700;
 }
-.raise-prose em { font-style: italic; }
-.raise-prose s,
-.raise-prose del {
+.rise-md-prose em { font-style: italic; }
+.rise-md-prose s,
+.rise-md-prose del {
   text-decoration: line-through;
   opacity: 0.75;
 }
 
 /* Inline code */
-.raise-prose code {
+.rise-md-prose code {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.875em;
   background: var(--rise-bg-secondary);
@@ -122,7 +122,7 @@
 /* Code blocks: monospace on the secondary surface, with a brand
  * accent stripe on the leading edge so they're visually grouped
  * apart from prose. */
-.raise-prose pre {
+.rise-md-prose pre {
   background: var(--rise-bg-secondary);
   color: var(--rise-text-primary);
   border: 1px solid var(--rise-border);
@@ -133,7 +133,7 @@
   font-size: 0.875em;
   line-height: 1.5;
 }
-.raise-prose pre code {
+.rise-md-prose pre code {
   background: transparent;
   border: 0;
   padding: 0;
@@ -141,33 +141,33 @@
   border-radius: 0;
 }
 /* Milkdown's code block renders the language label on top */
-.raise-prose .code-fence__selector,
-.raise-prose [data-language] {
+.rise-md-prose .code-fence__selector,
+.rise-md-prose [data-language] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
   color: var(--rise-text-muted);
 }
 
 /* Blockquote */
-.raise-prose blockquote {
+.rise-md-prose blockquote {
   border-left: 3px solid var(--rise-border);
   padding-left: 1rem;
   color: var(--rise-text-muted);
   font-style: italic;
 }
-.raise-prose blockquote > :first-child { margin-top: 0; }
+.rise-md-prose blockquote > :first-child { margin-top: 0; }
 
 /* Lists */
-.raise-prose ul,
-.raise-prose ol {
+.rise-md-prose ul,
+.rise-md-prose ol {
   padding-left: 1.5rem;
 }
-.raise-prose ul { list-style: disc; }
-.raise-prose ol { list-style: decimal; }
-.raise-prose li > p { display: inline; }
-.raise-prose li + li { margin-top: 0.25em; }
-.raise-prose li > ul,
-.raise-prose li > ol { margin-top: 0.25em; }
+.rise-md-prose ul { list-style: disc; }
+.rise-md-prose ol { list-style: decimal; }
+.rise-md-prose li > p { display: inline; }
+.rise-md-prose li + li { margin-top: 0.25em; }
+.rise-md-prose li > ul,
+.rise-md-prose li > ol { margin-top: 0.25em; }
 
 /*
  * Task lists (RAISE-29). The two surfaces produce different DOM —
@@ -176,7 +176,7 @@
  *   WYSIWYG (Milkdown's GFM preset, with our list_item NodeView in
  *   WysiwygEditor.tsx):
  *     <li data-item-type="task" data-checked="true|false">
- *       <input type="checkbox" class="raise-task-checkbox" />
+ *       <input type="checkbox" class="rise-md-task-checkbox" />
  *       <div>                                ← contentDOM
  *         <p>content</p>
  *         <ul>...nested list (if any)...</ul>
@@ -204,15 +204,15 @@
  * ~1rem, outside `list-style-position`) and task checkboxes (input
  * at the 1.5rem padding edge). Acceptable trade-off; clean nesting
  * is more important than pixel-perfect bullet/checkbox alignment. */
-.raise-prose li[data-item-type="task"],
-.raise-prose li.task-list-item {
+.rise-md-prose li[data-item-type="task"],
+.rise-md-prose li.task-list-item {
   list-style: none;
 }
 /* WYSIWYG only: flex-align the input + content div so they sit on the
  * same line and the content wraps cleanly to the right of the
  * checkbox. The preview structure (`<li><p><label><input>text</label></p>`)
  * already lays out inline via the natural `<p>` / `<label>` flow. */
-.raise-prose li[data-item-type="task"] {
+.rise-md-prose li[data-item-type="task"] {
   display: flex;
   align-items: baseline;
   gap: 0.4em;
@@ -221,14 +221,14 @@
 /* WYSIWYG: the contentDOM (`<div>`) and any nested list line up
  * after the checkbox. Make the contentDOM grow into the remaining
  * width so wraps line up cleanly. */
-.raise-prose li[data-item-type="task"] > div {
+.rise-md-prose li[data-item-type="task"] > div {
   flex: 1;
   min-width: 0;
 }
 
 /* The checkbox itself. */
-.raise-prose li[data-item-type="task"] > input[type="checkbox"],
-.raise-prose li.task-list-item input.task-list-item-checkbox {
+.rise-md-prose li[data-item-type="task"] > input[type="checkbox"],
+.rise-md-prose li.task-list-item input.task-list-item-checkbox {
   margin: 0;
   flex-shrink: 0;
   cursor: pointer;
@@ -247,14 +247,14 @@
  * scoped to its own checkbox: each label contains exactly one
  * input, so there's no cross-talk between siblings.
  */
-.raise-prose li[data-item-type="task"][data-checked="true"] > div > p,
-.raise-prose li.task-list-item label:has(> input[type="checkbox"]:checked) {
+.rise-md-prose li[data-item-type="task"][data-checked="true"] > div > p,
+.rise-md-prose li.task-list-item label:has(> input[type="checkbox"]:checked) {
   color: var(--rise-text-muted);
   text-decoration: line-through;
 }
 
 /* Horizontal rule */
-.raise-prose hr {
+.rise-md-prose hr {
   border: 0;
   height: 1px;
   background: var(--rise-border);
@@ -262,49 +262,49 @@
 }
 
 /* Links */
-.raise-prose a {
+.rise-md-prose a {
   color: var(--rise-interaction);
   text-decoration: none;
   text-underline-offset: 2px;
 }
-.raise-prose a:hover {
+.rise-md-prose a:hover {
   text-decoration: underline;
 }
 
 /* Images */
-.raise-prose img {
+.rise-md-prose img {
   max-width: 100%;
   height: auto;
   border-radius: 4px;
 }
 
 /* Tables */
-.raise-prose table {
+.rise-md-prose table {
   border-collapse: collapse;
   width: 100%;
   font-size: 0.95em;
 }
-.raise-prose th,
-.raise-prose td {
+.rise-md-prose th,
+.rise-md-prose td {
   border: 1px solid var(--rise-border);
   padding: 0.45rem 0.7rem;
   text-align: left;
 }
-.raise-prose th {
+.rise-md-prose th {
   background: var(--rise-bg-secondary);
   color: var(--rise-text-primary);
   font-weight: 600;
 }
-.raise-prose .selectedCell {
+.rise-md-prose .selectedCell {
   background: var(--rise-interaction-translucent);
 }
 
 /* ProseMirror selection / cursor decorations */
-.raise-prose .ProseMirror .ProseMirror-selectednode {
+.rise-md-prose .ProseMirror .ProseMirror-selectednode {
   outline: 2px solid var(--rise-interaction);
   outline-offset: 2px;
 }
-.raise-prose .ProseMirror .ProseMirror-gapcursor:after {
+.rise-md-prose .ProseMirror .ProseMirror-gapcursor:after {
   border-top: 1px solid var(--rise-text-muted);
 }
 
@@ -340,26 +340,26 @@
  * giant heading. SplitView strips the frontmatter off before
  * passing the body to markdown-it and renders the frontmatter as
  * its own block here: a muted, monospace `<pre>` styled to look
- * like the WYSIWYG editor's `.raise-frontmatter` textarea (a plain
+ * like the WYSIWYG editor's `.rise-md-frontmatter` textarea (a plain
  * bordered card on the surface background) so users see the same
  * metadata shape across both surfaces.
  *
- * Specificity note: the `.raise-frontmatter-preview pre` selectors
- * below need to override `.raise-prose pre` rules earlier in this
+ * Specificity note: the `.rise-md-frontmatter-preview pre` selectors
+ * below need to override `.rise-md-prose pre` rules earlier in this
  * file (the brand-blue left-edge stripe and the secondary bg are
  * the visual signature of code blocks; we don't want the
  * frontmatter to look like a code block). Both selectors live in
- * `.raise-prose` scope at the same level, so the more specific
+ * `.rise-md-prose` scope at the same level, so the more specific
  * one wins.
  */
-.raise-frontmatter-preview {
+.rise-md-frontmatter-preview {
   margin-bottom: 1.5em;
   border: 1px solid var(--rise-border);
   border-radius: var(--rise-radius-card);
   background: var(--rise-bg-primary);
   padding: 0.75rem;
 }
-.raise-prose .raise-frontmatter-preview pre {
+.rise-md-prose .rise-md-frontmatter-preview pre {
   margin: 0;
   padding: 0;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -368,7 +368,7 @@
   color: var(--rise-text-muted);
   white-space: pre;
   overflow-x: auto;
-  /* Override `.raise-prose pre`: no card background, no border,
+  /* Override `.rise-md-prose pre`: no card background, no border,
    * no brand-blue left-edge stripe — the styled wrapper above
    * provides the card shell, the `<pre>` is just text. */
   background: transparent;
@@ -380,7 +380,7 @@
 /*
  * Review-style comments rendered greyed-out (RAISE-31).
  *
- *   - `.raise-comment` is the class our ProseMirror decoration
+ *   - `.rise-md-comment` is the class our ProseMirror decoration
  *     plugin applies in WYSIWYG. Inline range over the comment
  *     text — same look as a span styled muted-italic.
  *   - `.md-comment` is the class the markdown-it custom rules
@@ -401,26 +401,26 @@
  * comment, not main content" — matching how code editors render
  * inline source comments.
  *
- * Specificity note: `.raise-prose` sets the body color, and a
- * descendant `.md-comment` / `.raise-comment` needs more
- * specificity than that to override. `.raise-prose .md-comment`
- * (0,2,0) beats `.raise-prose` (0,1,0). The `.raise-comment`
- * decoration class lands inside the same `.raise-prose`
+ * Specificity note: `.rise-md-prose` sets the body color, and a
+ * descendant `.md-comment` / `.rise-md-comment` needs more
+ * specificity than that to override. `.rise-md-prose .md-comment`
+ * (0,2,0) beats `.rise-md-prose` (0,1,0). The `.rise-md-comment`
+ * decoration class lands inside the same `.rise-md-prose`
  * container in WYSIWYG, so the same selector pattern works.
  */
-.raise-prose .raise-comment,
-.raise-prose .md-comment,
-.raise-prose .md-comment * {
+.rise-md-prose .rise-md-comment,
+.rise-md-prose .md-comment,
+.rise-md-prose .md-comment * {
   color: var(--rise-text-muted);
   font-style: italic;
   opacity: 0.65;
 }
-.raise-prose .md-comment + .md-comment {
+.rise-md-prose .md-comment + .md-comment {
   margin-top: 0;
 }
 
 /*
- * Reader-view toggle — applied to `.raise-prose-hide-comments`
+ * Reader-view toggle — applied to `.rise-md-prose-hide-comments`
  * (set by the SplitView preview pane's "Hide comments" button)
  * to mirror what a PDF recipient sees when "Strip comments
  * before export" is on (the default).
@@ -433,15 +433,15 @@
  * default. Toggle persists to localStorage so the author's
  * choice carries across sessions.
  */
-.raise-prose-hide-comments .raise-comment,
-.raise-prose-hide-comments .md-comment {
+.rise-md-prose-hide-comments .rise-md-comment,
+.rise-md-prose-hide-comments .md-comment {
   display: none;
 }
 
 /*
  * Source-view `//` line-comment decoration (RAISE-31).
  *
- * Applied via `inlineClassName: 'raise-source-comment'` on Monaco
+ * Applied via `inlineClassName: 'rise-md-source-comment'` on Monaco
  * decorations registered in `SourceEditor.tsx`. The `!important`
  * is necessary to override Monaco's per-token color classes
  * (`.mtkN`) which the syntax tokenizer already paints onto every
@@ -451,7 +451,7 @@
  * Italic / opacity match the WYSIWYG / preview comment style for
  * visual consistency across the three surfaces.
  */
-.raise-source-comment {
+.rise-md-source-comment {
   color: var(--rise-text-muted) !important;
   font-style: italic;
   opacity: 0.7;

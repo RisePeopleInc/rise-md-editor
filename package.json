@@ -1,15 +1,15 @@
 {
-  "name": "raise-editor",
-  "productName": "rAIse",
+  "name": "rise-md-editor",
+  "productName": "Rise MD Editor",
   "version": "0.1.2",
-  "description": "rAIse — a markdown editor for Rise People",
-  "homepage": "https://github.com/RisePeopleInc/raise-editor",
+  "description": "Rise MD Editor — a markdown editor for Rise People",
+  "homepage": "https://github.com/RisePeopleInc/rise-md-editor",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RisePeopleInc/raise-editor.git"
+    "url": "https://github.com/RisePeopleInc/rise-md-editor.git"
   },
   "bugs": {
-    "url": "https://github.com/RisePeopleInc/raise-editor/issues"
+    "url": "https://github.com/RisePeopleInc/rise-md-editor/issues"
   },
   "license": "UNLICENSED",
   "private": true,

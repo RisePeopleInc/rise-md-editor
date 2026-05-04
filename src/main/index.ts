@@ -20,9 +20,9 @@ import {
   type ExportPdfResult,
 } from './exportPdf';
 
-const APP_NAME = 'rAIse';
+const APP_NAME = 'Rise MD Editor';
 
-// `raise-asset://` resolves markdown-relative image paths against their
+// `rise-md-asset://` resolves markdown-relative image paths against their
 // containing file's directory and serves the bytes from disk. The
 // renderer is loaded from http://localhost in dev and file:// in
 // production — relative paths in <img src=...> would otherwise resolve
@@ -35,7 +35,7 @@ const APP_NAME = 'rAIse';
 // registerSchemesAsPrivileged at startup.
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: 'raise-asset',
+    scheme: 'rise-md-asset',
     privileges: {
       // `secure: true` so the scheme is treated as a trusted origin
       // (mixed-content rules don't block it); `supportFetchAPI` so any
@@ -68,7 +68,7 @@ function resetFileState(): void {
 }
 
 /**
- * Allowed roots for raise-asset:// reads + assets:open-relative
+ * Allowed roots for rise-md-asset:// reads + assets:open-relative
  * resolutions. The renderer renders images from:
  *   - The currently-open workspace folder (Project Mode)
  *   - The active tab's saved-file directory
@@ -132,15 +132,15 @@ function drainPendingMenuActions(): void {
 // `app.setName` only takes effect for the menu / About panel labels;
 // the macOS menu bar's first-item label is taken from `app.name`,
 // which we also seed via `productName` in package.json so that
-// `app.getName()` returns 'rAIse' without needing setName.
+// `app.getName()` returns 'Rise MD Editor' without needing setName.
 //
 // `process.title` covers the OS-level process name visible in
 // Activity Monitor / `ps`. Belt-and-suspenders so the menu bar in
-// dev shows 'rAIse' instead of 'Electron'.
+// dev shows 'Rise MD Editor' instead of 'Electron'.
 app.setName(APP_NAME);
 process.title = APP_NAME;
 // `iconPath` populates the artwork in the macOS About panel
-// (Apple → About rAIse). Without it the panel falls back to the
+// (Apple → About Rise MD Editor). Without it the panel falls back to the
 // running .app bundle's icon — Electron's own logo in dev. Same
 // build/icon.png as the dock + window icons.
 app.setAboutPanelOptions({
@@ -419,7 +419,7 @@ if (!gotLock) {
       app.dock.setIcon(path.join(__dirname, '../../build/icon.png'));
     }
 
-    // raise-asset:// → filesystem read, scoped to "allowed roots":
+    // rise-md-asset:// → filesystem read, scoped to "allowed roots":
     // the open workspace folder + the dirname of the active tab's
     // saved file. Without that gate the protocol would happily serve
     // any absolute fs path the renderer asked for — fine in practice
@@ -427,10 +427,10 @@ if (!gotLock) {
     // hardening that backstops any future XSS.
     //
     // URL pathname is the absolute file path (URL-encoded); on
-    // Windows the URL form is `raise-asset:///C:/Users/.../foo.png`,
+    // Windows the URL form is `rise-md-asset:///C:/Users/.../foo.png`,
     // so we strip the leading slash if the next character looks like
     // a drive letter.
-    protocol.handle('raise-asset', async (request) => {
+    protocol.handle('rise-md-asset', async (request) => {
       try {
         const url = new URL(request.url);
         let fsPath = decodeURIComponent(url.pathname);
@@ -443,7 +443,7 @@ if (!gotLock) {
         return await net.fetch(pathToFileURL(fsPath).toString());
       } catch (err) {
         return new Response(
-          `raise-asset error: ${err instanceof Error ? err.message : String(err)}`,
+          `rise-md-asset error: ${err instanceof Error ? err.message : String(err)}`,
           { status: 500 },
         );
       }
@@ -484,7 +484,7 @@ if (!gotLock) {
 ipcMain.handle('files:open', async () => {
   if (!mainWindow) return null;
   const result = await fileOps.openFile(mainWindow);
-  // RAISE-25: suppress the chokidar `change` that fires when rAIse first
+  // RAISE-25: suppress the chokidar `change` that fires when the editor first
   // reads an externally-created file in the watched folder.
   if (result) markRecentlyTouched(result.path);
   return result;
@@ -638,14 +638,14 @@ app.on('open-file', (event, filePath) => {
 // Project Mode: file-tree sidebar + folder watch
 // ---------------------------------------------------------------------------
 
-// Any I/O rAIse initiates — saves and opens — can land in chokidar as a
+// Any I/O the editor initiates — saves and opens — can land in chokidar as a
 // `change` event. Mark each touched file so the watcher's onFileChanged
 // can ignore it for a short window. Without this, two unrelated bugs
 // surface:
 //
 //   1. Every Save would prompt "this file changed on disk, reload?" right
 //      after writing — the user would think the editor was haunted.
-//   2. Opening a file that was created outside rAIse (chokidar saw it
+//   2. Opening a file that was created outside the editor (chokidar saw it
 //      appear in the watched folder) fires a spurious `change` for it
 //      moments after `openPath` returns, triggering the same false
 //      "reload?" prompt on first open. ([RAISE-25](https://risepeople.atlassian.net/browse/RAISE-25))
@@ -676,7 +676,7 @@ folderWatcher.setListener({
   onFileChanged: (filePath) => {
     if (recentlyTouched.has(filePath)) {
       // Refresh the TTL — slow disks (network mounts, FUSE, large files)
-      // can land chokidar `change` events well after rAIse's own I/O,
+      // can land chokidar `change` events well after the editor's own I/O,
       // and a fixed window risks firing a phantom "reload?" prompt for
       // a save or open the user initiated themselves. Extending on each
       // suppressed event keeps the suppression alive until I/O goes

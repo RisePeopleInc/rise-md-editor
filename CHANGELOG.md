@@ -1,12 +1,14 @@
 # Changelog
 
-All notable changes to rAIse are documented here.
+All notable changes to Rise MD Editor are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No changes since 0.1.2._
+### Changed
+
+- **Renamed app to Rise MD Editor** ([RAISE-43](https://risepeople.atlassian.net/browse/RAISE-43)). The display name in the dock / start menu / About dialog / window title now reads "Rise MD Editor" (was "rAIse"). The `appId`, `productName`, npm-package `name`, and GitHub repo are all renamed to match. The `RAISE-` Jira ticket prefix and the `--rise-*` Rise design-system CSS variables stay unchanged. No user-data migration is shipped — the app is pre-release and there are no installed users with state to preserve.
 
 ## [0.1.2] — 2026-04-27
 

@@ -14,7 +14,7 @@ interface UpdateBannerProps {
  *  - `downloading`: passive "A new version is downloading…" — no action,
  *    just keeps the user informed. Doesn't get a Dismiss button because
  *    the user can't really do anything meaningful with this state.
- *  - `downloaded`: actionable "A new version of rAIse is available.
+ *  - `downloaded`: actionable "A new version of Rise MD Editor is available.
  *    Restart to update." with **Restart** + **Later**. Clicking Later
  *    just hides the banner — the update is already on disk and applies
  *    next time the app quits via the user's normal exit path.
@@ -37,8 +37,8 @@ export function UpdateBanner({
       >
         <span className="min-w-0 truncate">
           {version
-            ? `Downloading rAIse ${version}…`
-            : 'Downloading a new version of rAIse…'}
+            ? `Downloading Rise MD Editor ${version}…`
+            : 'Downloading a new version of Rise MD Editor…'}
         </span>
       </div>
     );
@@ -52,8 +52,8 @@ export function UpdateBanner({
       >
         <span className="min-w-0 truncate">
           {version
-            ? `rAIse ${version} is ready. Restart to update.`
-            : 'A new version of rAIse is ready. Restart to update.'}
+            ? `Rise MD Editor ${version} is ready. Restart to update.`
+            : 'A new version of Rise MD Editor is ready. Restart to update.'}
         </span>
         <div className="flex shrink-0 items-center gap-2">
           <button

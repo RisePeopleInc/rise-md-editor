@@ -229,7 +229,7 @@ interface MilkdownBodyProps {
   onMarkdownChange: (markdown: string) => void;
   onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
   onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
-  /** Used by the image NodeView to resolve relative src → raise-asset:// URL. */
+  /** Used by the image NodeView to resolve relative src → rise-md-asset:// URL. */
   markdownPath: string | null;
 }
 
@@ -357,7 +357,7 @@ function MilkdownBody({
           // `<img src="assets/foo.png">`, which Chromium tries to
           // resolve against the renderer's origin (file:// or
           // localhost) — broken icon. We rewrite to a
-          // raise-asset:// URL at render time only; the stored src
+          // rise-md-asset:// URL at render time only; the stored src
           // attribute on the node stays as the original markdown
           // path so toMarkdown serializes it back correctly.
           nodeViews: {
@@ -424,7 +424,7 @@ function MilkdownBody({
                 checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.contentEditable = 'false';
-                checkbox.classList.add('raise-task-checkbox');
+                checkbox.classList.add('rise-md-task-checkbox');
                 // Stop ProseMirror from interpreting the click as
                 // selection-into-the-document — without this the
                 // caret would jump to the start of the list item on
@@ -820,7 +820,7 @@ function MilkdownBody({
     const handleContextMenu = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      if (target.closest('.raise-frontmatter')) return;
+      if (target.closest('.rise-md-frontmatter')) return;
       e.preventDefault();
 
       const sel = window.getSelection();
@@ -1005,7 +1005,7 @@ export function WysiwygEditor({
       if (target.tagName === 'IMG' && container.contains(target)) {
         // The NodeView writes the original markdown src to
         // `data-asset-src` while the rendered `src` is a
-        // raise-asset:// URL — for the "View full size" handler we
+        // rise-md-asset:// URL — for the "View full size" handler we
         // want the original (relative) path so main can resolve it
         // against the markdown file's directory.
         const original =
@@ -1054,7 +1054,7 @@ export function WysiwygEditor({
                 onChange={(e) => handleFrontmatterChange(e.target.value)}
                 spellCheck={false}
                 aria-label="YAML frontmatter"
-                className="raise-frontmatter mb-6 block w-full resize-y rounded border border-stroke bg-surface p-3 font-mono text-xs leading-relaxed text-secondary focus:border-interaction focus:outline-none"
+                className="rise-md-frontmatter mb-6 block w-full resize-y rounded border border-stroke bg-surface p-3 font-mono text-xs leading-relaxed text-secondary focus:border-interaction focus:outline-none"
                 rows={Math.max(3, frontmatter.split('\n').length + 1)}
                 // RAISE-28: explicit context menu on the frontmatter
                 // textarea. Electron has no default menu for `<textarea>`
@@ -1073,7 +1073,7 @@ export function WysiwygEditor({
                 }}
               />
             )}
-            <div className="raise-prose">
+            <div className="rise-md-prose">
               <MilkdownBody
                 ref={ref}
                 scrollContainerRef={scrollContainerRef}

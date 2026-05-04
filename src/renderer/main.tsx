@@ -10,7 +10,7 @@ import App from './App';
 // `/@fs/.../*.woff2`; prod: `assets/<font>-<hash>.woff2`) so the woff2
 // bytes ship inside the bundle. First paint is fully offline — no
 // network round-trip, no fallback flash on cold launch (the welcome
-// screen hero "rAIse" rendered briefly in Georgia before swap kicked
+// screen hero "Rise MD Editor" rendered briefly in Georgia before swap kicked
 // in when the CDN was slow / unreachable).
 //
 // Latin-only subsets — the app UI is English-only at the moment, so

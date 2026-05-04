@@ -442,8 +442,8 @@ export function buildMenu(deps: MenuDeps): Menu {
             const iconPath = path.join(__dirname, '../../build/icon.png');
             const opts = {
               type: 'info' as const,
-              title: 'About rAIse',
-              message: 'rAIse',
+              title: 'About Rise MD Editor',
+              message: 'Rise MD Editor',
               detail: `Version ${app.getVersion()}\n\nA markdown editor for Rise People.\n\n© ${new Date().getFullYear()} Rise People`,
               icon: nativeImage.createFromPath(iconPath),
             };

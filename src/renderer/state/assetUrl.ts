@@ -9,7 +9,7 @@
  * has nothing to do with the user's markdown file, so the image
  * comes up as a broken icon.
  *
- * Translation to a custom protocol (`raise-asset://`) registered in
+ * Translation to a custom protocol (`rise-md-asset://`) registered in
  * the main process happens at render time only — the stored markdown
  * keeps the relative path, which is what users want when they share
  * notes or sync them with Cowork.
@@ -17,9 +17,9 @@
 
 /**
  * Resolve `src` against `markdownPath`'s directory, returning a
- * `raise-asset://` URL pointing at the absolute filesystem location.
+ * `rise-md-asset://` URL pointing at the absolute filesystem location.
  * Pass-through for src values that are already absolute URLs (any
- * scheme:// prefix), since http/https/data/file/raise-asset URLs
+ * scheme:// prefix), since http/https/data/file/rise-md-asset URLs
  * don't need rewriting.
  */
 export function resolveAssetUrl(
@@ -28,7 +28,7 @@ export function resolveAssetUrl(
 ): string {
   if (!src) return src;
   // Anything with a scheme prefix is already absolute — http://, https://,
-  // file://, data:, and raise-asset:// itself.
+  // file://, data:, and rise-md-asset:// itself.
   if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return src;
   // Without a markdown path we can't resolve; fall through with the
   // original src (will render as broken, but that's fewer surprises
@@ -49,11 +49,11 @@ export function resolveAssetUrl(
   // URL paths need a leading `/` after the scheme. POSIX paths
   // already start with one (`/Users/...`); Windows drive-letter
   // paths (`C:/Users/...`) don't, and need one prepended so the
-  // URL is `raise-asset:///C:/Users/...` (the protocol handler in
+  // URL is `rise-md-asset:///C:/Users/...` (the protocol handler in
   // main strips that extra slash before treating it as a fs path).
   if (!absolute.startsWith('/')) absolute = `/${absolute}`;
 
   // encodeURI handles spaces, unicode, etc. without touching the
   // already-safe characters.
-  return `raise-asset://${encodeURI(absolute)}`;
+  return `rise-md-asset://${encodeURI(absolute)}`;
 }

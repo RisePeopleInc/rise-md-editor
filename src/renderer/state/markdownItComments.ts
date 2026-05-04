@@ -39,7 +39,7 @@ import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs';
  *      the rest in a styled paragraph.
  *
  * All three render with `class="md-comment"` (mirrored in CSS by
- * `.raise-prose .md-comment` for muted-italic styling). The
+ * `.rise-md-prose .md-comment` for muted-italic styling). The
  * default markdown-it token renderer handles open/close tokens
  * automatically given the tag + attrSet, so we don't need to
  * register custom render functions.

@@ -1,4 +1,4 @@
-# rAIse
+# Rise MD Editor
 
 A markdown editor for Rise People — designed for editing the `CLAUDE.md` and `SKILL.md` files that drive our AI workflows.
 
@@ -25,8 +25,8 @@ A markdown editor for Rise People — designed for editing the `CLAUDE.md` and `
 ### Setup
 
 ```sh
-git clone https://github.com/RisePeopleInc/raise-editor.git
-cd raise-editor
+git clone https://github.com/RisePeopleInc/rise-md-editor.git
+cd rise-md-editor
 npm install
 ```
 
@@ -54,9 +54,9 @@ All three (lint / typecheck / build) should pass before opening a PR. The build 
 Each platform target wraps `electron-vite build` and then runs `electron-builder` with the matching flag. Output lands in `dist/`.
 
 ```sh
-npm run build:mac     # → dist/rAIse-{version}-universal.dmg + .zip
-npm run build:win     # → dist/rAIse-{version}-Setup.exe + .zip
-npm run build:linux   # → dist/rAIse-{version}.AppImage + .deb
+npm run build:mac     # → dist/Rise MD Editor-{version}-universal.dmg + .zip
+npm run build:win     # → dist/Rise MD Editor-{version}-Setup.exe + .zip
+npm run build:linux   # → dist/Rise MD Editor-{version}.AppImage + .deb
 npm run build:all     # all three (only useful on a CI host with the toolchains)
 ```
 
@@ -88,7 +88,7 @@ The current cert is `Developer ID Application: Rise People Inc (TJFLUA3UJ3)`, ha
    ```
 6. `npm run build:mac` now produces a signed `.dmg`. Verify with:
    ```sh
-   codesign -dvv dist/mac-universal/rAIse.app | head -10
+   codesign -dvv dist/mac-universal/Rise MD Editor.app | head -10
    # Should print: "Authority=Developer ID Application: Rise People Inc..."
    ```
 
@@ -104,7 +104,7 @@ The resulting DMG is unsigned and Gatekeeper-quarantined on download — fine fo
 
 #### Notarization
 
-On macOS Catalina (10.15) and later, code signing alone is **not enough** — Gatekeeper specifically checks for an Apple-issued *notarization ticket* and shows the same `"could not verify rAIse is free of malware"` dialog for both unsigned and signed-but-unnotarized apps. Notarization uploads the signed bundle to Apple's notary service; Apple scans it for malware and returns a ticket which `electron-builder` staples to the DMG. After that, first launch on a clean Mac shows `"macOS verified that this app is free of malware"` with a real **Open** button.
+On macOS Catalina (10.15) and later, code signing alone is **not enough** — Gatekeeper specifically checks for an Apple-issued *notarization ticket* and shows the same `"could not verify Rise MD Editor is free of malware"` dialog for both unsigned and signed-but-unnotarized apps. Notarization uploads the signed bundle to Apple's notary service; Apple scans it for malware and returns a ticket which `electron-builder` staples to the DMG. After that, first launch on a clean Mac shows `"macOS verified that this app is free of malware"` with a real **Open** button.
 
 Three env vars need to be present in the build host's environment:
 
@@ -116,7 +116,7 @@ npm run build:mac
 ```
 
 - `APPLE_ID` — the Apple ID enrolled in the Apple Developer Program (`techpurchasing@risepeople.com` for Rise).
-- `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords* → "+", label e.g. `raise-editor-notarization`. The 16-char password is shown **once** at creation; record it in 1Password immediately. **Don't** put it in `~/.zshrc` or any committed file — set it inline for the build, or source it from a password manager / `op read` / `direnv` envrc that's `.gitignore`d.
+- `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords* → "+", label e.g. `rise-md-editor-notarization`. The 16-char password is shown **once** at creation; record it in 1Password immediately. **Don't** put it in `~/.zshrc` or any committed file — set it inline for the build, or source it from a password manager / `op read` / `direnv` envrc that's `.gitignore`d.
 - `APPLE_TEAM_ID` — `TJFLUA3UJ3` (Rise's developer team), already declared in `electron-builder.yml`'s `mac.notarize.teamId`. The env var is what Apple's notary CLI uses to authenticate the upload.
 
 `mac.notarize.teamId` is set in `electron-builder.yml`. If any of the three env vars are missing, electron-builder logs a warning and skips notarization; the build still produces a signed-but-unnotarized DMG, which is useful for local smoke tests but **will trigger the Gatekeeper malware dialog on end-user machines**. Don't ship those.
@@ -124,10 +124,10 @@ npm run build:mac
 Notarization adds 5–15 minutes to the build (Apple's scan time); `electron-builder` polls and staples automatically. To verify after the build:
 
 ```sh
-spctl --assess --type execute --verbose=4 dist/mac-universal/rAIse.app
+spctl --assess --type execute --verbose=4 dist/mac-universal/Rise MD Editor.app
 # Expect: "accepted" with "source=Notarized Developer ID"
 
-xcrun stapler validate dist/rAIse-*-universal.dmg
+xcrun stapler validate dist/Rise MD Editor-*-universal.dmg
 # Expect: "The validate action worked!"
 ```
 
@@ -174,7 +174,7 @@ The Developer ID cert + private key give anyone who has them the ability to publ
 The notarization flow uses an Apple ID + app-specific password — a separate secret from the signing cert's `.p12`. They're both required to ship a clean macOS build, and they have independent lifecycles.
 
 - The **app-specific password** is created at https://appleid.apple.com → *Sign-In and Security* → *App-Specific Passwords*. Apple shows it once; if you lose it you generate a new one and revoke the old.
-- Store it in 1Password under an entry like *"rAIse — Apple notary app-specific password"* with the Apple ID email and Team ID alongside. **Never** in dotfiles, **never** committed.
+- Store it in 1Password under an entry like *"Rise MD Editor — Apple notary app-specific password"* with the Apple ID email and Team ID alongside. **Never** in dotfiles, **never** committed.
 - Up to ten app-specific passwords per Apple ID. Revoke the entry whenever someone with access to it leaves the team.
 - Rotation: no fixed expiry on app-specific passwords, but plan to rotate annually or whenever the password manager flags it.
 - For CI: store as repo secrets (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) and inject at build time. Don't write them to disk on the runner.
@@ -194,10 +194,10 @@ Any tool that produces a 1024×1024 PNG works. Electron-builder generates the pl
 
 ## Auto-update
 
-`electron-updater` runs in production builds (skipped in `npm run dev`). On launch it checks `RisePeopleInc/raise-editor`'s GitHub Releases for a newer version. If one's found:
+`electron-updater` runs in production builds (skipped in `npm run dev`). On launch it checks `RisePeopleInc/rise-md-editor`'s GitHub Releases for a newer version. If one's found:
 
 1. The new version downloads in the background.
-2. A non-modal banner appears in the editor: *"rAIse `{x.y.z}` is ready. Restart to update."*
+2. A non-modal banner appears in the editor: *"Rise MD Editor `{x.y.z}` is ready. Restart to update."*
 3. **Restart** quits the app, installs, and relaunches. **Later** dismisses the banner; the update is on disk and applies on the next normal app exit.
 
 To cut a new release:

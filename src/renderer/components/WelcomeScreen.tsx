@@ -30,7 +30,7 @@ export function WelcomeScreen({ onOpenFile, onOpenFolder }: WelcomeScreenProps) 
           className="font-serif text-5xl font-bold tracking-tight text-brand"
           style={{ fontSize: '32px' }}
         >
-          rAIse
+          Rise MD Editor
         </h1>
         <p className="text-base text-body">Markdown editor for Rise People</p>
         <div className="mt-2 flex gap-3">

@@ -6,8 +6,8 @@
 # working — it doesn't read this file but does share `out/` with the
 # electron-builder pipeline.
 
-appId: com.risepeople.raise-editor
-productName: rAIse
+appId: com.risepeople.rise-md-editor
+productName: Rise MD Editor
 copyright: © 2026 Rise People
 
 directories:
@@ -35,12 +35,12 @@ asar: true
 publish:
   provider: github
   owner: RisePeopleInc
-  repo: raise-editor
+  repo: rise-md-editor
 
 # ---------------------------------------------------------------------------
-# File associations — registers rAIse as a handler for .md / .markdown /
-# .txt on all platforms. Drag onto the dock, right-click → Open With,
-# and double-click-from-Finder all flow through.
+# File associations — registers Rise MD Editor as a handler for .md /
+# .markdown / .txt on all platforms. Drag onto the dock, right-click →
+# Open With, and double-click-from-Finder all flow through.
 # ---------------------------------------------------------------------------
 fileAssociations:
   - ext: md
@@ -99,8 +99,8 @@ mac:
   # Notarization.
   #
   # Without notarization, signed-but-unnotarized apps still trigger
-  # Gatekeeper's "Apple could not verify rAIse is free of malware"
-  # dialog on first launch (Catalina+). With notarization, Apple's
+  # Gatekeeper's "Apple could not verify Rise MD Editor is free of
+  # malware" dialog on first launch (Catalina+). With notarization, Apple's
   # notary service scans the bundle, returns a ticket, and
   # electron-builder staples it to the DMG so the dialog becomes
   # "macOS verified that this app is free of malware" with an Open

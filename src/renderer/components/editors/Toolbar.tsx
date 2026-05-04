@@ -404,7 +404,7 @@ export function Toolbar({ ref, requireSavedPath }: ToolbarProps = {}) {
     // (`www.example.com`) or an email address. Without this the
     // resulting `<a href="www.example.com">` is non-functional —
     // browsers resolve the href relative to the current document
-    // (which under raise-asset:// produces nothing useful), and
+    // (which under rise-md-asset:// produces nothing useful), and
     // mailto: discoverability is poor for casual users.
     const url = ensureProtocol(rawUrl);
     // Visible text falls back to the URL when the user leaves the

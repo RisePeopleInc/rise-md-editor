@@ -38,7 +38,7 @@ interface SplitViewProps {
   /** Image-paste handler forwarded to the source pane. */
   onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
   /** Path of the markdown file — used to resolve relative image src in
-   *  the preview pane to raise-asset:// URLs. */
+   *  the preview pane to rise-md-asset:// URLs. */
   markdownPath: string | null;
 }
 
@@ -211,7 +211,7 @@ export function SplitView({
     // because markdown-it's code rules consume those before our
     // rules see them.
     instance.use(markdownItComments);
-    // RAISE-11: translate `<img src="assets/foo.png">` → raise-asset:// URL
+    // RAISE-11: translate `<img src="assets/foo.png">` → rise-md-asset:// URL
     // at render time. The token's `src` attribute is the literal markdown
     // src; we mutate it before delegating to the default renderer.
     const defaultImage = instance.renderer.rules.image;
@@ -279,7 +279,7 @@ export function SplitView({
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
       renderedHtml =
-        `<div class="raise-frontmatter-preview"><pre>${escaped}</pre></div>` +
+        `<div class="rise-md-frontmatter-preview"><pre>${escaped}</pre></div>` +
         bodyHtml;
     }
     return { html: renderedHtml, taskLines: lines };
@@ -520,7 +520,7 @@ export function SplitView({
        *
        * Wrapping div: `relative` so the comment-visibility toggle
        * button can absolute-position into the top-right corner
-       * without altering preview layout. Was a single `.raise-prose`
+       * without altering preview layout. Was a single `.rise-md-prose`
        * div before the RAISE-42 follow-up that added the toggle.
        */}
       <div
@@ -528,7 +528,7 @@ export function SplitView({
         style={{ width: `${100 - splitPercent}%` }}
       >
         {/*
-         * Comment-visibility toggle — flips `.raise-prose-hide-comments`
+         * Comment-visibility toggle — flips `.rise-md-prose-hide-comments`
          * on the preview node. Default OFF (comments visible) so the
          * author sees their review notes muted-italic per RAISE-31; ON
          * gives a reader-view that matches what a recipient sees in
@@ -557,12 +557,12 @@ export function SplitView({
         <div
           ref={previewRef}
           onScroll={handlePreviewScroll}
-          className={`raise-prose h-full overflow-auto px-6 py-8 ${hideComments ? 'raise-prose-hide-comments' : ''}`}
+          className={`rise-md-prose h-full overflow-auto px-6 py-8 ${hideComments ? 'rise-md-prose-hide-comments' : ''}`}
           // RAISE-28: identity attribute used by App.tsx's
           // `context-preview-select-all` handler to scope a programmatic
           // text selection to this node — `webContents.selectAll()` would
           // otherwise select the entire renderer document.
-          data-raise-preview-pane
+          data-rise-md-preview-pane
           // markdown-it is configured with html:false so user-inline HTML is
           // escaped before reaching the DOM; safe to inject the rendered HTML.
           dangerouslySetInnerHTML={{ __html: html }}
