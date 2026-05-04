@@ -254,6 +254,18 @@ Key design decisions, with the tickets that drove them:
 - **Custom `raise-asset://` protocol** for inline image rendering — the stored markdown stays as relative paths, only the rendered DOM gets a resolved URL. Allowed-roots gate prevents arbitrary fs reads. ([RAISE-11](https://risepeople.atlassian.net/browse/RAISE-11))
 - **Inline name editing** in the file tree (rename / new file / new folder) instead of `window.prompt` — sandboxed renderers don't support `prompt`. ([RAISE-8](https://risepeople.atlassian.net/browse/RAISE-8))
 - **Bundled templates** via Vite's `?raw` import — strings inlined into the main bundle, no fs reads at runtime. ([RAISE-9](https://risepeople.atlassian.net/browse/RAISE-9))
+- **Autolink discrimination by suffix**: `file.md` references stay plain text; `www.cbc.ca` and `internet.com` autolink. Implementation lives in `src/renderer/state/filenameExtensions.ts` — see "Filename / TLD list policy" below. ([RAISE-47](https://risepeople.atlassian.net/browse/RAISE-47))
+
+### Filename / TLD list policy
+
+`src/renderer/state/filenameExtensions.ts` exports two curated string sets that gate autolink behaviour everywhere a URL-shaped string can appear (WYSIWYG type-time, parse-side mdast revert, browser-injected mark strip, markdown-it preview, PDF export):
+
+- **`FILE_EXTENSION_TLDS`** — strings we treat as file extensions, NOT real TLDs. `file.md`, `notes.txt`, `config.json`, etc. don't autolink in any surface.
+- **`KNOWN_TLDS`** — strings we treat as real-domain TLDs. `www.cbc.ca`, `internet.com`, `example.io`, etc. DO autolink in the WYSIWYG type-time path (markdown-it linkify in preview / PDF uses its own broader TLD list).
+
+The two lists are independent — a string can be in one, the other, both, or neither, and the autolink decision is made per surface from the relevant list. **Adding to `FILE_EXTENSION_TLDS`** is appropriate when a real-domain reference like `notes.app` is being false-positive autolinked as `http://notes.app` because `app` is in `KNOWN_TLDS`; flipping the entry to file-extension treatment keeps notes-as-files working at the cost of `*.app` URLs no longer autolinking. **Adding to `KNOWN_TLDS`** is appropriate when a real-URL reference like `example.foo` isn't autolinking; new entries should be ICANN-recognised TLDs ([list](https://www.iana.org/domains/root/db)) and not also common file extensions or natural-language abbreviations.
+
+When in doubt, prefer the conservative path — leave the extension out of both lists, so the text falls through to plain rendering. The user can always wrap a real URL in `<https://example.foo>` (CommonMark autolink syntax) or `[label](https://example.foo)` (explicit link syntax) to force a link.
 
 ## Contributing
 

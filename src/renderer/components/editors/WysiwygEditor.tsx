@@ -53,6 +53,9 @@ import {
   splitFrontmatter,
   type FrontmatterSplit,
 } from '../../state/markdown';
+import { autolinkOnTypePlugin } from '../../state/autolinkOnType';
+import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
+import { stripBrowserAutolinkPlugin } from '../../state/stripBrowserAutolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
 
 export interface WysiwygEditorHandle {
@@ -525,6 +528,31 @@ function MilkdownBody({
       })
       .use(commonmark)
       .use(gfm)
+      // RAISE-47: revert filename-shaped autolinks
+      // (`file.md` → `link { url: 'http://file.md' }`) back to plain
+      // text on parse, so notes that reference `file.md` don't get
+      // wrapped in a clickable-but-broken link. Real URLs (text has
+      // explicit scheme) and emails (url has `mailto:` prefix)
+      // survive untouched. See state/remarkUnautolink.ts.
+      .use(remarkUnautolinkPlugin)
+      // RAISE-47: Chromium's contenteditable URL auto-detector
+      // wraps typed URL-shaped text in `<a href>` tags, which the
+      // link mark schema picks up via parseDOM. The detection is
+      // partial and adds synthesised-scheme `href` attrs that
+      // would serialise as ugly `[text](http://text)` link syntax
+      // surrounded by the unmarked half of the URL. This plugin
+      // strips those marks at the appendTransaction layer so only
+      // user-intent link marks (toolbar, paste, parsed `[text](url)`
+      // syntax) make it to the model. See
+      // state/stripBrowserAutolink.ts.
+      .use(stripBrowserAutolinkPlugin)
+      // RAISE-47 UX follow-up: typed URLs and emails autolink
+      // immediately as the user finishes them (anchored on whitespace,
+      // end-of-node, or sentence punctuation). Without this, a typed
+      // URL would only become a link after a parse cycle (mode
+      // switch, doc reload) — friction-heavy. See
+      // state/autolinkOnType.ts.
+      .use(autolinkOnTypePlugin)
       .use(listener)
       .use(history)
       .use(clipboard)
