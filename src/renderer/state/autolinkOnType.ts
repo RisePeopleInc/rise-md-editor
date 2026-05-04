@@ -89,10 +89,14 @@ const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
 const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 
 // `www.`-prefixed URL — same shape as
-// `mdast-util-gfm-autolink-literal`'s `literalAutolinkWww` matcher.
-// Lets `www.cbc.ca` autolink in Edit immediately on type, before
-// the parse-cycle round-trip would catch it.
-const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:\/[^\s<>"'`]*)?/g;
+// `mdast-util-gfm-autolink-literal`'s `literalAutolinkWww` matcher,
+// but extended to match an optional query string OR path segment.
+// The path segment is `\/[^\s]*`; the query is `\?[^\s]*`. Either
+// can follow the host portion. Without this, `www.x.com?foo` would
+// match only as `www.x.com` and the `?foo` would split off as
+// trailing text — looking wrong in the editor and saving as
+// `[www.x.com](http://www.x.com)?foo`.
+const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?][^\s<>"'`]*)?/g;
 
 // Bare hostname — `host.tld` without a scheme or `www.` prefix.
 // `mdast-util-gfm-autolink-literal` deliberately does NOT catch this
@@ -105,10 +109,8 @@ const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:\/[^\s<>"'`]*)?/g;
 //
 // `[a-z]{2,}` for the TLD (no digits) keeps version numbers
 // (`1.2.3`) and IP-literal-shaped runs (`192.168.0.1`) from
-// false-matching. The leading `(?<!\w)` is a negative lookbehind
-// instead of `\b` so trailing `?`/`!` after a previous word don't
-// create a false start.
-const BARE_HOSTNAME_RE = /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:\/[^\s<>"'`]*)?(?=[\s.,!?;:)\]]|$)/gi;
+// false-matching. Same path/query support as `WWW_URL_RE`.
+const BARE_HOSTNAME_RE = /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:[/?][^\s<>"'`]*)?(?=[\s.,!?;:)\]]|$)/gi;
 
 // Email pattern: standard local@host.tld. Anchored on word
 // boundaries so it doesn't match parts of unrelated text.
@@ -136,7 +138,7 @@ function findCompletedHits(
   text: string,
   re: RegExp,
   hrefFn: (match: string) => string,
-  options: { skipFilenameExtension?: boolean } = {},
+  options: { skipFilenameExtension?: boolean; treatEndAsBoundary?: boolean } = {},
 ): Hit[] {
   const hits: Hit[] = [];
   re.lastIndex = 0;
@@ -150,12 +152,23 @@ function findCompletedHits(
       trimmed = trimmed.slice(0, trimmed.length - punctMatch[0].length);
     }
     const matchEnd = m.index + trimmed.length;
-    // The URL must be followed by whitespace IN THE TEXT for us
-    // to consider it "completed". This is what stops the plugin
-    // from firing on partial URLs as the user types.
-    if (matchEnd >= text.length) continue;
-    if (!/\s/.test(text.charAt(matchEnd))) continue;
     if (trimmed.length === 0) continue;
+    // The URL is "completed" when the next character is whitespace
+    // OR when we're at the end of a TEXT NODE that's followed by a
+    // block boundary (Enter/paragraph break). The block-boundary
+    // case is signalled by `treatEndAsBoundary: true` from the
+    // caller — set when the text node we're scanning is the LAST
+    // child of its parent block. End-of-doc and end-of-paragraph
+    // both satisfy this.
+    //
+    // Without the end-as-boundary case, hitting Enter after a typed
+    // URL would never trigger autolinking — the URL stays plain
+    // until the user types a space somewhere.
+    if (matchEnd >= text.length) {
+      if (!options.treatEndAsBoundary) continue;
+    } else if (!/\s/.test(text.charAt(matchEnd))) {
+      continue;
+    }
     // For the `www.X` and bare-hostname patterns, skip matches
     // whose suffix is a known file extension — `notes.txt`,
     // `config.json`, `file.md` shouldn't autolink even though
@@ -187,7 +200,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
       if (!linkType) return null;
 
       const adds: MarkAdd[] = [];
-      newState.doc.descendants((node: ProseNode, pos: number) => {
+      newState.doc.descendants((node: ProseNode, pos: number, parent) => {
         if (!node.isText) return;
         // Skip text runs that already have a link mark — could be
         // an explicit `[text](url)` parse, a paste, a toolbar
@@ -197,6 +210,19 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
 
         const text = node.text ?? '';
         if (!text) return;
+
+        // Treat the text node's right edge as a "completed"
+        // boundary when this text run is the last inline child of
+        // its parent block (paragraph, heading, list item, etc.).
+        // That's the case after the user hits Enter — the typed URL
+        // sits at the end of its paragraph, and we want it
+        // autolinked even though there's no trailing whitespace
+        // character in the text node itself.
+        let treatEndAsBoundary = false;
+        if (parent) {
+          const lastChild = parent.lastChild;
+          if (lastChild === node) treatEndAsBoundary = true;
+        }
 
         // Track ranges already claimed by a previous pattern so a
         // single substring isn't double-marked (e.g. an
@@ -208,7 +234,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         const claim = (start: number, end: number) => claimed.push([start, end]);
 
         // Explicit-scheme URLs first (most specific pattern wins).
-        const urlHits = findCompletedHits(text, URL_RE, (m) => m);
+        const urlHits = findCompletedHits(text, URL_RE, (m) => m, { treatEndAsBoundary });
         for (const hit of urlHits) {
           adds.push({
             from: pos + hit.index,
@@ -223,6 +249,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           EMAIL_RE,
           (m) => `mailto:${m}`,
+          { treatEndAsBoundary },
         );
         for (const hit of emailHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
@@ -243,7 +270,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           WWW_URL_RE,
           (m) => `http://${m}`,
-          { skipFilenameExtension: true },
+          { skipFilenameExtension: true, treatEndAsBoundary },
         );
         for (const hit of wwwHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
@@ -263,7 +290,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
           text,
           BARE_HOSTNAME_RE,
           (m) => `http://${m}`,
-          { skipFilenameExtension: true },
+          { skipFilenameExtension: true, treatEndAsBoundary },
         );
         for (const hit of hostHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
