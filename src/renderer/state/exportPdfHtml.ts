@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import { full as markdownItEmoji } from 'markdown-it-emoji';
 import markdownItTaskLists from 'markdown-it-task-lists';
+import { looksLikeFilenameExtension } from './filenameExtensions';
 import { splitFrontmatter } from './markdown';
 import { markdownItComments } from './markdownItComments';
 
@@ -193,12 +194,51 @@ function buildMarkdownIt(markdownPath: string | null): MarkdownIt {
     typographer: true,
     breaks: false,
   });
-  // RAISE-47: same `fuzzyLink: false` tightening as SplitView so
-  // filename-shaped text (`file.md`, etc.) doesn't autolink to
-  // `http://file.md` in the PDF. Without the parallel setting,
-  // the preview pane and PDF export would diverge — preview shows
-  // plain text, PDF shows a broken link to a non-existent host.
-  md.linkify.set({ fuzzyLink: false });
+  // RAISE-47: same filename-shaped autolink suppression as
+  // SplitView — keep linkify's default `fuzzyLink: true` so real
+  // bare-domain references (`www.cbc.ca`) autolink, but unwrap
+  // any rendered link whose href points at a filename-shaped
+  // suffix (`file.md`, `notes.txt`, etc.) so the PDF doesn't
+  // contain broken-host links.
+  const defaultLinkOpen = md.renderer.rules['link_open'];
+  const defaultLinkClose = md.renderer.rules['link_close'];
+  const wrapLinkRule = (defaultRule: typeof defaultLinkOpen) =>
+    (tokens: Parameters<NonNullable<typeof defaultLinkOpen>>[0],
+     idx: Parameters<NonNullable<typeof defaultLinkOpen>>[1],
+     options: Parameters<NonNullable<typeof defaultLinkOpen>>[2],
+     env: Parameters<NonNullable<typeof defaultLinkOpen>>[3],
+     self: Parameters<NonNullable<typeof defaultLinkOpen>>[4]) => {
+      const token = tokens[idx]!;
+      if (token.type === 'link_open') {
+        const hrefIdx = token.attrIndex('href');
+        if (hrefIdx >= 0) {
+          const href = token.attrs?.[hrefIdx]?.[1] ?? '';
+          if (looksLikeFilenameExtension(href)) {
+            token.meta = { ...(token.meta ?? {}), fileShaped: true };
+            return '';
+          }
+        }
+      }
+      if (token.type === 'link_close') {
+        let depth = 1;
+        for (let i = idx - 1; i >= 0; i--) {
+          const t = tokens[i]!;
+          if (t.type === 'link_close') depth += 1;
+          else if (t.type === 'link_open') {
+            depth -= 1;
+            if (depth === 0) {
+              if (t.meta?.['fileShaped']) return '';
+              break;
+            }
+          }
+        }
+      }
+      return defaultRule
+        ? defaultRule(tokens, idx, options, env, self)
+        : self.renderToken(tokens, idx, options);
+    };
+  md.renderer.rules['link_open'] = wrapLinkRule(defaultLinkOpen);
+  md.renderer.rules['link_close'] = wrapLinkRule(defaultLinkClose);
   // Match SplitView's plugin set — keeps the PDF visually identical
   // to what the user sees in the split-preview pane.
   md.use(markdownItTaskLists, { enabled: false, label: true });

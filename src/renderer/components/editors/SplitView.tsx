@@ -17,6 +17,7 @@ import {
 } from './SourceEditor';
 import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
+import { looksLikeFilenameExtension } from '../../state/filenameExtensions';
 import { splitFrontmatter } from '../../state/markdown';
 import { markdownItComments } from '../../state/markdownItComments';
 import type { WordWrap } from '../../env';
@@ -111,27 +112,72 @@ export function SplitView({
       typographer: true,
       breaks: false,
     });
-    // RAISE-47: tighten linkify so filename-shaped text (`file.md`,
-    // `notes.md`, `example.app`, etc.) doesn't auto-link as
-    // `http://file.md`. linkify-it's `fuzzyLink: true` (the default
-    // when `linkify` is enabled) treats anything matching
-    // `<host>.<TLD>` as a bare URL, which trips on every markdown
-    // doc that references another markdown file by name. With
-    // `fuzzyLink: false` we still autolink:
+    // RAISE-47: keep linkify's default `fuzzyLink: true` so bare
+    // hostnames like `www.cbc.ca` and `internet.com` autolink as
+    // the user expects — but intercept the rendered link tokens
+    // and unwrap any whose href points at a filename-shaped
+    // suffix (`file.md`, `notes.txt`, etc.). The autolink-literal
+    // extension in linkify can't tell `.md` (Moldova's TLD) apart
+    // from `.md` (markdown file extension); the discrimination
+    // happens here, post-tokenisation, by checking the URL's
+    // suffix against `FILE_EXTENSION_TLDS`.
     //
-    //   - explicit-scheme URLs (`https://example.com`,
-    //     `http://github.com/foo`) — linkify still recognises any
-    //     URL with a scheme prefix.
-    //   - email autolinks (`user@example.com` → `mailto:`) —
-    //     unaffected by `fuzzyLink`, gated separately on `fuzzyEmail`.
+    // What still autolinks after this:
+    //   - Explicit-scheme URLs (`https://example.com`).
+    //   - Email autolinks (`user@example.com` → `mailto:`).
+    //   - Bare hostnames with real TLDs (`www.cbc.ca`,
+    //     `internet.com`, `github.com/foo/bar`).
     //
-    // Bare hostnames (`example.com` without scheme) no longer
-    // autolink. That's the deliberate trade — markdown editor
-    // primary content is dev / product notes that reference local
-    // files, not bare URLs typed in passing. Users who want a
-    // bare URL linked can write `<https://example.com>` (CommonMark
-    // autolink syntax) or `[example.com](https://example.com)`.
-    instance.linkify.set({ fuzzyLink: false });
+    // What no longer autolinks:
+    //   - Filename-shaped text where the suffix matches a known
+    //     file extension (`file.md`, `notes.txt`, `app.config`).
+    const defaultLinkOpen = instance.renderer.rules['link_open'];
+    const defaultLinkClose = instance.renderer.rules['link_close'];
+    const wrapLinkRule = (defaultRule: typeof defaultLinkOpen) =>
+      (tokens: Parameters<NonNullable<typeof defaultLinkOpen>>[0],
+       idx: Parameters<NonNullable<typeof defaultLinkOpen>>[1],
+       options: Parameters<NonNullable<typeof defaultLinkOpen>>[2],
+       env: Parameters<NonNullable<typeof defaultLinkOpen>>[3],
+       self: Parameters<NonNullable<typeof defaultLinkOpen>>[4]) => {
+        // The matched-pair `link_close` token's open-link mate is
+        // tagged on the `link_open` token's `meta.fileShaped`. We
+        // set the flag on the open and read it back on the close.
+        const token = tokens[idx]!;
+        if (token.type === 'link_open') {
+          const hrefIdx = token.attrIndex('href');
+          if (hrefIdx >= 0) {
+            const href = token.attrs?.[hrefIdx]?.[1] ?? '';
+            if (looksLikeFilenameExtension(href)) {
+              token.meta = { ...(token.meta ?? {}), fileShaped: true };
+              return ''; // suppress the <a> open
+            }
+          }
+        }
+        if (token.type === 'link_close') {
+          // Walk back to find the matching `link_open`. markdown-it
+          // inline tokens don't carry an explicit pair index, so
+          // scan back for the nearest unmatched open of the same
+          // type. The pair is always within the same `inline`
+          // token's children, balanced.
+          let depth = 1;
+          for (let i = idx - 1; i >= 0; i--) {
+            const t = tokens[i]!;
+            if (t.type === 'link_close') depth += 1;
+            else if (t.type === 'link_open') {
+              depth -= 1;
+              if (depth === 0) {
+                if (t.meta?.['fileShaped']) return ''; // suppress </a>
+                break;
+              }
+            }
+          }
+        }
+        return defaultRule
+          ? defaultRule(tokens, idx, options, env, self)
+          : self.renderToken(tokens, idx, options);
+      };
+    instance.renderer.rules['link_open'] = wrapLinkRule(defaultLinkOpen);
+    instance.renderer.rules['link_close'] = wrapLinkRule(defaultLinkClose);
     // RAISE-29: render `* [ ]` / `* [x]` GFM task lists as checkboxes
     // in the preview. `enabled: true` removes the `disabled` attribute
     // on the input so the user can click to toggle — a click handler

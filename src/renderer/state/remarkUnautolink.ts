@@ -2,6 +2,7 @@ import type { MilkdownPlugin } from '@milkdown/ctx';
 import { $remark } from '@milkdown/utils';
 import type { Link, PhrasingContent, Root, Text } from 'mdast';
 import { visit, SKIP } from 'unist-util-visit';
+import { looksLikeFilenameExtension } from './filenameExtensions';
 
 /**
  * Strip filename-shaped autolink-literal nodes from the parsed
@@ -60,6 +61,24 @@ import { visit, SKIP } from 'unist-util-visit';
 
 const SCHEME_RE = /^(?:https?:\/\/|mailto:)/i;
 
+/**
+ * A link node fingerprints as a filename-shaped autolink when:
+ *
+ *   1. It has a single text child (no nested formatting).
+ *   2. Its url is the visible text with `http://` or `https://`
+ *      synthesised in front (the autolink-literal output shape).
+ *   3. The visible text doesn't already start with a scheme
+ *      (`https?://` or `mailto:`).
+ *   4. The URL doesn't start with `mailto:` (emails stay linked).
+ *   5. **The visible text's suffix is in the file-extension list
+ *      from `filenameExtensions.ts`.** This is the change vs. the
+ *      original RAISE-47 implementation: previously, ANY synthesised-
+ *      scheme autolink was reverted, which clobbered legitimate bare-
+ *      domain references like `www.cbc.ca` or `internet.com`. Now we
+ *      only revert when the suffix matches a known file extension
+ *      (`.md`, `.txt`, `.json`, etc.) — real-TLD references stay as
+ *      autolinks.
+ */
 function looksLikeBareAutolink(node: Link): boolean {
   if (node.children.length !== 1) return false;
   const child = node.children[0];
@@ -69,7 +88,8 @@ function looksLikeBareAutolink(node: Link): boolean {
   if (!text || !url) return false;
   if (url.startsWith('mailto:')) return false;
   if (SCHEME_RE.test(text)) return false;
-  return url === `http://${text}` || url === `https://${text}`;
+  if (url !== `http://${text}` && url !== `https://${text}`) return false;
+  return looksLikeFilenameExtension(text);
 }
 
 function remarkUnautolink(): (tree: Root) => void {
