@@ -2,6 +2,7 @@ import { Plugin, PluginKey } from '@milkdown/prose/state';
 import type { Node as ProseNode } from '@milkdown/prose/model';
 import { $prose } from '@milkdown/utils';
 import type { MilkdownPlugin } from '@milkdown/ctx';
+import { looksLikeFilenameExtension } from './filenameExtensions';
 
 /**
  * Autolink URLs and emails as the user types
@@ -79,7 +80,7 @@ const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
 // Fix: never match while the URL is still being typed. The match
 // is only valid when the URL run is *terminated* in the text —
 // either by whitespace OR by sentence punctuation followed by
-// whitespace / end. We do this in `findCompletedUrls` below by
+// whitespace / end. We do this in `findCompletedHits` below by
 // running the greedy regex and filtering matches that don't have a
 // trailing whitespace boundary. URLs at the very end of a text
 // node (with no trailing whitespace) stay unlinked until the user
@@ -87,13 +88,35 @@ const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
 // friction.
 const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 
+// `www.`-prefixed URL — same shape as
+// `mdast-util-gfm-autolink-literal`'s `literalAutolinkWww` matcher.
+// Lets `www.cbc.ca` autolink in Edit immediately on type, before
+// the parse-cycle round-trip would catch it.
+const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:\/[^\s<>"'`]*)?/g;
+
+// Bare hostname — `host.tld` without a scheme or `www.` prefix.
+// `mdast-util-gfm-autolink-literal` deliberately does NOT catch this
+// shape (only `www.X` and explicit `http(s)://` patterns), so the
+// only way to get `internet.com` to autolink in WYSIWYG is to detect
+// it ourselves. Match shape: 1+ name parts followed by a 2+ letter
+// TLD; the `looksLikeFilenameExtension` filter inside `findCompletedHits`
+// drops anything whose suffix is a known file extension (`.md`,
+// `.json`, etc.) so file references stay plain text.
+//
+// `[a-z]{2,}` for the TLD (no digits) keeps version numbers
+// (`1.2.3`) and IP-literal-shaped runs (`192.168.0.1`) from
+// false-matching. The leading `(?<!\w)` is a negative lookbehind
+// instead of `\b` so trailing `?`/`!` after a previous word don't
+// create a false start.
+const BARE_HOSTNAME_RE = /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:\/[^\s<>"'`]*)?(?=[\s.,!?;:)\]]|$)/gi;
+
 // Email pattern: standard local@host.tld. Anchored on word
 // boundaries so it doesn't match parts of unrelated text.
 // Conservative — doesn't try to match every legal email syntax,
 // just the common-case shapes that show up in markdown notes.
 //
 // Same "must be followed by whitespace" boundary check applies
-// in `findCompletedEmails` for the same partial-typing reason.
+// in `findCompletedHits` for the same partial-typing reason.
 const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g;
 
 // Trailing characters to strip from a matched URL — markdown
@@ -113,6 +136,7 @@ function findCompletedHits(
   text: string,
   re: RegExp,
   hrefFn: (match: string) => string,
+  options: { skipFilenameExtension?: boolean } = {},
 ): Hit[] {
   const hits: Hit[] = [];
   re.lastIndex = 0;
@@ -132,6 +156,13 @@ function findCompletedHits(
     if (matchEnd >= text.length) continue;
     if (!/\s/.test(text.charAt(matchEnd))) continue;
     if (trimmed.length === 0) continue;
+    // For the `www.X` and bare-hostname patterns, skip matches
+    // whose suffix is a known file extension — `notes.txt`,
+    // `config.json`, `file.md` shouldn't autolink even though
+    // their shape technically matches the URL pattern.
+    if (options.skipFilenameExtension && looksLikeFilenameExtension(trimmed)) {
+      continue;
+    }
     hits.push({ index: m.index, length: trimmed.length, href: hrefFn(trimmed) });
   }
   return hits;
@@ -167,6 +198,16 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         const text = node.text ?? '';
         if (!text) return;
 
+        // Track ranges already claimed by a previous pattern so a
+        // single substring isn't double-marked (e.g. an
+        // `https://www.x.com` URL shouldn't ALSO match the bare-
+        // hostname pattern at the `www.x.com` substring).
+        const claimed: Array<[number, number]> = [];
+        const overlaps = (start: number, end: number) =>
+          claimed.some(([cs, ce]) => !(end <= cs || start >= ce));
+        const claim = (start: number, end: number) => claimed.push([start, end]);
+
+        // Explicit-scheme URLs first (most specific pattern wins).
         const urlHits = findCompletedHits(text, URL_RE, (m) => m);
         for (const hit of urlHits) {
           adds.push({
@@ -174,19 +215,64 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
             to: pos + hit.index + hit.length,
             href: hit.href,
           });
+          claim(hit.index, hit.index + hit.length);
         }
 
+        // Email autolinks.
         const emailHits = findCompletedHits(
           text,
           EMAIL_RE,
           (m) => `mailto:${m}`,
         );
         for (const hit of emailHits) {
+          if (overlaps(hit.index, hit.index + hit.length)) continue;
           adds.push({
             from: pos + hit.index,
             to: pos + hit.index + hit.length,
             href: hit.href,
           });
+          claim(hit.index, hit.index + hit.length);
+        }
+
+        // `www.`-prefixed URLs — synthesise an `http://` href so
+        // the browser knows where to navigate on click. Source
+        // serialises as `[www.x.com](http://www.x.com)` because
+        // text !== url; that's the documented trade-off for
+        // type-time autolinking of bare-domain URLs.
+        const wwwHits = findCompletedHits(
+          text,
+          WWW_URL_RE,
+          (m) => `http://${m}`,
+          { skipFilenameExtension: true },
+        );
+        for (const hit of wwwHits) {
+          if (overlaps(hit.index, hit.index + hit.length)) continue;
+          adds.push({
+            from: pos + hit.index,
+            to: pos + hit.index + hit.length,
+            href: hit.href,
+          });
+          claim(hit.index, hit.index + hit.length);
+        }
+
+        // Bare hostnames (`internet.com`, `example.org`) without
+        // `www.` or explicit scheme. The filename-extension filter
+        // skips file references like `notes.txt`, `config.json`,
+        // `file.md`. Same href synthesis as `www.`.
+        const hostHits = findCompletedHits(
+          text,
+          BARE_HOSTNAME_RE,
+          (m) => `http://${m}`,
+          { skipFilenameExtension: true },
+        );
+        for (const hit of hostHits) {
+          if (overlaps(hit.index, hit.index + hit.length)) continue;
+          adds.push({
+            from: pos + hit.index,
+            to: pos + hit.index + hit.length,
+            href: hit.href,
+          });
+          claim(hit.index, hit.index + hit.length);
         }
       });
 
