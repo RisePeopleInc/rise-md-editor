@@ -22,7 +22,7 @@ import { markdownItComments } from './markdownItComments';
  * Two deliberate divergences from the live preview:
  *
  *   1. **Image src resolution** — the live preview rewrites
- *      relative `assets/foo.png` paths to `raise-asset://...`
+ *      relative `assets/foo.png` paths to `rise-md-asset://...`
  *      URLs that the main process serves from disk. The off-
  *      screen print BrowserWindow doesn't have access to that
  *      protocol, so we instead inline images as `data:` URIs
@@ -246,7 +246,7 @@ function buildMarkdownIt(markdownPath: string | null): MarkdownIt {
   md.use(markdownItComments);
 
   // Image-src rewrite for print. Same pattern as SplitView, but
-  // resolves to `file://` rather than `raise-asset://` because
+  // resolves to `file://` rather than `rise-md-asset://` because
   // the off-screen print window doesn't see the custom protocol
   // handler registered on the main BrowserWindow.
   const defaultImage = md.renderer.rules.image;
@@ -303,7 +303,7 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
   if (frontmatter !== null) {
     const escapedFm = escapeHtml(frontmatter);
     bodyContent =
-      `<div class="raise-frontmatter-preview"><pre>${escapedFm}</pre></div>` +
+      `<div class="rise-md-frontmatter-preview"><pre>${escapedFm}</pre></div>` +
       bodyHtml;
   }
 
@@ -320,7 +320,7 @@ ${proseCss}
 ${printCss}
 </style>
 </head>
-<body class="raise-prose">
+<body class="rise-md-prose">
 ${bodyContent}
 </body>
 </html>`;

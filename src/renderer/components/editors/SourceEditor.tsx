@@ -273,7 +273,7 @@ export function SourceEditor({
     // entire markdown grammar; instead we layer on top via a
     // Monaco decorations collection.
     //
-    // Apply an `inlineClassName: 'raise-source-comment'` decoration
+    // Apply an `inlineClassName: 'rise-md-source-comment'` decoration
     // to every line whose first non-whitespace chars are `//`.
     // CSS rule in `milkdown.css` paints those ranges in the muted
     // comment colour. `editor.createDecorationsCollection()` (the
@@ -301,7 +301,7 @@ export function SourceEditor({
           decorations.push({
             range: new monaco.Range(line, 1, line, text.length + 1),
             options: {
-              inlineClassName: 'raise-source-comment',
+              inlineClassName: 'rise-md-source-comment',
               stickiness:
                 monaco.editor.TrackedRangeStickiness
                   .AlwaysGrowsWhenTypingAtEdges,

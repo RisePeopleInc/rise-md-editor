@@ -650,7 +650,7 @@ function AppContent() {
           // would also match Monaco's internal hidden IME textarea
           // (`.monaco-editor .inputarea`) and break Monaco undo.
           const active = document.activeElement;
-          if (active?.classList.contains('raise-frontmatter')) {
+          if (active?.classList.contains('rise-md-frontmatter')) {
             // execCommand is deprecated in the spec but still works in
             // Chromium for `<textarea>` / `<input>` undo + redo. No
             // modern alternative exists for synthetic-event undo on
@@ -759,10 +759,10 @@ function AppContent() {
         case 'context-preview-select-all': {
           // RAISE-28: dispatched from the preview-pane context menu.
           // Programmatic selection scoped to the preview node — looking
-          // it up by data attribute rather than `.raise-prose` because
+          // it up by data attribute rather than `.rise-md-prose` because
           // the latter is also used by the WYSIWYG body, and we want
           // to be unambiguous about which surface we're selecting.
-          const preview = document.querySelector('[data-raise-preview-pane]');
+          const preview = document.querySelector('[data-rise-md-preview-pane]');
           if (preview) {
             const sel = window.getSelection();
             const range = document.createRange();

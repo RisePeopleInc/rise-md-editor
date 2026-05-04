@@ -216,7 +216,7 @@ function buildDecorations(doc: ProseNode): DecorationSet {
       if (value.startsWith('<!--') && value.endsWith('-->')) {
         decorations.push(
           Decoration.inline(pos, pos + node.nodeSize, {
-            class: 'raise-comment',
+            class: 'rise-md-comment',
           }),
         );
       }
@@ -234,7 +234,7 @@ function buildDecorations(doc: ProseNode): DecorationSet {
       if (text.length > 0 && LINE_COMMENT_RE.test(text)) {
         decorations.push(
           Decoration.inline(pos + 1, pos + 1 + node.content.size, {
-            class: 'raise-comment',
+            class: 'rise-md-comment',
           }),
         );
         // Don't collect this block for the cross-block scan —
@@ -305,7 +305,7 @@ function buildDecorations(doc: ProseNode): DecorationSet {
         if (startPos == null || lastChar == null) continue;
         decorations.push(
           Decoration.inline(startPos, lastChar + 1, {
-            class: 'raise-comment',
+            class: 'rise-md-comment',
           }),
         );
       }
