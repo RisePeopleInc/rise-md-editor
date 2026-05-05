@@ -117,9 +117,9 @@ npm run build:mac
 
 - `APPLE_ID` — the Apple ID enrolled in the Apple Developer Program (`techpurchasing@risepeople.com` for Rise).
 - `APPLE_APP_SPECIFIC_PASSWORD` — generated at https://appleid.apple.com → _Sign-In and Security_ → _App-Specific Passwords_ → "+", label e.g. `rise-md-editor-notarization`. The 16-char password is shown **once** at creation; record it in 1Password immediately. **Don't** put it in `~/.zshrc` or any committed file — set it inline for the build, or source it from a password manager / `op read` / `direnv` envrc that's `.gitignore`d.
-- `APPLE_TEAM_ID` — `TJFLUA3UJ3` (Rise's developer team), already declared in `electron-builder.yml`'s `mac.notarize.teamId`. The env var is what Apple's notary CLI uses to authenticate the upload.
+- `APPLE_TEAM_ID` — `TJFLUA3UJ3` (Rise's developer team). The env var is what Apple's notary CLI uses to authenticate the upload.
 
-`mac.notarize.teamId` is set in `electron-builder.yml`. If any of the three env vars are missing, electron-builder logs a warning and skips notarization; the build still produces a signed-but-unnotarized DMG, which is useful for local smoke tests but **will trigger the Gatekeeper malware dialog on end-user machines**. Don't ship those.
+Notarization is driven entirely by these env vars — `electron-builder.yml` deliberately has no `notarize:` block (recent electron-builder versions warn if you set `notarize.teamId` in the config, since it can drift out of sync with what notarytool actually reads). If any of the three env vars are missing, electron-builder logs a warning and skips notarization; the build still produces a signed-but-unnotarized DMG, which is useful for local smoke tests but **will trigger the Gatekeeper malware dialog on end-user machines**. Don't ship those.
 
 Notarization adds 5–15 minutes to the build (Apple's scan time); `electron-builder` polls and staples automatically. To verify after the build:
 
