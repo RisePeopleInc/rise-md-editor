@@ -1,0 +1,226 @@
+# Rise MD Editor — release pipeline (RAISE-45).
+#
+# Triggers on `v*` tag pushes (the standard "cut a release" path) plus
+# `workflow_dispatch` for dry-run testing without burning notary minutes.
+#
+# Jobs:
+#   build-mac   macOS-14 runner. Universal binary (Intel + Apple Silicon),
+#               full Developer ID code signing + notarization. Produces
+#               .dmg + .zip + latest-mac.yml.
+#   build-win   windows-latest runner. NSIS installer + portable .zip.
+#               UNSIGNED for now — Windows code signing is deferred
+#               (see docs/release-process.md "Windows signing — deferred").
+#   release     Aggregates artifacts and creates a draft GitHub Release
+#               that the user reviews and publishes manually. Tag push
+#               only — workflow_dispatch never publishes.
+#
+# `--publish never` is passed to electron-builder on every build so the
+# build host never tries to upload directly. The dedicated release job
+# does the upload via softprops/action-gh-release, which keeps the
+# build hosts free of repo write tokens.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      skip_signing:
+        description: 'Skip macOS signing & notarization (dry-run smoke test)'
+        type: boolean
+        default: false
+
+# softprops/action-gh-release writes Releases via the GitHub API, so the
+# job needs `contents: write`. Build jobs only need read access (npm ci
+# fetches public packages; checkout uses the default token).
+permissions:
+  contents: write
+
+# Don't pile up parallel release runs for the same ref. Don't cancel a
+# running release either — partial artifacts in a draft release are
+# worse than waiting for the previous run to finish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # macOS — full signing + notarization
+  # ---------------------------------------------------------------------------
+  build-mac:
+    name: Build macOS (universal, signed + notarized)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build & sign macOS (universal)
+        env:
+          # Apple Developer ID Application cert as a base64-encoded .p12
+          # plus its key password. electron-builder reads these directly:
+          # https://www.electron.build/code-signing
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # Notarization (notarytool). All three are required — if any
+          # is missing electron-builder logs a warning and ships a
+          # signed-but-unnotarized DMG (Gatekeeper malware dialog on
+          # first launch — DON'T release those).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # GH_TOKEN is unused on the `--publish never` path but
+          # electron-builder warns when it isn't set on a tag build.
+          # The default GITHUB_TOKEN has read access which is enough.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ inputs.skip_signing }}" == "true" ]]; then
+            echo "::notice::skip_signing=true — building unsigned macOS DMG (no notarization)"
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          fi
+          npm run build:mac -- --publish never
+
+      - name: Verify signature & notarization
+        if: ${{ inputs.skip_signing != true }}
+        run: |
+          # Find the universal .app bundle and confirm Gatekeeper accepts it.
+          APP_PATH=$(find dist -name '*.app' -maxdepth 3 -type d | head -1)
+          if [[ -z "$APP_PATH" ]]; then
+            echo "::error::No .app bundle found under dist/"
+            exit 1
+          fi
+          echo "Inspecting: $APP_PATH"
+          codesign -dvv "$APP_PATH" 2>&1 | head -15
+          # `spctl --assess` returns "accepted" + "source=Notarized Developer ID"
+          # when notarization succeeded and the staple landed.
+          spctl --assess --type execute --verbose=4 "$APP_PATH" 2>&1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-artifacts
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Windows — UNSIGNED (signing deferred, see docs/release-process.md)
+  # ---------------------------------------------------------------------------
+  #
+  # Phase 1 of RAISE-45 ships unsigned Windows installers. SmartScreen
+  # will warn end users on first download for a brief reputation-build
+  # window; that's an acceptable tradeoff to unblock CI now while the
+  # Azure Artifact Signing path is being provisioned.
+  #
+  # When signing is wired up later, the build will gain:
+  #   - Azure tenant + workload-identity OIDC federation (no static secrets)
+  #   - electron-builder `signtoolOptions.sign` callback that shells out
+  #     to the Azure trusted-signing client
+  # No long-lived `.pfx` ever lives on the runner.
+  build-win:
+    name: Build Windows (unsigned — signing deferred)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build Windows (unsigned)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # No CSC_* env vars are set, so electron-builder skips signing
+        # and writes a plain unsigned NSIS installer. The warning in the
+        # build log is expected.
+        run: npm run build:win -- --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-artifacts
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Release — aggregate artifacts into a draft GitHub Release
+  # ---------------------------------------------------------------------------
+  #
+  # Tag push only. workflow_dispatch runs the build jobs (smoke test) but
+  # never publishes — the `if` here ensures that. The release is created
+  # as a DRAFT so a human reviews artifact list + autogenerated notes
+  # before flipping it to public.
+  release:
+    name: Publish draft GitHub Release
+    needs: [build-mac, build-win]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 10
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist
+
+      - name: Create draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          name: Rise MD Editor ${{ github.ref_name }}
+          files: |
+            dist/**/*.dmg
+            dist/**/*.zip
+            dist/**/*.exe
+            dist/**/*.blockmap
+            dist/**/latest-mac.yml
+            dist/**/latest.yml
+          body: |
+            ## Rise MD Editor ${{ github.ref_name }}
+
+            Automated build via GitHub Actions ([workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})).
+
+            ### Artifacts
+            - **macOS** (`.dmg` + `.zip`): universal binary, Developer ID signed, Apple notarized. Drag to /Applications.
+            - **Windows** (`.exe` + `.zip`): NSIS installer, **currently unsigned**. SmartScreen will warn on first download — click *More info* → *Run anyway*. Code signing is in flight ([RAISE-45 follow-up](https://risepeople.atlassian.net/browse/RAISE-45)).
+
+            ### Auto-update
+            Existing installs receive this version automatically via electron-updater on next launch.

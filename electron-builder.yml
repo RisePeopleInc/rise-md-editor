@@ -136,11 +136,19 @@ win:
       arch: x64
     - target: zip
       arch: x64
-  # Code signing.
+  # Code signing — currently UNSIGNED (RAISE-45 phase 1).
   #
-  # Set CSC_LINK / CSC_KEY_PASSWORD with a code-signing cert (.pfx).
-  # SmartScreen will quarantine unsigned installers on first download
-  # for new users.
+  # No `CSC_LINK` / `CSC_KEY_PASSWORD` env vars are set on the
+  # `build-win` GitHub Actions job, so electron-builder skips signing
+  # and writes a plain unsigned NSIS installer. SmartScreen warns end
+  # users on first download for a brief reputation-build window — an
+  # acceptable tradeoff while the Azure Artifact Signing integration
+  # is being provisioned.
+  #
+  # When signing lands, this section will gain a `signtoolOptions.sign`
+  # callback that shells out to the Azure trusted-signing client
+  # against an OIDC-federated workload identity (no static `.pfx` on
+  # the runner). See docs/release-process.md "Windows signing — deferred".
   #   https://www.electron.build/code-signing#windows
 
 nsis:
