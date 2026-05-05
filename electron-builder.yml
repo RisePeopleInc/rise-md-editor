@@ -106,7 +106,11 @@ mac:
   # "macOS verified that this app is free of malware" with an Open
   # button — clean install UX.
   #
-  # Required env vars on the build host:
+  # All notarization config is driven by env vars (no `notarize:` block
+  # here) — recent electron-builder versions warn if you ALSO set
+  # `notarize.teamId` in the config file because it can drift out of
+  # sync with the env var that notarytool actually uses:
+  #
   #   APPLE_ID                   — Apple ID enrolled in the Developer Program
   #                                (techpurchasing@risepeople.com for Rise)
   #   APPLE_APP_SPECIFIC_PASSWORD — generated at appleid.apple.com → Sign-In
@@ -120,8 +124,6 @@ mac:
   # malware dialog on end-user machines).
   #
   # https://www.electron.build/configuration/mac#MacConfiguration-notarize
-  notarize:
-    teamId: TJFLUA3UJ3
 
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
