@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Automated release pipeline via GitHub Actions** ([RAISE-45](https://risepeople.atlassian.net/browse/RAISE-45)). Pushing a `v*` tag now triggers a parallel macOS + Windows build on GitHub-hosted runners that assembles the artifacts into a draft GitHub Release. macOS builds are code-signed and notarized (Apple Developer ID + notarytool); Windows builds are unsigned for now while Azure Artifact Signing is being provisioned (SmartScreen warns on first download for a brief reputation-build window). A `workflow_dispatch` entry point with a `skip_signing` input lets contributors dry-run the build path without burning notary minutes. Operational details — secrets, troubleshooting, signing roadmap — live in `docs/release-process.md`.
+
 ### Changed
 
 - **Renamed app to Rise MD Editor** ([RAISE-43](https://risepeople.atlassian.net/browse/RAISE-43)). The display name in the dock / start menu / About dialog / window title now reads "Rise MD Editor" (was "rAIse"). The `appId`, `productName`, npm-package `name`, and GitHub repo are all renamed to match. The `RAISE-` Jira ticket prefix and the `--rise-*` Rise design-system CSS variables stay unchanged. No user-data migration is shipped — the app is pre-release and there are no installed users with state to preserve.
@@ -32,7 +36,7 @@ Tiny follow-up to v0.1.0 — code signing for macOS only, no feature changes.
 ### Changed
 
 - **macOS builds are now code-signed** with the Rise People Inc Developer ID Application certificate. ([RAISE-23](https://risepeople.atlassian.net/browse/RAISE-23))
-  - On first launch users still see Gatekeeper's "verified developer" dialog (one-time *"Open Anyway"* via System Settings → Privacy & Security) because the build isn't notarized yet — but the dialog now says *"Apple verified Rise People Inc"* instead of *"could not verify rAIse"*. Notarization is tracked as a follow-up.
+  - On first launch users still see Gatekeeper's "verified developer" dialog (one-time _"Open Anyway"_ via System Settings → Privacy & Security) because the build isn't notarized yet — but the dialog now says _"Apple verified Rise People Inc"_ instead of _"could not verify rAIse"_. Notarization is tracked as a follow-up.
   - `electron-builder.yml`'s `mac.identity` is now hardcoded; build hosts without the cert in their Keychain need `CSC_IDENTITY_AUTO_DISCOVERY=false` in the environment to skip signing for unsigned smoke builds.
 
 ### Notes
