@@ -71,6 +71,26 @@ The project uses a strict per-ticket workflow. **Don't deviate without asking.**
 - **CHANGELOG.md** has an `[Unreleased]` section at the top; add an entry for any user-visible change. Keep the existing entry style (bold lead, ticket link, plain-language explanation, Notes sub-bullet for migration / behavior caveats).
 - **Don't auto-commit unless asked**. The user explicitly says "commit" or "ship it". Until then, edits are reviewable diffs only.
 
+## Documentation maintenance
+
+**Treat documentation as part of the code.** Every PR that changes user-visible behavior, project conventions, dependencies, runtime versions, or architecture must include the corresponding doc updates in the **same PR** — not deferred to a follow-up.
+
+The goal: someone reading the docs at any commit on `main` should find them accurate. Stale docs are worse than missing docs because they confidently mislead.
+
+**When opening a PR, audit the diff against the docs and update wherever they overlap:**
+
+- **Dependency or runtime version bumps** (e.g. Electron major, Node, Vite, electron-builder, Milkdown, Monaco, React, Tailwind) → update the tech-stack table in `CLAUDE.md` _and_ `docs/architecture.md` (both have one).
+- **New IPC channels, new state hooks, new processes, security-boundary changes** → update `docs/architecture.md`'s IPC and state-management sections, and any relevant invariants in `CLAUDE.md`.
+- **New conventions, gotchas, or pitfalls discovered during the work** → add to the corresponding section in `CLAUDE.md`. If a session burned cycles on a footgun, document it.
+- **User-visible features, behavior changes, bug fixes** → add to `CHANGELOG.md`'s `[Unreleased]` section in the existing entry style.
+- **Release-pipeline changes** (signing, secrets, workflow YAML, packaging targets) → update `docs/release-process.md`.
+- **Licensing changes** (`package.json` `license` field, dep license additions to non-MIT) → update `docs/license-rationale.md` and re-run the dep-license scan.
+- **README** is the project's external face — update it for anything a new visitor would expect to see (feature additions, install changes, contribution norms).
+
+**When reviewing a PR, cross-check the diff against the docs.** If the change affects something a doc claims, flag the missing doc update as part of the review — minimum **🔵 Suggestion**, escalating to **🟡 Warning** if the staleness would actively mislead a new contributor. The PR doesn't merge with confident-but-wrong docs.
+
+**Exceptions** (still rare): pure refactors with zero observable surface change, internal-only renames that affect no doc, dep patch bumps that don't change major behavior. Even then, prefer to update if a doc happens to mention the changed thing — the marginal effort is small and prevents drift.
+
 ## Coding standards
 
 - **TypeScript strict mode is non-negotiable**. `tsconfig.*.json` has `strict: true`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, `noImplicitOverride`, `noImplicitReturns`. Never relax these.
