@@ -1,4 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, type MenuItemConstructorOptions } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  net,
+  protocol,
+  shell,
+  type MenuItemConstructorOptions,
+} from 'electron';
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -119,7 +130,17 @@ function dispatchMenuAction(type: string, payload?: unknown): void {
     return;
   }
   pendingMenuActions.push({ type, payload });
-  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  // On macOS, `app.on('open-file', ...)` can fire BEFORE `app.whenReady()`
+  // resolves — Electron warns about this explicitly. Calling `new BrowserWindow()`
+  // before ready throws "Cannot create BrowserWindow before app is ready"
+  // and crashes the launch (RAISE-54). Gate the synchronous window creation
+  // here: if ready, create now. If not, leave the action queued — the
+  // `app.whenReady()` block creates the window (line 453) and the
+  // `renderer:ready` IPC handler drains pendingMenuActions (line ~615),
+  // so the same open-path payload lands once the window mounts.
+  if ((!mainWindow || mainWindow.isDestroyed()) && app.isReady()) {
+    createWindow();
+  }
 }
 
 function drainPendingMenuActions(): void {
@@ -271,9 +292,7 @@ async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
 // would leave the close handler's promise pending forever and freeze quit.
 const RESOLVE_DIRTY_TIMEOUT_MS = 30_000;
 
-function requestResolveDirtyFromRenderer(
-  mode: 'save-all' | 'review',
-): Promise<boolean> {
+function requestResolveDirtyFromRenderer(mode: 'save-all' | 'review'): Promise<boolean> {
   if (!mainWindow) return Promise.resolve(false);
   const window = mainWindow;
   return new Promise((resolve) => {
@@ -504,30 +523,24 @@ ipcMain.handle('files:save', async (_, filePath: string, content: string) => {
   markRecentlyTouched(filePath);
 });
 
-ipcMain.handle(
-  'files:save-as',
-  async (_, content: string, suggestedName?: string) => {
-    if (!mainWindow) return null;
-    const result = await fileOps.saveFileAs(mainWindow, content, suggestedName);
-    if (result) markRecentlyTouched(result.path);
-    return result;
-  },
-);
+ipcMain.handle('files:save-as', async (_, content: string, suggestedName?: string) => {
+  if (!mainWindow) return null;
+  const result = await fileOps.saveFileAs(mainWindow, content, suggestedName);
+  if (result) markRecentlyTouched(result.path);
+  return result;
+});
 
 // RAISE-42: export the active doc to PDF. The renderer builds the
 // print-shell HTML (markdown-it preview output + Rise CSS + print
 // overrides) and hands it here; we render via an off-screen
 // BrowserWindow + `webContents.printToPDF`, prompt the save dialog,
 // and write the result. See `exportPdf.ts` for the full flow.
-ipcMain.handle(
-  'export:to-pdf',
-  async (_, opts: ExportPdfOptions): Promise<ExportPdfResult> => {
-    if (!mainWindow) {
-      return { status: 'error', message: 'No active window' };
-    }
-    return exportToPdf(mainWindow, opts);
-  },
-);
+ipcMain.handle('export:to-pdf', async (_, opts: ExportPdfOptions): Promise<ExportPdfResult> => {
+  if (!mainWindow) {
+    return { status: 'error', message: 'No active window' };
+  }
+  return exportToPdf(mainWindow, opts);
+});
 
 ipcMain.handle(
   'dialog:confirm-unsaved',
@@ -718,14 +731,17 @@ ipcMain.handle('folder:get-tree', async (_, folderPath: string) =>
 // Probe a path's kind for the renderer's drag-drop handler. Returns
 // 'directory' / 'file' / 'missing' so the dropper can route to the
 // folder-open or file-open flow without relying on the file extension.
-ipcMain.handle('folder:stat-path', async (_, p: string): Promise<'file' | 'directory' | 'missing'> => {
-  try {
-    const stats = await fs.stat(p);
-    return stats.isDirectory() ? 'directory' : 'file';
-  } catch {
-    return 'missing';
-  }
-});
+ipcMain.handle(
+  'folder:stat-path',
+  async (_, p: string): Promise<'file' | 'directory' | 'missing'> => {
+    try {
+      const stats = await fs.stat(p);
+      return stats.isDirectory() ? 'directory' : 'file';
+    } catch {
+      return 'missing';
+    }
+  },
+);
 
 ipcMain.handle('folder:close', async () => {
   await folderWatcher.stopWatching();
@@ -772,17 +788,14 @@ ipcMain.handle(
 
 // Returns the user's chosen action from a native context menu for a file or
 // folder in the tree. The renderer dispatches the actual operation.
-type ItemMenuAction =
-  | 'new-file'
-  | 'new-folder'
-  | 'rename'
-  | 'delete'
-  | 'reveal'
-  | 'open';
+type ItemMenuAction = 'new-file' | 'new-folder' | 'rename' | 'delete' | 'reveal' | 'open';
 
 ipcMain.handle(
   'folder:show-item-menu',
-  async (_, payload: { isDirectory: boolean; isMarkdown: boolean }): Promise<ItemMenuAction | null> => {
+  async (
+    _,
+    payload: { isDirectory: boolean; isMarkdown: boolean },
+  ): Promise<ItemMenuAction | null> => {
     if (!mainWindow) return null;
     return new Promise<ItemMenuAction | null>((resolve) => {
       let chosen: ItemMenuAction | null = null;
@@ -794,10 +807,7 @@ ipcMain.handle(
           { type: 'separator' },
         );
       } else if (payload.isMarkdown) {
-        items.push(
-          { label: 'Open', click: () => (chosen = 'open') },
-          { type: 'separator' },
-        );
+        items.push({ label: 'Open', click: () => (chosen = 'open') }, { type: 'separator' });
       }
       items.push(
         { label: 'Rename', click: () => (chosen = 'rename') },
@@ -992,14 +1002,11 @@ function broadcastThemeUpdate(): void {
 
 ipcMain.handle('theme:get', async () => snapshotThemeState());
 
-ipcMain.handle(
-  'theme:set-app',
-  async (_, pref: themeStore.ThemePreference) => {
-    themeStore.setThemePreference(pref);
-    broadcastThemeUpdate();
-    return snapshotThemeState();
-  },
-);
+ipcMain.handle('theme:set-app', async (_, pref: themeStore.ThemePreference) => {
+  themeStore.setThemePreference(pref);
+  broadcastThemeUpdate();
+  return snapshotThemeState();
+});
 
 ipcMain.handle(
   'theme:set-editor',
@@ -1062,10 +1069,7 @@ nativeTheme.on('updated', () => {
 
 ipcMain.handle(
   'assets:save-dropped-image',
-  async (
-    _,
-    payload: { markdownPath: string; sourcePath: string },
-  ): Promise<assetOps.SavedAsset> =>
+  async (_, payload: { markdownPath: string; sourcePath: string }): Promise<assetOps.SavedAsset> =>
     assetOps.saveDroppedImage(payload.markdownPath, payload.sourcePath),
 );
 
@@ -1091,10 +1095,7 @@ ipcMain.handle(
 // file's dirname keeps the click-to-open flow safe.
 ipcMain.handle(
   'assets:open-relative',
-  async (
-    _,
-    payload: { markdownPath: string; relPath: string },
-  ): Promise<string> => {
+  async (_, payload: { markdownPath: string; relPath: string }): Promise<string> => {
     const baseDir = path.dirname(payload.markdownPath);
     const abs = path.resolve(baseDir, payload.relPath);
     const rel = path.relative(baseDir, abs);
