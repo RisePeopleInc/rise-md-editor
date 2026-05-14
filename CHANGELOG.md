@@ -13,7 +13,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Fixed
 
 - **Crash on macOS launch via Finder double-click** ([RAISE-54](https://risepeople.atlassian.net/browse/RAISE-54)). Right-click → Open With → Rise MD Editor (or double-clicking a `.md` file when the app isn't already running) no longer triggers an "Uncaught Exception: Cannot create BrowserWindow before app is ready" dialog. Root cause: the macOS `open-file` event handler funneled through `dispatchMenuAction`, which called `createWindow()` synchronously — and on macOS, `open-file` can fire before `app.whenReady()` completes. The dispatch now gates window creation on `app.isReady()` and relies on the existing `whenReady` + renderer-ready queue-drain path to surface the pending action once the window is up.
-- **Spurious "Save changes?" prompt when closing an unmodified file** ([RAISE-55](https://risepeople.atlassian.net/browse/RAISE-55)). Closing a file you only opened (no edits) no longer prompts to save discardable changes. Root cause: Milkdown's first `markdownUpdated` event after loading a file is the parse-and-reserialize of the on-disk source, which differs byte-for-byte (list-marker normalization, escape handling) even when semantically identical. The renderer's WYSIWYG listener now skips the first emit, so opening a file leaves the tab clean until the user types.
 
 ### Changed
 

@@ -260,19 +260,6 @@ function MilkdownBody({
   const markdownPathRef = useRef(markdownPath);
   markdownPathRef.current = markdownPath;
 
-  // RAISE-55: skip the first `markdownUpdated` emit after editor creation.
-  // Milkdown's first emit is the parse-and-reserialize of `defaultValueCtx`
-  // — it can differ byte-for-byte from the on-disk source (list-marker
-  // normalization, list-item escaping, trailing newline, etc.) even
-  // though it's semantically identical. Without this gate, opening a file
-  // in WYSIWYG mode reports a content !== savedContent diff to fileState
-  // and marks the tab dirty before the user has typed anything, producing
-  // a spurious "Save changes?" prompt on close. After the first emit, all
-  // subsequent emits are real user edits and flow through normally.
-  // Tab switches re-mount Milkdown (fileState bumps loadEpoch on reopen),
-  // which resets this ref via the fresh useRef initial value.
-  const isFirstEmitRef = useRef(true);
-
   useEditor((root) =>
     Editor.make()
       .config(nord)
@@ -281,10 +268,6 @@ function MilkdownBody({
         ctx.set(defaultValueCtx, initial);
         ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prev) => {
           if (markdown === prev) return;
-          if (isFirstEmitRef.current) {
-            isFirstEmitRef.current = false;
-            return;
-          }
           // Two-stage serialize-side post-process. Both functions are
           // pure string -> string and idempotent; the order doesn't
           // matter functionally, but we run the cheaper one (empty-
