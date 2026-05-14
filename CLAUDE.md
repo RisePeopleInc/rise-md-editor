@@ -125,6 +125,7 @@ These have all bitten in real sessions. Front-load them.
 - **The app is pre-release with no installed users.** No user-data migration code is needed; backward-compat for state shapes is not a constraint. If a refactor would benefit from changing electron-store keys, just change them.
 - **`mac.notarize.teamId` in `electron-builder.yml` is intentionally absent** — recent electron-builder versions warn when it's set alongside the `APPLE_TEAM_ID` env var. Notarization is driven entirely by env vars (`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`). See `docs/release-process.md`.
 - **OFL-1.1 fonts** ship inside the asar via @fontsource. Each `@fontsource/*` package's `LICENSE` file is automatically included; don't strip it (OFL redistribution requirement).
+- **macOS `app.on('open-file')` fires before `whenReady()`.** Any path that ends up calling `new BrowserWindow()` from an early event handler must gate on `app.isReady()` first. Fixed for `dispatchMenuAction` in RAISE-54 — keep the same shape if adding new early-event handlers (`open-url` for custom URL schemes, etc.).
 
 ## Non-goals (intentionally not in scope)
 

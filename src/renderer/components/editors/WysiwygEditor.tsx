@@ -38,10 +38,7 @@ import {
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
-import {
-  getMarkdownFromClipboard,
-  unescapeHeadingNumberDot,
-} from '../../state/clipboardPaste';
+import { getMarkdownFromClipboard, unescapeHeadingNumberDot } from '../../state/clipboardPaste';
 import {
   commentDecorationsPlugin,
   unescapeCommentDelimiters,
@@ -49,11 +46,7 @@ import {
 } from '../../state/commentDecorations';
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
-import {
-  joinFrontmatter,
-  splitFrontmatter,
-  type FrontmatterSplit,
-} from '../../state/markdown';
+import { joinFrontmatter, splitFrontmatter, type FrontmatterSplit } from '../../state/markdown';
 import { autolinkOnTypePlugin } from '../../state/autolinkOnType';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { stripBrowserAutolinkPlugin } from '../../state/stripBrowserAutolink';
@@ -135,11 +128,7 @@ const slashPlugin = slashFactory('raise-slash');
  * an `<h2>` would split the heading. The bug report's AC names
  * this case explicitly.
  */
-const INLINE_ONLY_CONTAINERS = new Set([
-  'table_cell',
-  'table_header',
-  'heading',
-]);
+const INLINE_ONLY_CONTAINERS = new Set(['table_cell', 'table_header', 'heading']);
 
 /**
  * Inspect the resolved-pos chain to decide whether the paste
@@ -175,10 +164,7 @@ function isInlineOnlyContext(from: ResolvedPos): boolean {
  * the dominant flow is "user types text in another app and
  * pastes it into a single cell".
  */
-function flattenToInline(
-  parsed: ProseNode,
-  schema: ProseNode['type']['schema'],
-): Fragment {
+function flattenToInline(parsed: ProseNode, schema: ProseNode['type']['schema']): Fragment {
   const inlineNodes: ProseNode[] = [];
   const breakType = schema.nodes['hard_break'];
   let firstParagraph = true;
@@ -326,9 +312,7 @@ function MilkdownBody({
           // `&#x20; // indented note` in source which is jarring.
           const processed = unescapeIndentEntities(
             unescapeCommentDelimiters(
-              unescapeHeadingNumberDot(
-                emojiToShortcodes(stripEmptyParagraphMarkers(markdown)),
-              ),
+              unescapeHeadingNumberDot(emojiToShortcodes(stripEmptyParagraphMarkers(markdown))),
             ),
           );
           onChangeRef.current(processed);
@@ -342,9 +326,7 @@ function MilkdownBody({
           const view = mountedCtx.get(editorViewCtx);
           const max = view.state.doc.content.size;
           const safe = Math.min(Math.max(offset, 0), max);
-          const tr = view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, safe),
-          );
+          const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, safe));
           view.dispatch(tr);
         });
         // RAISE-11: image drop / paste interception. ProseMirror's
@@ -443,16 +425,13 @@ function MilkdownBody({
                   if (typeof getPos !== 'function') return;
                   const pos = getPos();
                   if (pos == null) return;
-                  view.dispatch(
-                    view.state.tr.setNodeAttribute(pos, 'checked', checkbox!.checked),
-                  );
+                  view.dispatch(view.state.tr.setNodeAttribute(pos, 'checked', checkbox!.checked));
                 });
                 li.insertBefore(checkbox, content);
               }
 
               const applyAttrs = (n: typeof node): void => {
-                const checked =
-                  (n.attrs as { checked?: boolean | null }).checked ?? null;
+                const checked = (n.attrs as { checked?: boolean | null }).checked ?? null;
                 if (checked == null) {
                   li.removeAttribute('data-item-type');
                   li.removeAttribute('data-checked');
@@ -472,8 +451,7 @@ function MilkdownBody({
                   // Don't try to transition a NodeView between task ↔
                   // non-task in place — let ProseMirror remount us with
                   // the right shape (with or without the checkbox).
-                  const newIsTask =
-                    (newNode.attrs as { checked?: boolean | null }).checked != null;
+                  const newIsTask = (newNode.attrs as { checked?: boolean | null }).checked != null;
                   if (newIsTask !== isTask) return false;
                   applyAttrs(newNode);
                   return true;
@@ -512,11 +490,7 @@ function MilkdownBody({
               // there. Subsequent images stack at the new caret.
               const max = view.state.doc.content.size;
               const safe = Math.min(Math.max(coords.pos, 0), max);
-              view.dispatch(
-                view.state.tr.setSelection(
-                  TextSelection.create(view.state.doc, safe),
-                ),
-              );
+              view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, safe)));
               for (const ins of insertions) {
                 const stem = ins.asset.relPath.split('/').pop() ?? '';
                 const alt = stem.replace(/\.[^.]+$/, '');
@@ -637,10 +611,7 @@ function MilkdownBody({
               const $from = view.state.selection.$from;
               let slice: Slice;
               if (isInlineOnlyContext($from)) {
-                const inlineFragment = flattenToInline(
-                  parsed,
-                  view.state.schema,
-                );
+                const inlineFragment = flattenToInline(parsed, view.state.schema);
                 slice = new Slice(inlineFragment, 0, 0);
               } else {
                 // Best-effort open-ends: only "open" the boundary
@@ -650,10 +621,8 @@ function MilkdownBody({
                 // code_block, list) stay as discrete blocks.
                 const firstChild = parsed.content.firstChild;
                 const lastChild = parsed.content.lastChild;
-                const openStart =
-                  firstChild?.type.name === 'paragraph' ? 1 : 0;
-                const openEnd =
-                  lastChild?.type.name === 'paragraph' ? 1 : 0;
+                const openStart = firstChild?.type.name === 'paragraph' ? 1 : 0;
+                const openEnd = lastChild?.type.name === 'paragraph' ? 1 : 0;
                 slice = new Slice(parsed.content, openStart, openEnd);
               }
               view.dispatch(view.state.tr.replaceSelection(slice));
@@ -758,9 +727,7 @@ function MilkdownBody({
           // came back). 0 is always a valid position.
           const max = view.state.doc.content.size;
           const safe = Math.min(Math.max(offset, 0), max);
-          const tr = view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, safe),
-          );
+          const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, safe));
           view.dispatch(tr);
           view.focus();
         });
@@ -779,8 +746,7 @@ function MilkdownBody({
           // serializer expects a doc-level node, so this is the right
           // shape regardless of selection size — and falls back cleanly
           // to the entire doc when from === to (collapsed cursor).
-          const target =
-            from === to ? view.state.doc : view.state.doc.cut(from, to);
+          const target = from === to ? view.state.doc : view.state.doc.cut(from, to);
           markdown = serializer(target);
         });
         if (!markdown) return;
@@ -862,9 +828,7 @@ function MilkdownBody({
           if (coords) {
             const pmSel = view.state.selection;
             const clickInSelection =
-              !pmSel.empty &&
-              coords.pos >= pmSel.from &&
-              coords.pos <= pmSel.to;
+              !pmSel.empty && coords.pos >= pmSel.from && coords.pos <= pmSel.to;
             if (!clickInSelection) {
               const tr = view.state.tr.setSelection(
                 TextSelection.near(view.state.doc.resolve(coords.pos)),
@@ -1008,8 +972,7 @@ export function WysiwygEditor({
         // rise-md-asset:// URL — for the "View full size" handler we
         // want the original (relative) path so main can resolve it
         // against the markdown file's directory.
-        const original =
-          target.getAttribute('data-asset-src') ?? target.getAttribute('src') ?? '';
+        const original = target.getAttribute('data-asset-src') ?? target.getAttribute('src') ?? '';
         const filename = original.split('/').pop() || original;
         const rect = target.getBoundingClientRect();
         setImageTooltip({

@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - **Automated release pipeline via GitHub Actions** ([RAISE-45](https://risepeople.atlassian.net/browse/RAISE-45)). Pushing a `v*` tag now triggers a parallel macOS + Windows build on GitHub-hosted runners that assembles the artifacts into a draft GitHub Release. macOS builds are code-signed and notarized (Apple Developer ID + notarytool); Windows builds are unsigned for now while Azure Artifact Signing is being provisioned (SmartScreen warns on first download for a brief reputation-build window). A `workflow_dispatch` entry point with a `skip_signing` input lets contributors dry-run the build path without burning notary minutes. Operational details — secrets, troubleshooting, signing roadmap — live in `docs/release-process.md`.
 
+### Fixed
+
+- **Crash on macOS launch via Finder double-click** ([RAISE-54](https://risepeople.atlassian.net/browse/RAISE-54)). Right-click → Open With → Rise MD Editor (or double-clicking a `.md` file when the app isn't already running) no longer triggers an "Uncaught Exception: Cannot create BrowserWindow before app is ready" dialog. Root cause: the macOS `open-file` event handler funneled through `dispatchMenuAction`, which called `createWindow()` synchronously — and on macOS, `open-file` can fire before `app.whenReady()` completes. The dispatch now gates window creation on `app.isReady()` and relies on the existing `whenReady` + renderer-ready queue-drain path to surface the pending action once the window is up.
+
 ### Changed
 
 - **Renamed app to Rise MD Editor** ([RAISE-43](https://risepeople.atlassian.net/browse/RAISE-43)). The display name in the dock / start menu / About dialog / window title now reads "Rise MD Editor" (was "rAIse"). The `appId`, `productName`, npm-package `name`, and GitHub repo are all renamed to match. The `RAISE-` Jira ticket prefix and the `--rise-*` Rise design-system CSS variables stay unchanged. No user-data migration is shipped — the app is pre-release and there are no installed users with state to preserve.
