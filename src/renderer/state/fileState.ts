@@ -247,12 +247,28 @@ export function FileProvider({ children }: FileProviderProps) {
       // user edits and update only `content`, which then diverges from
       // `editorBaseline` → tab reads as dirty correctly.
       //
-      // Only baseline on tabs that came from disk (`path !== null`).
-      // Untitled tabs (new-from-template, blank Cmd+N) intentionally
-      // start with `savedContent` set to `''` so they prompt on close
-      // before being saved; rebaselining would silently mark them clean
-      // and the user would lose unsaved template content.
-      if (t && t.editorBaseline === undefined && t.path !== null) {
+      // Three gates on the baseline capture:
+      //   1. `editorBaseline === undefined` — only baseline once per
+      //      load; subsequent emits flow through as real edits.
+      //   2. `path !== null` — only for tabs loaded from disk. Untitled
+      //      tabs (new-from-template, blank Cmd+N) start with
+      //      `savedContent` set to `''` so they prompt on close before
+      //      being saved; rebaselining would silently mark them clean
+      //      and the user would lose unsaved template content.
+      //   3. `editorMode === 'wysiwyg'` — only WYSIWYG has the
+      //      parse-and-reserialize round trip that produces drift.
+      //      Source mode (Monaco) shows raw bytes and only emits on
+      //      user input; Split mode's edit surface is also Monaco. If
+      //      we baselined on a Source-mode first emit, the user's
+      //      first keystroke in Source would get captured as baseline,
+      //      silently marking the tab clean — a data-integrity
+      //      regression. The current default mode is 'wysiwyg' (per
+      //      `makeTab`), so this gate is mostly defense-in-depth
+      //      against a future change that persists / overrides the
+      //      default mode, or against the narrow race where the user
+      //      switches to Source within Milkdown's 200ms debounce
+      //      window before the init emit fires.
+      if (t && t.editorBaseline === undefined && t.path !== null && t.editorMode === 'wysiwyg') {
         updateTab(id, { content, editorBaseline: content });
         return;
       }
