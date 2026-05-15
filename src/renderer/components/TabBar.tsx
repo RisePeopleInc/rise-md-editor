@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent, type MouseEvent } from 'react';
-import type { Tab } from '../state/fileState';
+import { isTabDirty, type Tab } from '../state/fileState';
 
 interface TabBarProps {
   tabs: Tab[];
@@ -149,7 +149,7 @@ export function TabBar({ tabs, activeTabId, onActivate, onClose, onReorder }: Ta
     >
       {tabs.map((tab, index) => {
         const isActive = tab.id === activeTabId;
-        const isDirty = tab.content !== tab.savedContent;
+        const isDirty = isTabDirty(tab);
         const showDropMarker = dragOverIndex === index && tab.id !== activeTabId;
         const label = labels[index]!;
         return (

@@ -41,6 +41,30 @@ export interface Tab {
    * off `${id}-${loadEpoch}` so a re-open visibly refreshes the document.
    */
   loadEpoch: number;
+  /**
+   * RAISE-55: the editor's own view of the on-disk content, captured on
+   * the FIRST `setContent` call after the tab was loaded from disk. Used
+   * (in preference to `savedContent`) for the dirty comparison, so
+   * round-trip drift between the on-disk markdown and the editor's
+   * serialized form doesn't show as dirty before the user has typed.
+   *
+   * Concrete shape of the drift: Milkdown parses the on-disk source,
+   * applies plugin `appendTransaction`s on init (autolink-on-type adds
+   * link marks to URL-shaped text, etc.), then debounces a
+   * `markdownUpdated` emit with the modified-but-not-user-edited
+   * markdown. Without this baseline the tab reads as dirty the instant
+   * the editor mounts — the original RAISE-55 symptom.
+   *
+   * `undefined` means we haven't captured the baseline yet (just-loaded
+   * tab, or newly-untitled tab). The dirty comparison falls back to
+   * `savedContent` in that case — which is what we want for untitled
+   * tabs (template-created files stay dirty until saved).
+   *
+   * Reset on `loadFile` / `refreshTabFromDisk` so the next emit
+   * re-baselines against the freshly-loaded content. Updated on save
+   * so post-save user edits compare against the just-saved baseline.
+   */
+  editorBaseline?: string;
 }
 
 export interface FileContextValue {
@@ -129,8 +153,23 @@ function basenameOf(p: string | null): string {
   return p.split(/[\\/]/).pop() || p;
 }
 
-function isTabDirty(t: Tab): boolean {
-  return t.content !== t.savedContent;
+/**
+ * RAISE-55: canonical dirty check. When the editor has reported its
+ * initial post-parse markdown (`editorBaseline`), use that as the
+ * dirty baseline so cosmetic round-trip drift (autolinks added to
+ * bare URLs, list-marker normalization, etc.) doesn't count as a
+ * user edit. Falls back to `savedContent` for tabs that haven't
+ * received their first setContent yet — relevant for new untitled
+ * tabs (Cmd+N, template creates) which should read as dirty until
+ * saved.
+ *
+ * Exported so the TabBar's visual dirty indicator and App.tsx's
+ * external-edit reload prompt stay in lockstep with the close-flow's
+ * save-prompt logic — three surfaces, one source of truth.
+ */
+export function isTabDirty(t: Tab): boolean {
+  const baseline = t.editorBaseline ?? t.savedContent;
+  return t.content !== baseline;
 }
 
 function makeTab(path: string | null, content: string): Tab {
@@ -205,6 +244,41 @@ export function FileProvider({ children }: FileProviderProps) {
     (content: string) => {
       const id = activeTabIdRef.current;
       if (!id) return;
+      const t = tabsRef.current.find((x) => x.id === id);
+      // RAISE-55: the first setContent call after a tab is loaded from
+      // disk is the editor's "post-parse" view, not a user edit. Capture
+      // it as the dirty-comparison baseline so cosmetic round-trip drift
+      // (Milkdown re-serializing `- list` as `* list`, autolink plugins
+      // wrapping bare URLs in `[text](href)`, etc.) doesn't trip the
+      // close-with-unsaved-changes prompt. Subsequent emits are real
+      // user edits and update only `content`, which then diverges from
+      // `editorBaseline` → tab reads as dirty correctly.
+      //
+      // Three gates on the baseline capture:
+      //   1. `editorBaseline === undefined` — only baseline once per
+      //      load; subsequent emits flow through as real edits.
+      //   2. `path !== null` — only for tabs loaded from disk. Untitled
+      //      tabs (new-from-template, blank Cmd+N) start with
+      //      `savedContent` set to `''` so they prompt on close before
+      //      being saved; rebaselining would silently mark them clean
+      //      and the user would lose unsaved template content.
+      //   3. `editorMode === 'wysiwyg'` — only WYSIWYG has the
+      //      parse-and-reserialize round trip that produces drift.
+      //      Source mode (Monaco) shows raw bytes and only emits on
+      //      user input; Split mode's edit surface is also Monaco. If
+      //      we baselined on a Source-mode first emit, the user's
+      //      first keystroke in Source would get captured as baseline,
+      //      silently marking the tab clean — a data-integrity
+      //      regression. The current default mode is 'wysiwyg' (per
+      //      `makeTab`), so this gate is mostly defense-in-depth
+      //      against a future change that persists / overrides the
+      //      default mode, or against the narrow race where the user
+      //      switches to Source within Milkdown's 200ms debounce
+      //      window before the init emit fires.
+      if (t && t.editorBaseline === undefined && t.path !== null && t.editorMode === 'wysiwyg') {
+        updateTab(id, { content, editorBaseline: content });
+        return;
+      }
       updateTab(id, { content });
     },
     [updateTab],
@@ -234,6 +308,9 @@ export function FileProvider({ children }: FileProviderProps) {
                   // which reads its initial value once) remount and pick up
                   // the refreshed content.
                   loadEpoch: t.loadEpoch + 1,
+                  // RAISE-55: clear the baseline so the next post-load
+                  // setContent re-captures against the refreshed content.
+                  editorBaseline: undefined,
                 }
               : t,
           ),
@@ -328,7 +405,15 @@ export function FileProvider({ children }: FileProviderProps) {
     (filePath: string, content: string) => {
       const next = tabsRef.current.map((t) =>
         t.path === filePath
-          ? { ...t, content, savedContent: content, loadEpoch: t.loadEpoch + 1 }
+          ? {
+              ...t,
+              content,
+              savedContent: content,
+              loadEpoch: t.loadEpoch + 1,
+              // RAISE-55: reset baseline; the remount fires fresh post-parse
+              // emits that should re-capture against the new content.
+              editorBaseline: undefined,
+            }
           : t,
       );
       writeTabs(next);
@@ -419,7 +504,14 @@ export function FileProvider({ children }: FileProviderProps) {
       try {
         const result = await window.api.files.saveAs(tab.content, basenameOf(tab.path));
         if (!result) return false;
-        updateTab(tab.id, { path: result.path, savedContent: tab.content });
+        // RAISE-55: align editorBaseline with what just landed on disk so
+        // post-save user edits compare against the saved markdown form,
+        // not whatever the parse-and-reserialize baseline was at load.
+        updateTab(tab.id, {
+          path: result.path,
+          savedContent: tab.content,
+          editorBaseline: tab.content,
+        });
         window.api.addRecent(result.path);
         return true;
       } catch (err) {
@@ -441,7 +533,9 @@ export function FileProvider({ children }: FileProviderProps) {
       if (!tab.path) return saveAs(tab.id);
       try {
         await window.api.files.save(tab.path, tab.content);
-        updateTab(tab.id, { savedContent: tab.content });
+        // RAISE-55: keep editorBaseline in sync with savedContent so
+        // subsequent emits compare against the just-saved markdown.
+        updateTab(tab.id, { savedContent: tab.content, editorBaseline: tab.content });
         return true;
       } catch (err) {
         window.api.showError(
@@ -592,7 +686,14 @@ export function FileProvider({ children }: FileProviderProps) {
     const off = window.api.onFileSavedAs(({ path: savedPath, content: savedBytes }) => {
       const next = tabsRef.current.map((t) =>
         t.path === savedPath || (t.id === activeTabIdRef.current && !t.path)
-          ? { ...t, path: savedPath, savedContent: savedBytes }
+          ? {
+              ...t,
+              path: savedPath,
+              savedContent: savedBytes,
+              // RAISE-55: keep baseline in sync with the just-saved bytes
+              // so the next emit doesn't show as dirty.
+              editorBaseline: savedBytes,
+            }
           : t,
       );
       writeTabs(next);
