@@ -18,7 +18,7 @@ import {
 import { buildPrintHtml } from './state/exportPdfHtml';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
-import { FileProvider, useFileState, type EditorMode } from './state/fileState';
+import { FileProvider, isTabDirty, useFileState, type EditorMode } from './state/fileState';
 import { useSidebarState, isOpenable } from './state/sidebarState';
 import { useThemeState } from './state/themeState';
 import { useUpdateState } from './state/updateState';
@@ -803,7 +803,7 @@ function AppContent() {
     const off = window.api.folder.onFileChanged(async (filePath) => {
       const tab = file.tabs.find((t) => t.path === filePath);
       if (!tab) return;
-      const isDirty = tab.content !== tab.savedContent;
+      const isDirty = isTabDirty(tab);
       const reload = await window.api.confirmFileReload(
         basenameOfPath(filePath),
         isDirty,

@@ -153,14 +153,21 @@ function basenameOf(p: string | null): string {
   return p.split(/[\\/]/).pop() || p;
 }
 
-function isTabDirty(t: Tab): boolean {
-  // RAISE-55: when the editor has reported its initial post-parse markdown
-  // (`editorBaseline`), use that as the dirty baseline so cosmetic
-  // round-trip drift (autolinks added to bare URLs, list-marker
-  // normalization, etc.) doesn't count as a user edit. Falls back to
-  // `savedContent` for tabs that haven't received their first
-  // setContent yet — relevant for new untitled tabs (Cmd+N, template
-  // creates) which should read as dirty until saved.
+/**
+ * RAISE-55: canonical dirty check. When the editor has reported its
+ * initial post-parse markdown (`editorBaseline`), use that as the
+ * dirty baseline so cosmetic round-trip drift (autolinks added to
+ * bare URLs, list-marker normalization, etc.) doesn't count as a
+ * user edit. Falls back to `savedContent` for tabs that haven't
+ * received their first setContent yet — relevant for new untitled
+ * tabs (Cmd+N, template creates) which should read as dirty until
+ * saved.
+ *
+ * Exported so the TabBar's visual dirty indicator and App.tsx's
+ * external-edit reload prompt stay in lockstep with the close-flow's
+ * save-prompt logic — three surfaces, one source of truth.
+ */
+export function isTabDirty(t: Tab): boolean {
   const baseline = t.editorBaseline ?? t.savedContent;
   return t.content !== baseline;
 }
