@@ -53,6 +53,15 @@ exports.default = async function sign(configuration) {
     return;
   }
 
+  // signtool.exe is part of the Windows SDK but the SDK's versioned
+  // bin directory isn't on PATH by default on GitHub-hosted
+  // `windows-latest` runners. The workflow's "Locate signtool.exe"
+  // step resolves the latest installed copy and exports the path
+  // via $GITHUB_ENV. Fall back to bare `signtool.exe` (PATH lookup)
+  // if the env var isn't set — covers local Windows dev where the
+  // SDK is on PATH via Visual Studio's developer command prompt.
+  const signtool = process.env.SIGNTOOL_PATH || 'signtool.exe';
+
   // signtool args:
   //   sign            — operation
   //   /v              — verbose output (handy for CI logs)
@@ -91,7 +100,7 @@ exports.default = async function sign(configuration) {
   ];
 
   try {
-    execFileSync('signtool.exe', args, { stdio: 'inherit' });
+    execFileSync(signtool, args, { stdio: 'inherit' });
   } catch (err) {
     // Re-throw so electron-builder marks the build as failed. The
     // stdout/stderr from signtool already went to inherit so the
