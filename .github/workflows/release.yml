@@ -197,21 +197,29 @@ jobs:
       # Install the Artifact Signing client NuGet package and capture
       # the path to Azure.CodeSigning.Dlib.dll. (The NuGet package
       # name retains the older `Trusted.Signing` literal — that's
-      # outside our control.) The package is extracted under the
-      # user's NuGet cache; `nuget install` puts it at a predictable
-      # path we can resolve.
+      # outside our control.) Version is pinned to a known-good
+      # release; bump deliberately and verify against
+      # https://www.nuget.org/packages/Microsoft.Trusted.Signing.Client
+      # before merging. The dlib path is resolved by globbing rather
+      # than string-templating the version, so a future version bump
+      # only needs the version constant updated above this comment.
       - name: Install Artifact Signing dlib
         shell: pwsh
         run: |
-          $packageVersion = '1.0.78'  # pin to a known-good version; bump deliberately
+          $packageVersion = '1.0.95'  # latest as of 2026-05; bump after verifying on nuget.org
           nuget install Microsoft.Trusted.Signing.Client -Version $packageVersion -OutputDirectory "$env:RUNNER_TEMP\artifact-signing"
-          $dlibPath = "$env:RUNNER_TEMP\artifact-signing\Microsoft.Trusted.Signing.Client.$packageVersion\bin\x64\Azure.CodeSigning.Dlib.dll"
-          if (-not (Test-Path $dlibPath)) {
-            Write-Error "Artifact Signing dlib not found at $dlibPath"
+          # Glob for the dlib — the file path includes the version
+          # number, so resolving by search keeps the lookup decoupled
+          # from the pin above. -Recurse handles the bin/x64/ subpath
+          # without us hardcoding it.
+          $dlib = Get-ChildItem -Path "$env:RUNNER_TEMP\artifact-signing" -Recurse -Filter 'Azure.CodeSigning.Dlib.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dlib) {
+            Write-Error "Azure.CodeSigning.Dlib.dll not found anywhere under $env:RUNNER_TEMP\artifact-signing. NuGet install probably failed silently — scroll up for diagnostics."
+            Get-ChildItem -Path "$env:RUNNER_TEMP\artifact-signing" -Recurse | Select-Object -First 30 FullName
             exit 1
           }
-          "AZURE_ARTIFACT_SIGNING_DLIB_PATH=$dlibPath" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          Write-Host "Dlib path: $dlibPath"
+          "AZURE_ARTIFACT_SIGNING_DLIB_PATH=$($dlib.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "Dlib path: $($dlib.FullName)"
 
       # The dlib reads account + cert-profile config from a JSON file
       # path passed to signtool's /dmdf flag. Endpoint and names are
