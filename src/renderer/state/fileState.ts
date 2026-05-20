@@ -75,6 +75,11 @@ export interface FileContextValue {
 
   setContent: (content: string) => void;
   /**
+   * RAISE-55 follow-up: WYSIWYG-specific baseline path. See the
+   * `setMarkdownBaseline` definition for full rationale.
+   */
+  setMarkdownBaseline: (content: string) => void;
+  /**
    * Load a file (or refresh an already-open one) into a tab and make it
    * active. Returns the tab id so callers can attach UI state — e.g. the
    * "created from template" hint banner — keyed by id.
@@ -244,42 +249,74 @@ export function FileProvider({ children }: FileProviderProps) {
     (content: string) => {
       const id = activeTabIdRef.current;
       if (!id) return;
+      updateTab(id, { content });
+    },
+    [updateTab],
+  );
+
+  /**
+   * RAISE-55 follow-up: invoked by WYSIWYG when the editor reports its
+   * post-parse / post-init-transaction markdown BEFORE any user input
+   * has happened on this tab. Updates `editorBaseline` so the dirty
+   * comparison sees the editor's normalized view (autolinks added to
+   * bare URLs, list-marker normalization, etc.) as the clean reference
+   * instead of the raw on-disk bytes.
+   *
+   * The user-input vs. init-emit distinction is made by the editor
+   * (it has DOM-event-level signal — keydown / paste / drop / input —
+   * before the markdown serializer's 200ms-debounced emit fires).
+   * fileState can't tell those apart on its own, which is why my
+   * earlier shape ("first setContent after load = baseline") regressed
+   * 1-char WYSIWYG edits on files without URL-shaped text: those files
+   * never emit on init, so the user's first keystroke WAS the first
+   * setContent and got incorrectly absorbed as the baseline.
+   *
+   * Gates:
+   *   - `path !== null` — only for tabs loaded from disk. Untitled
+   *     tabs (new-from-template, Cmd+N) start with `savedContent: ''`
+   *     so they prompt on close before being saved; rebaselining
+   *     would mark them clean and lose unsaved template content.
+   *   - `editorMode === 'wysiwyg'` — only WYSIWYG has the
+   *     parse-and-reserialize round trip that produces drift.
+   *
+   * Also updates `content` to match — the editor's authoritative view
+   * of what's in the tab. Without this update `t.content` would drift
+   * from what Milkdown is showing, breaking mode swaps and save.
+   */
+  const setMarkdownBaseline = useCallback(
+    (content: string) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
       const t = tabsRef.current.find((x) => x.id === id);
-      // RAISE-55: the first setContent call after a tab is loaded from
-      // disk is the editor's "post-parse" view, not a user edit. Capture
-      // it as the dirty-comparison baseline so cosmetic round-trip drift
-      // (Milkdown re-serializing `- list` as `* list`, autolink plugins
-      // wrapping bare URLs in `[text](href)`, etc.) doesn't trip the
-      // close-with-unsaved-changes prompt. Subsequent emits are real
-      // user edits and update only `content`, which then diverges from
-      // `editorBaseline` → tab reads as dirty correctly.
-      //
-      // Three gates on the baseline capture:
-      //   1. `editorBaseline === undefined` — only baseline once per
-      //      load; subsequent emits flow through as real edits.
-      //   2. `path !== null` — only for tabs loaded from disk. Untitled
-      //      tabs (new-from-template, blank Cmd+N) start with
-      //      `savedContent` set to `''` so they prompt on close before
-      //      being saved; rebaselining would silently mark them clean
-      //      and the user would lose unsaved template content.
-      //   3. `editorMode === 'wysiwyg'` — only WYSIWYG has the
-      //      parse-and-reserialize round trip that produces drift.
-      //      Source mode (Monaco) shows raw bytes and only emits on
-      //      user input; Split mode's edit surface is also Monaco. If
-      //      we baselined on a Source-mode first emit, the user's
-      //      first keystroke in Source would get captured as baseline,
-      //      silently marking the tab clean — a data-integrity
-      //      regression. The current default mode is 'wysiwyg' (per
-      //      `makeTab`), so this gate is mostly defense-in-depth
-      //      against a future change that persists / overrides the
-      //      default mode, or against the narrow race where the user
-      //      switches to Source within Milkdown's 200ms debounce
-      //      window before the init emit fires.
-      if (t && t.editorBaseline === undefined && t.path !== null && t.editorMode === 'wysiwyg') {
-        updateTab(id, { content, editorBaseline: content });
+      if (!t || t.path === null || t.editorMode !== 'wysiwyg') {
+        // Not eligible for baselining — fall back to a regular content
+        // update so the editor's view still propagates to fileState.
+        // This is the right behavior for untitled / non-WYSIWYG tabs;
+        // dirty tracking remains based on `savedContent`.
+        updateTab(id, { content });
         return;
       }
-      updateTab(id, { content });
+      // RAISE-55 follow-up: baseline is captured ONCE per load. Tab
+      // switches and mode switches remount the WysiwygEditor with a
+      // fresh `hasUserInteractedRef = false`, which would otherwise
+      // re-fire setMarkdownBaseline against the user's already-edited
+      // content — silently marking the tab clean and losing the dirty
+      // signal. If the user typed a bare URL on first open then tab-
+      // switched and back, autolinkOnTypePlugin's appendTransaction
+      // would fire on the remount's first parse (because the now-bare
+      // URL is fresh URL-shaped text), producing an init-style emit
+      // even though the user has edits in flight. Gating the baseline
+      // update on `editorBaseline === undefined` makes this idempotent:
+      // the original capture sticks until the file is reloaded
+      // (loadFile / refreshTabFromDisk both reset editorBaseline to
+      // undefined), saved (save / saveAs / onFileSavedAs realign
+      // editorBaseline with the just-saved content), at which point a
+      // fresh baseline becomes the right thing to capture.
+      if (t.editorBaseline !== undefined) {
+        updateTab(id, { content });
+        return;
+      }
+      updateTab(id, { content, editorBaseline: content });
     },
     [updateTab],
   );
@@ -708,6 +745,7 @@ export function FileProvider({ children }: FileProviderProps) {
       activeTab,
       isDirty,
       setContent,
+      setMarkdownBaseline,
       loadFile,
       newFile,
       newFileFromContent,
@@ -737,6 +775,7 @@ export function FileProvider({ children }: FileProviderProps) {
       activeTab,
       isDirty,
       setContent,
+      setMarkdownBaseline,
       loadFile,
       newFile,
       newFileFromContent,

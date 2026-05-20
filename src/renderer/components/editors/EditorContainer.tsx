@@ -10,6 +10,14 @@ import type { WordWrap } from '../../env';
 interface EditorContainerProps {
   tab: Tab;
   onContentChange: (markdown: string) => void;
+  /**
+   * RAISE-55 follow-up: WYSIWYG-only baseline path. Invoked instead of
+   * `onContentChange` for emits that fire before any user input on the
+   * editor (the editor's post-parse / post-init-transaction markdown).
+   * Lets fileState capture the editor's normalized view as the dirty
+   * baseline so cosmetic round-trip drift doesn't show as dirty.
+   */
+  onContentBaseline?: (markdown: string) => void;
   onModeChange: (mode: EditorMode) => void;
   onCursorChange: (position: CursorPosition) => void;
   sourceRef: Ref<SourceEditorHandle>;
@@ -39,6 +47,7 @@ interface EditorContainerProps {
 export function EditorContainer({
   tab,
   onContentChange,
+  onContentBaseline,
   onModeChange,
   onCursorChange,
   sourceRef,
@@ -67,6 +76,7 @@ export function EditorContainer({
             ref={wysiwygRef}
             content={tab.content}
             onChange={onContentChange}
+            onMarkdownBaseline={onContentBaseline}
             initialScrollTop={tab.wysiwygScrollPosition}
             initialCursorOffset={tab.wysiwygCursorOffset}
             onImageDrop={onImageDrop}
