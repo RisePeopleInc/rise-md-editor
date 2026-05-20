@@ -296,6 +296,26 @@ export function FileProvider({ children }: FileProviderProps) {
         updateTab(id, { content });
         return;
       }
+      // RAISE-55 follow-up: baseline is captured ONCE per load. Tab
+      // switches and mode switches remount the WysiwygEditor with a
+      // fresh `hasUserInteractedRef = false`, which would otherwise
+      // re-fire setMarkdownBaseline against the user's already-edited
+      // content — silently marking the tab clean and losing the dirty
+      // signal. If the user typed a bare URL on first open then tab-
+      // switched and back, autolinkOnTypePlugin's appendTransaction
+      // would fire on the remount's first parse (because the now-bare
+      // URL is fresh URL-shaped text), producing an init-style emit
+      // even though the user has edits in flight. Gating the baseline
+      // update on `editorBaseline === undefined` makes this idempotent:
+      // the original capture sticks until the file is reloaded
+      // (loadFile / refreshTabFromDisk both reset editorBaseline to
+      // undefined), saved (save / saveAs / onFileSavedAs realign
+      // editorBaseline with the just-saved content), at which point a
+      // fresh baseline becomes the right thing to capture.
+      if (t.editorBaseline !== undefined) {
+        updateTab(id, { content });
+        return;
+      }
       updateTab(id, { content, editorBaseline: content });
     },
     [updateTab],
