@@ -123,8 +123,14 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # Windows — signed via Azure Trusted Signing (RAISE-58)
+  # Windows — signed via Azure Artifact Signing (RAISE-58)
   # ---------------------------------------------------------------------------
+  #
+  # Azure rebranded "Trusted Signing" to "Artifact Signing" in the
+  # portal UI. Microsoft Learn docs and many third-party tutorials
+  # still use the old name; the NuGet package and DLL retain
+  # `Trusted.Signing` / `CodeSigning` literals. Full setup recipe
+  # in docs/azure-signing-setup.md.
   #
   # Auth: OIDC federation between GitHub Actions and the Entra app
   # registration `rise-md-editor-github-signing`. The `id-token: write`
@@ -137,16 +143,16 @@ jobs:
   #   1. azure/login@v2 exchanges the OIDC token for an Azure access
   #      token and writes it to the standard credential locations the
   #      .NET DefaultAzureCredential picks up.
-  #   2. The Trusted Signing dlib (NuGet package
+  #   2. The Artifact Signing dlib (NuGet package
   #      `Microsoft.Trusted.Signing.Client`) is installed and its
   #      path captured for the sign callback.
-  #   3. A metadata JSON file is written, naming the Trusted Signing
+  #   3. A metadata JSON file is written, naming the Artifact Signing
   #      account + cert profile to sign against.
   #   4. electron-builder runs the normal `--win` build; its
   #      `signtoolOptions.sign` callback (scripts/sign-windows.cjs)
   #      invokes signtool.exe with the dlib for every .exe.
   build-win:
-    name: Build Windows (signed via Azure Trusted Signing)
+    name: Build Windows (signed via Azure Artifact Signing)
     runs-on: windows-latest
     timeout-minutes: 30
     # OIDC token minting requires id-token: write. contents: read is
@@ -179,40 +185,42 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Microsoft's Trusted Signing dlib is a .NET assembly. The
+      # Microsoft's Artifact Signing dlib is a .NET assembly. The
       # windows-latest runner already has .NET SDKs preinstalled,
       # but pinning here keeps the workflow stable against runner
       # image churn.
-      - name: Set up .NET (for the Trusted Signing dlib)
+      - name: Set up .NET (for the Artifact Signing dlib)
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      # Install the Trusted Signing client NuGet package and capture
-      # the path to Azure.CodeSigning.Dlib.dll. The package is
-      # extracted under the user's NuGet cache; `nuget install` puts
-      # it at a predictable path we can resolve.
-      - name: Install Trusted Signing dlib
+      # Install the Artifact Signing client NuGet package and capture
+      # the path to Azure.CodeSigning.Dlib.dll. (The NuGet package
+      # name retains the older `Trusted.Signing` literal — that's
+      # outside our control.) The package is extracted under the
+      # user's NuGet cache; `nuget install` puts it at a predictable
+      # path we can resolve.
+      - name: Install Artifact Signing dlib
         shell: pwsh
         run: |
           $packageVersion = '1.0.78'  # pin to a known-good version; bump deliberately
-          nuget install Microsoft.Trusted.Signing.Client -Version $packageVersion -OutputDirectory "$env:RUNNER_TEMP\trusted-signing"
-          $dlibPath = "$env:RUNNER_TEMP\trusted-signing\Microsoft.Trusted.Signing.Client.$packageVersion\bin\x64\Azure.CodeSigning.Dlib.dll"
+          nuget install Microsoft.Trusted.Signing.Client -Version $packageVersion -OutputDirectory "$env:RUNNER_TEMP\artifact-signing"
+          $dlibPath = "$env:RUNNER_TEMP\artifact-signing\Microsoft.Trusted.Signing.Client.$packageVersion\bin\x64\Azure.CodeSigning.Dlib.dll"
           if (-not (Test-Path $dlibPath)) {
-            Write-Error "Trusted Signing dlib not found at $dlibPath"
+            Write-Error "Artifact Signing dlib not found at $dlibPath"
             exit 1
           }
-          "AZURE_TRUSTED_SIGNING_DLIB_PATH=$dlibPath" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "AZURE_ARTIFACT_SIGNING_DLIB_PATH=$dlibPath" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Write-Host "Dlib path: $dlibPath"
 
       # The dlib reads account + cert-profile config from a JSON file
       # path passed to signtool's /dmdf flag. Endpoint and names are
       # NOT secrets — they're just config — so we keep them in the
       # workflow YAML for visibility.
-      - name: Write Trusted Signing metadata
+      - name: Write Artifact Signing metadata
         shell: pwsh
         run: |
-          $metadataPath = "$env:RUNNER_TEMP\trusted-signing-metadata.json"
+          $metadataPath = "$env:RUNNER_TEMP\artifact-signing-metadata.json"
           @'
           {
             "Endpoint": "https://eus.codesigning.azure.net/",
@@ -220,7 +228,7 @@ jobs:
             "CertificateProfileName": "rise-md-editor-public"
           }
           '@ | Out-File -Encoding utf8 $metadataPath
-          "AZURE_TRUSTED_SIGNING_METADATA_PATH=$metadataPath" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "AZURE_ARTIFACT_SIGNING_METADATA_PATH=$metadataPath" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Write-Host "Metadata path: $metadataPath"
 
       # Exchange the GitHub OIDC token for an Azure access token.

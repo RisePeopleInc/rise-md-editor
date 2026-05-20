@@ -46,27 +46,29 @@ All five live under _Settings → Secrets and variables → Actions_ on the repo
 | `APPLE_APP_SPECIFIC_PASSWORD` | https://appleid.apple.com → _Sign-In and Security_ → _App-Specific Passwords_ | 16 chars, format `xxxx-xxxx-xxxx-xxxx`. Apple shows it once at creation — record in 1Password immediately. |
 | `APPLE_TEAM_ID`               | `TJFLUA3UJ3`                                                                  | Rise's Apple Developer team ID; matches the cert's Common Name                                             |
 
-### Windows signing — Azure Trusted Signing
+### Windows signing — Azure Artifact Signing
 
-Windows installers are signed via [Azure Trusted Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) ([RAISE-58](https://risepeople.atlassian.net/browse/RAISE-58)). FIPS 140-2 Level 3 HSM-backed cert, ~$10/month (Basic tier). The cert never leaves Microsoft's HSM — the build runner authenticates to Azure via OIDC federation, calls the signing service through `signtool.exe` + the Trusted Signing dlib, and the service signs in place.
+Windows installers are signed via [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) ([RAISE-58](https://risepeople.atlassian.net/browse/RAISE-58); Microsoft Learn URL still uses the older "trusted-signing" path). FIPS 140-2 Level 3 HSM-backed cert, ~$10/month (Basic tier). The cert never leaves Microsoft's HSM — the build runner authenticates to Azure via OIDC federation, calls the signing service through `signtool.exe` + the Artifact Signing dlib, and the service signs in place.
+
+One-time provisioning recipe (resource group, account, identity validation, app registration, federated credential, role assignment) lives in [`azure-signing-setup.md`](azure-signing-setup.md). This doc covers the ongoing operation only.
 
 **Three new repo secrets** (under _Settings → Secrets and variables → Actions_):
 
-| Secret                  | Source                                                 | Notes                                                  |
-| ----------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
-| `AZURE_TENANT_ID`       | Microsoft Entra directory ID                           | Steve's tenant: `0123a73c-a400-44e5-8960-15337cf2e8f0` |
-| `AZURE_CLIENT_ID`       | App registration `rise-md-editor-github-signing`       | `1335db74-9168-463d-b6de-940d8e9ad742`                 |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription holding the Trusted Signing account | `a1471a7e-eaf3-4a3b-adfc-ae05298698e1`                 |
+| Secret                  | Source                                                  | Notes                                                  |
+| ----------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
+| `AZURE_TENANT_ID`       | Microsoft Entra directory ID                            | Steve's tenant: `0123a73c-a400-44e5-8960-15337cf2e8f0` |
+| `AZURE_CLIENT_ID`       | App registration `rise-md-editor-github-signing`        | `1335db74-9168-463d-b6de-940d8e9ad742`                 |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription holding the Artifact Signing account | `a1471a7e-eaf3-4a3b-adfc-ae05298698e1`                 |
 
 None of these are sensitive in the traditional sense (they're publicly-visible identifiers), but they're configured as secrets so they don't leak into PRs or fork logs.
 
 **Non-secret config** (hardcoded in the workflow):
 
-|                         |                                        |
-| ----------------------- | -------------------------------------- |
-| Account URI             | `https://eus.codesigning.azure.net/`   |
-| Trusted Signing account | `rise-md-editor-signing` (East US)     |
-| Certificate profile     | `rise-md-editor-public` (Public Trust) |
+|                          |                                        |
+| ------------------------ | -------------------------------------- |
+| Account URI              | `https://eus.codesigning.azure.net/`   |
+| Artifact Signing account | `rise-md-editor-signing` (East US)     |
+| Certificate profile      | `rise-md-editor-public` (Public Trust) |
 
 **OIDC federation** — the signing job declares `environment: rise-md-editor-signing` and the Entra app registration has a federated credential keyed to that environment + repo. Only workflow runs that match both can mint an Azure access token. No long-lived service-principal secret on the runner.
 

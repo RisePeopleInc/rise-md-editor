@@ -138,21 +138,27 @@ win:
       arch: x64
     - target: zip
       arch: x64
-  # Code signing via Azure Trusted Signing (RAISE-58).
+  # Code signing via Azure Artifact Signing (RAISE-58).
+  #
+  # Azure rebranded "Trusted Signing" to "Artifact Signing" in the
+  # portal UI; Microsoft Learn docs may still use the old name. The
+  # NuGet package + DLL retain `Trusted.Signing` / `CodeSigning`
+  # literal names — those aren't ours to rename. Full setup recipe:
+  # `docs/azure-signing-setup.md`.
   #
   # `signtoolOptions.sign` is invoked by electron-builder for every
   # `.exe` it produces during the build — the unpacked app, helper
   # exes (e.g. `elevate.exe`), the uninstaller stub, and the final
   # NSIS installer. The callback in `scripts/sign-windows.cjs` shells
   # out to `signtool.exe` (Windows SDK, pre-installed on
-  # `windows-latest` runners) with the Trusted Signing dlib, which
+  # `windows-latest` runners) with the Artifact Signing dlib, which
   # delegates the actual signing to Microsoft's HSM-hosted cert.
   #
   # The CI workflow `.github/workflows/release.yml` sets two env vars
   # the callback reads:
-  #   AZURE_TRUSTED_SIGNING_DLIB_PATH       — abs path to
+  #   AZURE_ARTIFACT_SIGNING_DLIB_PATH       — abs path to
   #                                            Azure.CodeSigning.Dlib.dll
-  #   AZURE_TRUSTED_SIGNING_METADATA_PATH   — abs path to the JSON
+  #   AZURE_ARTIFACT_SIGNING_METADATA_PATH   — abs path to the JSON
   #                                            describing endpoint
   #                                            + account + cert profile
   #

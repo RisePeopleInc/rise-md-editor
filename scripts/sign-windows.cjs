@@ -1,20 +1,25 @@
 // RAISE-58: Windows code-signing callback for electron-builder via
-// Azure Trusted Signing. Invoked by electron-builder's
-// `signtoolOptions.sign` for every `.exe` that needs signing during
-// the build (the unpacked app exe, helper exes like `elevate.exe` and
-// `__uninstaller-nsis-*.exe`, and the final NSIS installer).
+// Azure Artifact Signing (formerly Trusted Signing; the NuGet
+// package and DLL retain the older `Trusted.Signing` / `CodeSigning`
+// literal names, but the service is rebranded in the Azure portal).
+// Full setup recipe in docs/azure-signing-setup.md.
+//
+// Invoked by electron-builder's `signtoolOptions.sign` for every
+// `.exe` that needs signing during the build (the unpacked app exe,
+// helper exes like `elevate.exe` and `__uninstaller-nsis-*.exe`, and
+// the final NSIS installer).
 //
 // Flow:
 //   1. CI workflow logs into Azure via OIDC federation (no static
 //      service-principal secret). `DefaultAzureCredential` picks up
 //      the OIDC token automatically from the runner environment.
-//   2. CI workflow installs Microsoft's Trusted Signing client
+//   2. CI workflow installs Microsoft's Artifact Signing client
 //      (NuGet package `Microsoft.Trusted.Signing.Client`), which
 //      contains `Azure.CodeSigning.Dlib.dll`. The workflow exports
-//      the path via `AZURE_TRUSTED_SIGNING_DLIB_PATH`.
+//      the path via `AZURE_ARTIFACT_SIGNING_DLIB_PATH`.
 //   3. CI workflow writes a JSON metadata file pointing at the
 //      account endpoint + cert profile, and exports the path via
-//      `AZURE_TRUSTED_SIGNING_METADATA_PATH`.
+//      `AZURE_ARTIFACT_SIGNING_METADATA_PATH`.
 //   4. This script shells out to `signtool.exe` (Windows SDK,
 //      pre-installed on `windows-latest`) with `/dlib` + `/dmdf`,
 //      which delegates the actual signing to the Azure-hosted HSM.
@@ -33,8 +38,8 @@ const { execFileSync } = require('node:child_process');
 exports.default = async function sign(configuration) {
   const filePath = configuration.path;
 
-  const dlibPath = process.env.AZURE_TRUSTED_SIGNING_DLIB_PATH;
-  const metadataPath = process.env.AZURE_TRUSTED_SIGNING_METADATA_PATH;
+  const dlibPath = process.env.AZURE_ARTIFACT_SIGNING_DLIB_PATH;
+  const metadataPath = process.env.AZURE_ARTIFACT_SIGNING_METADATA_PATH;
 
   if (!dlibPath || !metadataPath) {
     // Local dev or any build where Azure auth isn't configured. Don't
@@ -42,7 +47,7 @@ exports.default = async function sign(configuration) {
     // failure. Skipping cleanly produces an unsigned `.exe` (matching
     // the pre-RAISE-58 behavior on the same runner).
     console.warn(
-      '[sign-windows] AZURE_TRUSTED_SIGNING_DLIB_PATH or _METADATA_PATH not set — skipping signing for',
+      '[sign-windows] AZURE_ARTIFACT_SIGNING_DLIB_PATH or _METADATA_PATH not set — skipping signing for',
       filePath,
     );
     return;
@@ -53,13 +58,13 @@ exports.default = async function sign(configuration) {
   //   /v              — verbose output (handy for CI logs)
   //   /fd SHA256      — digest algorithm
   //   /tr <url>       — RFC 3161 timestamp authority. ACS endpoint
-  //                     pairs with the Trusted Signing cert; using a
+  //                     pairs with the Artifact Signing cert; using a
   //                     non-Microsoft timestamper here would attach a
   //                     valid timestamp but the cert chain wouldn't
   //                     match. Microsoft's docs are explicit about
   //                     this endpoint.
   //   /td SHA256      — timestamp digest algorithm
-  //   /dlib <path>    — pluggable signing module — the Trusted Signing
+  //   /dlib <path>    — pluggable signing module — the Artifact Signing
   //                     dlib that calls into Azure for the actual
   //                     private-key operation.
   //   /dmdf <path>    — dlib metadata JSON: endpoint, account name,
