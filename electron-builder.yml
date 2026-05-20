@@ -138,20 +138,33 @@ win:
       arch: x64
     - target: zip
       arch: x64
-  # Code signing — currently UNSIGNED (RAISE-45 phase 1).
+  # Code signing via Azure Trusted Signing (RAISE-58).
   #
-  # No `CSC_LINK` / `CSC_KEY_PASSWORD` env vars are set on the
-  # `build-win` GitHub Actions job, so electron-builder skips signing
-  # and writes a plain unsigned NSIS installer. SmartScreen warns end
-  # users on first download for a brief reputation-build window — an
-  # acceptable tradeoff while the Azure Artifact Signing integration
-  # is being provisioned.
+  # `signtoolOptions.sign` is invoked by electron-builder for every
+  # `.exe` it produces during the build — the unpacked app, helper
+  # exes (e.g. `elevate.exe`), the uninstaller stub, and the final
+  # NSIS installer. The callback in `scripts/sign-windows.cjs` shells
+  # out to `signtool.exe` (Windows SDK, pre-installed on
+  # `windows-latest` runners) with the Trusted Signing dlib, which
+  # delegates the actual signing to Microsoft's HSM-hosted cert.
   #
-  # When signing lands, this section will gain a `signtoolOptions.sign`
-  # callback that shells out to the Azure trusted-signing client
-  # against an OIDC-federated workload identity (no static `.pfx` on
-  # the runner). See docs/release-process.md "Windows signing — deferred".
+  # The CI workflow `.github/workflows/release.yml` sets two env vars
+  # the callback reads:
+  #   AZURE_TRUSTED_SIGNING_DLIB_PATH       — abs path to
+  #                                            Azure.CodeSigning.Dlib.dll
+  #   AZURE_TRUSTED_SIGNING_METADATA_PATH   — abs path to the JSON
+  #                                            describing endpoint
+  #                                            + account + cert profile
+  #
+  # When either env var is missing (local `npm run build:win` without
+  # Azure auth), the callback logs a "skipping" warning and returns
+  # — producing an unsigned `.exe`. Matches the pre-RAISE-58 behavior
+  # for local dev. See docs/release-process.md "Windows signing".
   #   https://www.electron.build/code-signing#windows
+  #   https://learn.microsoft.com/en-us/azure/trusted-signing/
+  signtoolOptions:
+    sign: ./scripts/sign-windows.cjs
+    signingHashAlgorithms: [sha256]
 
 nsis:
   oneClick: false

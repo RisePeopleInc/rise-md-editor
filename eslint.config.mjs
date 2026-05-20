@@ -28,5 +28,20 @@ export default [
     files: ['src/main/**/*.ts', 'src/preload/**/*.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
+  {
+    // Build-time helper scripts (CommonJS, Node-only). Lives outside
+    // src/ so the renderer/main configs above don't pick it up.
+    files: ['scripts/**/*.{js,cjs}'],
+    languageOptions: {
+      globals: { ...globals.node },
+      sourceType: 'commonjs',
+    },
+    rules: {
+      // CJS by design — these scripts are invoked by tools that
+      // expect a `require`-able module (electron-builder's sign
+      // callback is a CommonJS contract).
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
   prettier,
 ];

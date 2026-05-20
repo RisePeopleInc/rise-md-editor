@@ -16,7 +16,7 @@ This document covers what the workflow expects, how to cut a release, and how to
 4. **Review the draft Release** at `https://github.com/RisePeopleInc/rise-md-editor/releases`. Both `latest-mac.yml` and `latest.yml` should be present alongside the installers — these are what `electron-updater` reads.
 5. **Smoke-test** the installers by downloading and running them on a clean machine (or VM). Verify:
    - macOS: Gatekeeper shows "macOS verified that this app is free of malware" with an **Open** button (not the "Apple could not verify" dialog).
-   - Windows: SmartScreen warns on first download (expected — see _Windows signing — deferred_ below); click _More info_ → _Run anyway_.
+   - Windows: installer launches without the "Unknown publisher" SmartScreen warning. Right-click → Properties → Digital Signatures → details should show **Rise People Inc.** as the verified signer. (Reputation-based SmartScreen may still nag for the first few dozen downloads of a brand-new binary; that's separate from the unknown-publisher warning and fades with usage.)
 6. **Publish** the draft Release. This makes it available to existing installs via electron-updater on next launch.
 
 ## Dry-run via `workflow_dispatch`
@@ -46,15 +46,38 @@ All five live under _Settings → Secrets and variables → Actions_ on the repo
 | `APPLE_APP_SPECIFIC_PASSWORD` | https://appleid.apple.com → _Sign-In and Security_ → _App-Specific Passwords_ | 16 chars, format `xxxx-xxxx-xxxx-xxxx`. Apple shows it once at creation — record in 1Password immediately. |
 | `APPLE_TEAM_ID`               | `TJFLUA3UJ3`                                                                  | Rise's Apple Developer team ID; matches the cert's Common Name                                             |
 
-### Windows signing — deferred
+### Windows signing — Azure Trusted Signing
 
-No Windows signing secrets are configured right now. RAISE-45 phase 1 ships unsigned Windows installers; the workflow's `build-win` job intentionally has no `CSC_*` env vars wired, so electron-builder skips signing and emits a plain `.exe`.
+Windows installers are signed via [Azure Trusted Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) ([RAISE-58](https://risepeople.atlassian.net/browse/RAISE-58)). FIPS 140-2 Level 3 HSM-backed cert, ~$10/month (Basic tier). The cert never leaves Microsoft's HSM — the build runner authenticates to Azure via OIDC federation, calls the signing service through `signtool.exe` + the Trusted Signing dlib, and the service signs in place.
 
-**Why**: SSL.com eSigner ($65/yr) is the obvious cheap option but lacks a SOC 2 Type II report, which complicates Rise's vendor assessment. Azure Artifact Signing (FIPS 140-2 Level 3, SOC 2 Type II via Microsoft) is the chosen replacement at ~$120/yr — but it requires a Microsoft Entra ID tenant + workload-identity OIDC federation setup that's tracked separately.
+**Three new repo secrets** (under _Settings → Secrets and variables → Actions_):
 
-**Impact for users**: SmartScreen Defender warns on first download for a few weeks until the unsigned binary builds reputation. Click _More info_ → _Run anyway_ to install. Auto-update across versions still works because `electron-updater` validates against the SHA listed in `latest.yml` rather than a code-signing chain.
+| Secret                  | Source                                                 | Notes                                                  |
+| ----------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
+| `AZURE_TENANT_ID`       | Microsoft Entra directory ID                           | Steve's tenant: `0123a73c-a400-44e5-8960-15337cf2e8f0` |
+| `AZURE_CLIENT_ID`       | App registration `rise-md-editor-github-signing`       | `1335db74-9168-463d-b6de-940d8e9ad742`                 |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription holding the Trusted Signing account | `a1471a7e-eaf3-4a3b-adfc-ae05298698e1`                 |
 
-**When signing lands**: the `build-win` step will gain a `signtoolOptions.sign` callback in `electron-builder.yml` plus an Azure-auth step in the workflow (OIDC federation, no long-lived secrets on the runner). Until then, the workflow comment block in `build-win` documents the future shape so the integration is straightforward.
+None of these are sensitive in the traditional sense (they're publicly-visible identifiers), but they're configured as secrets so they don't leak into PRs or fork logs.
+
+**Non-secret config** (hardcoded in the workflow):
+
+|                         |                                        |
+| ----------------------- | -------------------------------------- |
+| Account URI             | `https://eus.codesigning.azure.net/`   |
+| Trusted Signing account | `rise-md-editor-signing` (East US)     |
+| Certificate profile     | `rise-md-editor-public` (Public Trust) |
+
+**OIDC federation** — the signing job declares `environment: rise-md-editor-signing` and the Entra app registration has a federated credential keyed to that environment + repo. Only workflow runs that match both can mint an Azure access token. No long-lived service-principal secret on the runner.
+
+**Impact for users**: signed installers no longer trigger SmartScreen's "Unknown publisher" warning. Reputation-based SmartScreen may still nag for the first dozens of installs of a brand-new binary; that fades after a few hundred downloads.
+
+**SmartScreen audit notes**: Right-click installer → Properties → Digital Signatures → details should show:
+
+- Signer: `Rise People Inc.` (matches the Identity Validation submitted to Microsoft)
+- Issuer: chains up to Microsoft's trusted root
+- Status: This digital signature is OK
+- Timestamp: stamped by `http://timestamp.acs.microsoft.com`
 
 ## Troubleshooting
 

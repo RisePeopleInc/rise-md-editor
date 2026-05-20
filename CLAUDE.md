@@ -16,17 +16,17 @@ This repo is internal to Rise. License is `UNLICENSED`. See [`docs/license-ratio
 
 ## Tech stack
 
-| Layer          | What                       | Notes                                                       |
-| -------------- | -------------------------- | ----------------------------------------------------------- |
-| Shell          | Electron 33                | Hardened renderer, contextIsolation, no nodeIntegration     |
-| Bundler        | electron-vite (Vite 5)     | Three Vite builds (main / preload / renderer)               |
-| Source editor  | Monaco                     | VS Code's editor; six Gruvbox theme variants                |
-| WYSIWYG editor | Milkdown 7                 | ProseMirror underneath; commonmark + gfm presets            |
-| UI             | React 19 + Tailwind CSS 4  | No global state library — composed React hooks              |
-| Persistence    | electron-store (main only) | Renderer never touches it directly                          |
-| Packaging      | electron-builder 25        | Signed/notarized macOS, unsigned Windows (signing deferred) |
-| Auto-update    | electron-updater           | GitHub Releases feed                                        |
-| Runtime        | Node 22                    | Pinned in `.nvmrc`                                          |
+| Layer          | What                       | Notes                                                   |
+| -------------- | -------------------------- | ------------------------------------------------------- |
+| Shell          | Electron 33                | Hardened renderer, contextIsolation, no nodeIntegration |
+| Bundler        | electron-vite (Vite 5)     | Three Vite builds (main / preload / renderer)           |
+| Source editor  | Monaco                     | VS Code's editor; six Gruvbox theme variants            |
+| WYSIWYG editor | Milkdown 7                 | ProseMirror underneath; commonmark + gfm presets        |
+| UI             | React 19 + Tailwind CSS 4  | No global state library — composed React hooks          |
+| Persistence    | electron-store (main only) | Renderer never touches it directly                      |
+| Packaging      | electron-builder 25        | Signed/notarized macOS, Azure-Trusted-Signed Windows    |
+| Auto-update    | electron-updater           | GitHub Releases feed                                    |
+| Runtime        | Node 22                    | Pinned in `.nvmrc`                                      |
 
 **Why two editors?** Markdown is text; ProseMirror is a tree. Round-tripping every edit through serialization would be lossy and slow. Source mode gives power users a byte-perfect path; WYSIWYG gives non-technical users a familiar editing surface. The cost is dual maintenance — every feature change considers both.
 
