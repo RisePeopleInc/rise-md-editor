@@ -80,6 +80,18 @@ interface WysiwygEditorProps {
   ref?: Ref<WysiwygEditorHandle>;
   content: string;
   onChange: (markdown: string) => void;
+  /**
+   * RAISE-55 follow-up: invoked instead of `onChange` when the editor
+   * emits markdown before the user has interacted with the tab. Lets
+   * fileState capture the editor's post-parse / post-init-transaction
+   * markdown as the dirty-comparison baseline, so cosmetic round-trip
+   * drift (autolinks added to bare URLs, list-marker normalization,
+   * etc.) doesn't show as dirty. After the first input event on this
+   * editor — keydown / paste / drop / `input` from anywhere inside
+   * the WysiwygEditor wrapper, including the frontmatter textarea —
+   * all subsequent emits flow through `onChange` as real user edits.
+   */
+  onMarkdownBaseline?: (markdown: string) => void;
   /** Restored on mount via the scroll-container ref. */
   initialScrollTop?: number;
   /** ProseMirror cursor offset to restore once Milkdown is mounted. */
@@ -213,6 +225,23 @@ interface MilkdownBodyProps {
   initial: string;
   initialCursorOffset?: number;
   onMarkdownChange: (markdown: string) => void;
+  /**
+   * RAISE-55 follow-up: invoked instead of `onMarkdownChange` when the
+   * Milkdown listener fires its post-parse / post-init-transaction
+   * emit BEFORE any user input on the WysiwygEditor wrapper. Routed by
+   * `hasUserInteractedRef` below. See WysiwygEditorProps for the full
+   * rationale.
+   */
+  onMarkdownBaseline?: (markdown: string) => void;
+  /**
+   * RAISE-55 follow-up: owned by the WysiwygEditor parent and set to
+   * `true` by an `input`-event listener on the parent's wrapper div.
+   * MilkdownBody's `markdownUpdated` callback reads `.current` at emit
+   * time to decide whether the emit is an init transaction (route
+   * through `onMarkdownBaseline`) or a real user edit (route through
+   * `onMarkdownChange`).
+   */
+  hasUserInteractedRef: React.MutableRefObject<boolean>;
   onImageDrop?: (files: File[]) => Promise<ImageInsertion[]>;
   onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
   /** Used by the image NodeView to resolve relative src → rise-md-asset:// URL. */
@@ -226,6 +255,8 @@ function MilkdownBody({
   initial,
   initialCursorOffset,
   onMarkdownChange,
+  onMarkdownBaseline,
+  hasUserInteractedRef,
   onImageDrop,
   onImagePaste,
   markdownPath,
@@ -235,6 +266,8 @@ function MilkdownBody({
   // re-renders with a new closure.
   const onChangeRef = useRef(onMarkdownChange);
   onChangeRef.current = onMarkdownChange;
+  const onBaselineRef = useRef(onMarkdownBaseline);
+  onBaselineRef.current = onMarkdownBaseline;
 
   // Capture initial cursor offset in a ref so the listener (registered once
   // at editor creation) closes over the latest value rather than a stale
@@ -315,7 +348,26 @@ function MilkdownBody({
               unescapeHeadingNumberDot(emojiToShortcodes(stripEmptyParagraphMarkers(markdown))),
             ),
           );
-          onChangeRef.current(processed);
+          // RAISE-55 follow-up: route the emit to the baseline path
+          // when no user input has been observed on this WysiwygEditor
+          // instance yet (the post-parse + post-init-transaction emit
+          // from Milkdown's listener). After the first input event on
+          // the editor's wrapper — keydown / paste / drop / `input`,
+          // from either the body or the frontmatter textarea — every
+          // subsequent emit is a real user edit and flows through
+          // `onChange`. The parent owns the ref so frontmatter-side
+          // interactions count too.
+          if (hasUserInteractedRef.current) {
+            onChangeRef.current(processed);
+          } else if (onBaselineRef.current) {
+            onBaselineRef.current(processed);
+          } else {
+            // Backstop: parent didn't wire `onMarkdownBaseline`. Fall
+            // back to the user-edit callback so content still
+            // propagates — slightly worse dirty-tracking than ideal
+            // but no data loss.
+            onChangeRef.current(processed);
+          }
         });
         // Once Milkdown finishes its initial mount, jump the caret to the
         // captured ProseMirror offset (clamped). This is the WYSIWYG
@@ -858,6 +910,7 @@ export function WysiwygEditor({
   ref,
   content,
   onChange,
+  onMarkdownBaseline,
   initialScrollTop,
   initialCursorOffset,
   onImageDrop,
@@ -907,13 +960,67 @@ export function WysiwygEditor({
   const bodyRef = useRef<string>(initialSplit.body);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onBaselineRef = useRef(onMarkdownBaseline);
+  onBaselineRef.current = onMarkdownBaseline;
+
+  // RAISE-55 follow-up: tracks whether the user has interacted with this
+  // WysiwygEditor instance (either the frontmatter textarea or the
+  // Milkdown body). Set to `true` by the wrapper-level `input` listener
+  // below, OR explicitly by `handleFrontmatterChange` as a belt-and-
+  // suspenders (the textarea fires `input` first, but doing it
+  // synchronously here means the order can't get unlucky).
+  //
+  // MilkdownBody reads `.current` inside its `markdownUpdated` callback
+  // to decide whether the current emit is an init transaction (route
+  // through `onMarkdownBaseline`) or a real user edit (route through
+  // `onMarkdownChange`).
+  //
+  // Mount-keyed via `useRef`: every fresh instance of WysiwygEditor
+  // (tab switch, mode switch, file reload via `loadEpoch` bump) starts
+  // with `false`, which is exactly when we want to be capturing the
+  // baseline.
+  const hasUserInteractedRef = useRef(false);
+
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  // RAISE-55 follow-up: wire the user-interaction signal. `input` fires
+  // when the value of any descendant text input / contenteditable
+  // actually changes (Milkdown's body, the frontmatter textarea). It
+  // does NOT fire for selection / cursor movement / Cmd+S / Cmd+W /
+  // mode-switch shortcuts — exactly the events we want to ignore.
+  // Capture phase (`true` as the third arg) ensures we see the event
+  // before ProseMirror or React stops propagation.
+  useEffect(() => {
+    const root = wrapperRef.current;
+    if (!root) return;
+    const handler = () => {
+      hasUserInteractedRef.current = true;
+    };
+    root.addEventListener('input', handler, true);
+    return () => {
+      root.removeEventListener('input', handler, true);
+    };
+  }, []);
 
   const emit = useCallback((nextFrontmatter: string | null, nextBody: string) => {
     onChangeRef.current(joinFrontmatter(nextFrontmatter, nextBody));
   }, []);
 
+  const emitBaseline = useCallback(
+    (nextFrontmatter: string | null, nextBody: string) => {
+      onBaselineRef.current?.(joinFrontmatter(nextFrontmatter, nextBody));
+    },
+    [],
+  );
+
   const handleFrontmatterChange = useCallback(
     (next: string) => {
+      // Defensive: the textarea fires `input` (which sets
+      // hasUserInteractedRef via the wrapper listener) before this
+      // handler runs, but capturing it here too means a future code
+      // path that calls handleFrontmatterChange programmatically
+      // (e.g. paste, undo) won't accidentally bypass the signal.
+      hasUserInteractedRef.current = true;
       frontmatterRef.current = next;
       setFrontmatter(next);
       emit(next, bodyRef.current);
@@ -927,6 +1034,17 @@ export function WysiwygEditor({
       emit(frontmatterRef.current, markdown);
     },
     [emit],
+  );
+
+  // RAISE-55 follow-up: the body's "baseline" path. MilkdownBody picks
+  // this over handleBodyChange when no user interaction has been
+  // observed yet — see MilkdownBody's `markdownUpdated` callback.
+  const handleBodyBaseline = useCallback(
+    (markdown: string) => {
+      bodyRef.current = markdown;
+      emitBaseline(frontmatterRef.current, markdown);
+    },
+    [emitBaseline],
   );
 
   // Image-click tooltip state. Shows filename + "View full size" when
@@ -1007,7 +1125,7 @@ export function WysiwygEditor({
 
   return (
     <MilkdownProvider>
-      <div className="flex h-full w-full flex-col bg-app">
+      <div ref={wrapperRef} className="flex h-full w-full flex-col bg-app">
         <Toolbar ref={toolbarRef} requireSavedPath={requireSavedPath} />
         <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <div className="mx-auto max-w-[720px] px-6 py-8">
@@ -1044,6 +1162,8 @@ export function WysiwygEditor({
                 initial={initialSplit.body}
                 initialCursorOffset={initialCursorOffset}
                 onMarkdownChange={handleBodyChange}
+                onMarkdownBaseline={handleBodyBaseline}
+                hasUserInteractedRef={hasUserInteractedRef}
                 onImageDrop={onImageDrop}
                 onImagePaste={onImagePaste}
                 markdownPath={markdownPath}

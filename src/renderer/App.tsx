@@ -960,6 +960,7 @@ function AppContent() {
             <EditorContainer
               tab={file.activeTab}
               onContentChange={file.setContent}
+              onContentBaseline={file.setMarkdownBaseline}
               onModeChange={handleModeChange}
               onCursorChange={setCursor}
               sourceRef={editorRef}
