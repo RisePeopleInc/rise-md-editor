@@ -796,18 +796,50 @@ function AppContent() {
     openExportPdfModal,
   ]);
 
-  // External-change reload prompt: when chokidar reports a content change
-  // for a file that's currently open in a tab, ask the user if they want
-  // to discard their working copy and reload from disk.
+  // RAISE-56: external-change handling. When chokidar reports a content
+  // change for a file that's open in a tab, the response splits on
+  // whether the local copy is dirty:
+  //
+  //   - Clean tab: silently refresh from disk. No prompt. This is the
+  //     "Claude (or any external tool) edits a file the user has open;
+  //     they just see the new content" path — the canonical Cowork
+  //     workflow this editor was built around.
+  //
+  //   - Dirty tab: prompt with the existing confirm-reload dialog
+  //     so the user can choose to keep their local edits or discard
+  //     them in favour of the on-disk version. Same UX as before.
+  //
+  // Main's `recentlyTouched` debounce (~1.5s after the editor's own
+  // saves and opens) already suppresses the watcher event for I/O
+  // initiated by the renderer, so this path never fires "we just
+  // wrote a file → reload it?" feedback loops.
+  //
+  // Note: this only fires when a folder is open (Project Mode);
+  // single-file mode has no watcher today. Tracked as a follow-up
+  // on RAISE-56.
   useEffect(() => {
     const off = window.api.folder.onFileChanged(async (filePath) => {
       const tab = file.tabs.find((t) => t.path === filePath);
       if (!tab) return;
-      const isDirty = isTabDirty(tab);
-      const reload = await window.api.confirmFileReload(
-        basenameOfPath(filePath),
-        isDirty,
-      );
+
+      if (!isTabDirty(tab)) {
+        // Clean local copy — silently refresh.
+        try {
+          const result = await window.api.files.openPath(filePath);
+          file.refreshTabFromDisk(result.path, result.content);
+        } catch (err) {
+          // Transient FS errors (file briefly missing during atomic
+          // rename, locked by another process, etc.) are uninteresting
+          // for the silent path — we'll catch the next change event
+          // once the write settles. Log to console for debug visibility
+          // but don't pop a dialog.
+          console.warn('Silent reload failed for', filePath, err);
+        }
+        return;
+      }
+
+      // Dirty local copy — prompt as before.
+      const reload = await window.api.confirmFileReload(basenameOfPath(filePath), true);
       if (!reload) return;
       try {
         const result = await window.api.files.openPath(filePath);

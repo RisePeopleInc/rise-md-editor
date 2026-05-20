@@ -182,11 +182,17 @@ Save path:
   IPC files:save → main writes bytes → reply with new mtime →
   fileState clears dirty flag
 
-External-edit detection:
+External-edit detection (RAISE-56):
   chokidar fires → main coalesces (debounce 50ms per path) →
-  webContents.send('folder:tree-changed') → renderer diffs the new tree
-  against current state, refreshes affected tabs (with dirty-prompt if
-  the tab is dirty)
+  webContents.send('folder:file-changed') → renderer's onFileChanged
+  handler in App.tsx:
+    - Clean tab (isTabDirty === false): silently re-fetch from disk
+      and refreshTabFromDisk. No prompt. Canonical "Claude edits a
+      file while user has it open" path.
+    - Dirty tab: prompt "this file changed on disk — reload?" so
+      unsaved local edits aren't blown away.
+  Only fires in Project Mode (folder open); single-file mode has
+  no watcher today.
 ```
 
 The `useFileState` hook is the coordinator — it owns the tab list and dirty flags and is the only thing that calls `files:save`. Editors emit content via `onChange` callbacks; the hook decides when to debounce / persist / mark clean.
