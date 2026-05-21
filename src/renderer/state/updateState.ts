@@ -12,13 +12,28 @@ export function useUpdateState(): UpdateState & { install: () => void } {
   const [state, setState] = useState<UpdateState>({ status: 'idle' });
 
   useEffect(() => {
+    // Subscribe-then-fetch ordering to close the initial-state race
+    // ([RAISE-20](https://risepeople.atlassian.net/browse/RAISE-20)). If
+    // we did getState() first and registered the subscription on its
+    // resolution, a state push from main between the IPC send and its
+    // response would be dropped — and even after, ordering matters:
+    // with the subscription registered first, a push that lands mid-init
+    // (e.g. main flips `idle` → `downloading` while `getState()` is in
+    // flight) gets applied via `setState`, and we must not let the
+    // stale `getState` reply overwrite it. `receivedFromSubscription`
+    // is that guard: once a live event has populated state, we discard
+    // the initial fetch.
     let cancelled = false;
+    let receivedFromSubscription = false;
+    const off = window.api.update.onStateChange((next) => {
+      receivedFromSubscription = true;
+      setState(next);
+    });
     void (async () => {
       const initial = await window.api.update.getState();
-      if (cancelled) return;
+      if (cancelled || receivedFromSubscription) return;
       setState(initial);
     })();
-    const off = window.api.update.onStateChange((next) => setState(next));
     return () => {
       cancelled = true;
       off();
