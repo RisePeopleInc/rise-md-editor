@@ -795,12 +795,39 @@ ipcMain.handle('folder:rename', async (_, oldPath: string, newName: string) =>
   folderOps.renamePath(oldPath, newName),
 );
 
+// RAISE-13: Move a file or folder into a new parent directory.
+// Drag-and-drop in the sidebar tree calls this. Validation lives in
+// `folderOps.movePath` — no-op moves, self-into-self, descendant-
+// of-self, collisions, and cross-device errors are all surfaced as
+// throws so the renderer can show a clean error dialog.
+ipcMain.handle('folder:move', async (_, srcPath: string, destDir: string) =>
+  folderOps.movePath(srcPath, destDir),
+);
+
+// RAISE-13 follow-up: Opt-drag (macOS) / Ctrl-drag (Win/Linux) creates
+// a copy instead of a move. Same-parent copies auto-rename
+// (`report.md` → `report 2.md`); cross-parent collisions throw EEXIST.
+ipcMain.handle('folder:copy', async (_, srcPath: string, destDir: string) =>
+  folderOps.copyPath(srcPath, destDir),
+);
+
 ipcMain.handle('folder:trash', async (_, itemPath: string) => {
   await folderOps.trashPath(itemPath);
 });
 
 ipcMain.on('folder:reveal', (_, itemPath: string) => {
   folderOps.revealInFolder(itemPath);
+});
+
+// RAISE-13 follow-up: open a file in the user's system default
+// application — `.html` lands in their browser or VS Code,
+// `.pdf` in Preview or Acrobat, etc., based on OS file
+// associations. Double-clicking a non-markdown file in the
+// sidebar tree fires this. `shell.openPath` returns the error
+// string (empty on success) which we forward to the renderer
+// so it can surface a dialog if the open fails.
+ipcMain.handle('folder:open-in-system', async (_, itemPath: string): Promise<string> => {
+  return shell.openPath(itemPath);
 });
 
 ipcMain.handle(

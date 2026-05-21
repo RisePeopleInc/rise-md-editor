@@ -186,8 +186,19 @@ export interface RaiseFolderApi {
   createFile: (parentPath: string, name: string) => Promise<string>;
   createFolder: (parentPath: string, name: string) => Promise<string>;
   rename: (oldPath: string, newName: string) => Promise<string>;
+  /** RAISE-13: move a file or folder into a new parent directory.
+   *  Returns the new absolute path. Throws on collision /
+   *  self-into-self / descendant-of-self / cross-device. */
+  move: (srcPath: string, destDir: string) => Promise<string>;
+  /** RAISE-13 follow-up: copy a file or folder into a new parent
+   *  directory. Same-parent copies auto-rename (`report.md` →
+   *  `report 2.md`); cross-parent collisions throw EEXIST. */
+  copy: (srcPath: string, destDir: string) => Promise<string>;
   trash: (itemPath: string) => Promise<void>;
   reveal: (itemPath: string) => void;
+  /** RAISE-13 follow-up: open a file in the OS default app. Returns
+   *  the error string (empty on success). */
+  openInSystem: (itemPath: string) => Promise<string>;
   confirmDelete: (name: string, isDirectory: boolean) => Promise<boolean>;
   statPath: (p: string) => Promise<'file' | 'directory' | 'missing'>;
   showItemMenu: (payload: {

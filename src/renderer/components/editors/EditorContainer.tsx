@@ -131,6 +131,7 @@ export function EditorContainer({
             wordWrap={wordWrap}
             onImageDrop={onImageDrop}
             onImagePaste={onImagePaste}
+            markdownPath={tab.path}
           />
         )}
       </div>

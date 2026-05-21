@@ -40,6 +40,11 @@ import {
 import { resolveAssetUrl } from '../../state/assetUrl';
 import { getMarkdownFromClipboard, unescapeHeadingNumberDot } from '../../state/clipboardPaste';
 import {
+  computeInsertedPath,
+  getTreeDragSourcePath,
+  isImagePath,
+} from '../../state/sidebarDrop';
+import {
   commentDecorationsPlugin,
   unescapeCommentDelimiters,
   unescapeIndentEntities,
@@ -551,13 +556,42 @@ function MilkdownBody({
           handleDrop(view, event) {
             const dt = (event as DragEvent).dataTransfer;
             if (!dt) return false;
-            const images = pickImageFiles(dt.files);
-            if (images.length === 0) return false;
             const dropEvent = event as DragEvent;
             const coords = view.posAtCoords({
               left: dropEvent.clientX,
               top: dropEvent.clientY,
             });
+
+            // Sidebar-originated drag (RAISE-13 follow-up). The
+            // RAISE_TREE_DND_TYPE marker tells us this is one of
+            // our own drags rather than a Finder file drop. Image
+            // files insert as a markdown image; non-image files are
+            // intentionally suppressed (no-op) so ProseMirror's
+            // default doesn't drop the raw path text into the doc.
+            // A future ticket can extend non-image handling
+            // (markdown link, attachment reference, etc.).
+            const treeSrc = getTreeDragSourcePath(dt);
+            if (treeSrc) {
+              event.preventDefault();
+              if (!coords || !isImagePath(treeSrc)) return true;
+              const editor = editorInstanceRef.current;
+              if (!editor) return true;
+              const rel = computeInsertedPath(treeSrc, markdownPathRef.current);
+              const stem = (rel.split('/').pop() ?? '').replace(/\.[^.]+$/, '');
+              // Move caret to the drop point first so
+              // insertImageCommand (which uses replaceSelectionWith)
+              // lands the image there rather than at the previous
+              // selection.
+              const max = view.state.doc.content.size;
+              const safe = Math.min(Math.max(coords.pos, 0), max);
+              view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, safe)));
+              editor.action(callCommand(insertImageCommand.key, { src: rel, alt: stem }));
+              view.focus();
+              return true;
+            }
+
+            const images = pickImageFiles(dt.files);
+            if (images.length === 0) return false;
             if (!coords) return false;
             event.preventDefault();
             void (async () => {

@@ -365,6 +365,79 @@ function AppContent() {
   // on success. On error the inline input stays mounted with the user's
   // typed value preserved — they can fix the conflict and re-press Enter
   // without retyping from scratch.
+  // RAISE-13: drag-and-drop move. FileTree validates renderer-side
+  // (no-op moves, self-into-self, descendant-of-self all disable the
+  // drop before this fires), so by the time we get here the move
+  // *should* succeed. Main re-validates and surfaces collision /
+  // cross-device errors as throws — we map those to user-facing
+  // dialogs and otherwise rely on chokidar's onTreeChanged signal
+  // to re-render the tree from disk.
+  const handleMove = useCallback(
+    async (srcPath: string, destDir: string) => {
+      try {
+        const newPath = await window.api.folder.move(srcPath, destDir);
+        // Keep open tabs aligned with the new path. `relocateTabs`
+        // also rewrites descendants of a moved folder, so a file
+        // open inside `srcPath/sub/foo.md` follows the move
+        // automatically.
+        file.relocateTabs(srcPath, newPath);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        window.api.showError(
+          'Could not move',
+          /EEXIST/i.test(message)
+            ? message.includes('already exists')
+              ? message
+              : `An item with that name already exists in the destination folder.`
+            : message,
+        );
+      }
+    },
+    [file],
+  );
+
+  // RAISE-13 follow-up: double-click on a non-markdown file in the
+  // sidebar opens it in the OS default application. `shell.openPath`
+  // returns the error string (empty on success) so we forward it to
+  // the user-facing error dialog when present. Common failure modes
+  // include no app associated with the extension (rare on macOS;
+  // surfaces a "no default app" system dialog from the OS itself
+  // before this handler even runs) and permission errors on
+  // network-mounted volumes.
+  const handleOpenExternal = useCallback(async (filePath: string) => {
+    try {
+      const errMessage = await window.api.folder.openInSystem(filePath);
+      if (errMessage) {
+        window.api.showError('Could not open file', errMessage);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      window.api.showError('Could not open file', message);
+    }
+  }, []);
+
+  // RAISE-13 follow-up: opt-drag / ctrl-drag duplicates the dragged
+  // item. Unlike move, the source is unchanged — no `relocateTabs`
+  // call needed. chokidar's tree-changed signal repaints the
+  // sidebar with the new file. Same-parent copies auto-rename
+  // (main does the allocation); cross-parent collisions throw
+  // EEXIST just like move.
+  const handleCopy = useCallback(async (srcPath: string, destDir: string) => {
+    try {
+      await window.api.folder.copy(srcPath, destDir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      window.api.showError(
+        'Could not copy',
+        /EEXIST/i.test(message)
+          ? message.includes('already exists')
+            ? message
+            : `An item with that name already exists in the destination folder.`
+          : message,
+      );
+    }
+  }, []);
+
   const handleRenameSubmit = useCallback(
     async (oldPath: string, newName: string) => {
       if (newName === '') {
@@ -1056,12 +1129,15 @@ function AppContent() {
               expanded={sidebar.expanded}
               onToggle={sidebar.toggleExpanded}
               onOpenFile={(p) => void handleOpenPath(p)}
+              onOpenExternal={(p) => void handleOpenExternal(p)}
               onContextMenu={handleTreeContextMenu}
               editingPath={sidebar.editingPath}
               creating={sidebar.creating}
               onRenameSubmit={(p, name) => void handleRenameSubmit(p, name)}
               onCreateSubmit={(parent, kind, name) => void handleCreateSubmit(parent, kind, name)}
               onEditCancel={sidebar.cancelEdit}
+              onMove={(src, dest) => void handleMove(src, dest)}
+              onCopy={(src, dest) => void handleCopy(src, dest)}
             />
           )}
         </Sidebar>

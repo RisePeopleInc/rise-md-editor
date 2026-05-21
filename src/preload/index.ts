@@ -308,10 +308,33 @@ const folder = {
     ipcRenderer.invoke('folder:create-folder', parentPath, name),
   rename: (oldPath: string, newName: string): Promise<string> =>
     ipcRenderer.invoke('folder:rename', oldPath, newName),
+  /**
+   * RAISE-13: move a file or folder into a new parent directory.
+   * Returns the new absolute path. Throws on invalid moves
+   * (collision, self-into-self, descendant-of-self, cross-device).
+   */
+  move: (srcPath: string, destDir: string): Promise<string> =>
+    ipcRenderer.invoke('folder:move', srcPath, destDir),
+  /**
+   * RAISE-13 follow-up: copy a file or folder into a new parent
+   * directory. Same-parent copies auto-rename (`report.md` →
+   * `report 2.md`); cross-parent copies require an unused name.
+   */
+  copy: (srcPath: string, destDir: string): Promise<string> =>
+    ipcRenderer.invoke('folder:copy', srcPath, destDir),
   trash: (itemPath: string): Promise<void> => ipcRenderer.invoke('folder:trash', itemPath),
   reveal: (itemPath: string): void => {
     ipcRenderer.send('folder:reveal', itemPath);
   },
+  /**
+   * RAISE-13 follow-up: open a file in the OS default application
+   * (`.html` → browser or VS Code per the user's file
+   * associations, `.pdf` → Preview / Acrobat, etc.). Returns the
+   * error string (empty on success) so the caller can decide
+   * whether to surface a dialog.
+   */
+  openInSystem: (itemPath: string): Promise<string> =>
+    ipcRenderer.invoke('folder:open-in-system', itemPath),
   confirmDelete: (name: string, isDirectory: boolean): Promise<boolean> =>
     ipcRenderer.invoke('folder:confirm-delete', name, isDirectory),
   statPath: (p: string): Promise<'file' | 'directory' | 'missing'> =>

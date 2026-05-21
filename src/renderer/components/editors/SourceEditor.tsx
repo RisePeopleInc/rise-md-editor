@@ -15,6 +15,11 @@ import {
   type ImageInsertion,
   type PasteImageSnapshot,
 } from '../../state/imageInsert';
+import {
+  computeInsertedPath,
+  getTreeDragSourcePath,
+  isImagePath,
+} from '../../state/sidebarDrop';
 import type { WordWrap } from '../../env';
 
 export interface CursorPosition {
@@ -118,6 +123,15 @@ interface SourceEditorProps {
    * handler returns.
    */
   onImagePaste?: (snapshot: PasteImageSnapshot) => Promise<ImageInsertion | null>;
+  /**
+   * RAISE-13 follow-up: the document's current filesystem path,
+   * used to compute relative paths for files dragged from the
+   * sidebar. Null for unsaved documents — in that case the drop
+   * inserts the absolute path with forward slashes. Reads via a
+   * ref inside the drop handler so the value is always current
+   * without having to re-attach the listener on every change.
+   */
+  markdownPath?: string | null;
 }
 
 const MONO_STACK =
@@ -155,6 +169,7 @@ export function SourceEditor({
   wordWrap,
   onImageDrop,
   onImagePaste,
+  markdownPath,
 }: SourceEditorProps) {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   // Stable options identity per wordWrap value. `@monaco-editor/react`
@@ -176,6 +191,12 @@ export function SourceEditor({
   // closures even after re-renders.
   const onImageDropRef = useRef(onImageDrop);
   onImageDropRef.current = onImageDrop;
+  // Ref so the drop listener (attached once on mount) sees the
+  // latest path without having to re-attach as the user switches
+  // tabs. Mirrors the same pattern WysiwygEditor uses for
+  // `markdownPath`.
+  const markdownPathRef = useRef<string | null>(markdownPath ?? null);
+  markdownPathRef.current = markdownPath ?? null;
   const onImagePasteRef = useRef(onImagePaste);
   onImagePasteRef.current = onImagePaste;
   // Capture mount-time initial cursor/scroll in refs so handleMount sees
@@ -385,10 +406,6 @@ export function SourceEditor({
         (event) => {
           const dt = (event as DragEvent).dataTransfer;
           if (!dt) return;
-          const images = pickImageFiles(dt.files);
-          if (images.length === 0) return; // Let Monaco handle plain drops.
-          event.preventDefault();
-          event.stopPropagation();
           const dropEvent = event as DragEvent;
           // Resolve the drop point to a model position. Falls back to
           // the current cursor if Monaco can't classify the click point.
@@ -397,6 +414,30 @@ export function SourceEditor({
             dropEvent.clientY,
           );
           const position = target?.position ?? instance.getPosition();
+
+          // RAISE-13 follow-up: sidebar-originated drag. Source pane
+          // (and Split's source pane) insert the file's relative path
+          // as plain text — the user is editing raw markdown here,
+          // they want the path string they'd type by hand. Image
+          // files get the relative path; non-image files are
+          // suppressed (no-op) so Monaco's default doesn't drop the
+          // raw path text at random. A future ticket can extend
+          // non-image handling (markdown link, attachment, etc.).
+          const treeSrc = getTreeDragSourcePath(dt);
+          if (treeSrc) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!position || !isImagePath(treeSrc)) return;
+            const rel = computeInsertedPath(treeSrc, markdownPathRef.current);
+            insertAt(position, rel);
+            instance.focus();
+            return;
+          }
+
+          const images = pickImageFiles(dt.files);
+          if (images.length === 0) return; // Let Monaco handle plain drops.
+          event.preventDefault();
+          event.stopPropagation();
           if (!position) return;
           void (async () => {
             const handler = onImageDropRef.current;
