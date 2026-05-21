@@ -488,5 +488,36 @@ export function htmlToPlainText(html: string): string {
   // The closing-tag substitution can produce 3+ consecutive
   // newlines around nested blocks (`</p></div>` → "\n\n"). Collapse
   // to at most two so paste output doesn't accumulate blank lines.
-  return text.replace(/\n{3,}/g, '\n\n').trim();
+  return normalizeInvisibleSpaces(text.replace(/\n{3,}/g, '\n\n')).trim();
+}
+
+/**
+ * RAISE-51 smoke-test follow-up: normalize invisible whitespace
+ * characters that web sources commonly inject and the user almost
+ * never wants in their markdown source.
+ *
+ * Specifically U+00A0 NO-BREAK SPACE → U+0020 SPACE. Web pages
+ * routinely use `&nbsp;` for French-style typography, non-wrapping
+ * layout spacing, Word `&nbsp;` artifacts, etc. These survive
+ * `textContent` extraction as literal U+00A0 chars, which render
+ * indistinguishably from ASCII spaces in Edit mode but are
+ * different bytes in the source — visible as faint dots or
+ * highlighted in Monaco's "render whitespace" mode, and treated
+ * differently by markdown parsers in some edge cases.
+ *
+ * Also strips U+FEFF (BOM / zero-width no-break space) — appears
+ * occasionally at the start of clipboard content from sources that
+ * encoded with a BOM.
+ *
+ * Deliberately conservative — does NOT touch U+200B (zero-width
+ * space), U+200C/D (joiners), U+00AD (soft hyphen). Those carry
+ * meaning in some scripts and stripping them could break content
+ * the user actually intended to preserve.
+ */
+export function normalizeInvisibleSpaces(text: string): string {
+  if (!text) return text;
+  // Match U+00A0 (NO-BREAK SPACE) and U+FEFF (BOM) via Unicode
+  // escapes, not literal characters — ESLint's no-irregular-whitespace
+  // rightly flags literal U+00A0 in source as a footgun.
+  return text.replace(/\u00A0/g, ' ').replace(/\uFEFF/g, '');
 }

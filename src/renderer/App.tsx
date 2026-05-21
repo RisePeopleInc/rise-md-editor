@@ -11,7 +11,7 @@ import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
 import { ExportPdfModal, type ExportPdfSubmitPayload } from './components/ExportPdfModal';
 import { ExportHtmlModal, type ExportHtmlSubmitPayload } from './components/ExportHtmlModal';
 import { buildPrintHtml } from './state/exportPdfHtml';
-import { htmlToPlainText } from './state/clipboardPaste';
+import { htmlToPlainText, normalizeInvisibleSpaces } from './state/clipboardPaste';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, isTabDirty, useFileState, type EditorMode } from './state/fileState';
@@ -845,12 +845,20 @@ function AppContent() {
           void (async () => {
             if (wantWysiwyg) {
               const html = await window.api.clipboard.readHTML();
+              // `htmlToPlainText` already normalises U+00A0 / U+FEFF.
               const fromHtml = html ? htmlToPlainText(html) : '';
-              const text = fromHtml || (await window.api.clipboard.readText());
+              const text =
+                fromHtml ||
+                normalizeInvisibleSpaces(await window.api.clipboard.readText());
               if (!text) return;
               wysiwygRef.current?.pastePlain(text);
             } else if (wantMonaco) {
-              const text = await window.api.clipboard.readText();
+              // Source / Split also benefit from U+00A0 normalisation
+              // — pasted webpage text into Monaco would otherwise
+              // leave non-breaking spaces in the markdown source.
+              const text = normalizeInvisibleSpaces(
+                await window.api.clipboard.readText(),
+              );
               if (!text) return;
               editorRef.current?.pastePlain(text);
             }
