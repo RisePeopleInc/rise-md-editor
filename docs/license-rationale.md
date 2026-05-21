@@ -1,12 +1,14 @@
 # License rationale
 
-This document explains where Rise MD Editor stands on licensing today and what an MIT relicensing would entail. It is **not** legal advice — the dependency analysis here is technical, but any actual license change should be run past whoever owns the IP / brand policy at Rise.
+> **Status**: MIT relicense implemented in [RAISE-57](https://risepeople.atlassian.net/browse/RAISE-57). This document is retained as a historical record of the analysis that informed the decision — it predates the actual flip and intentionally reads from the "are we sure?" perspective rather than the "this is the policy" perspective. The current state is: source is MIT, brand is reserved (see [`../LICENSE`](../LICENSE) and [`../BRAND.md`](../BRAND.md)).
 
-## Current state
+This document explains where Rise MD Editor stood on licensing before RAISE-57 and what an MIT relicensing entailed. It is **not** legal advice — the dependency analysis here is technical, but the actual license change was run past whoever owns the IP / brand policy at Rise before being implemented.
 
-- `package.json` declares `"license": "UNLICENSED"` and `"private": true`.
+## State before RAISE-57
+
+- `package.json` declared `"license": "UNLICENSED"` and `"private": true`.
 - No `LICENSE` file in the repo root.
-- Effect: all rights reserved by Rise People Inc. by default. Third parties have no permission to copy, redistribute, or modify the code.
+- Effect: all rights reserved by Rise People Inc. by default. Third parties had no permission to copy, redistribute, or modify the code.
 
 ## Why closed-source today
 
@@ -62,6 +64,24 @@ The OFL does not infect the source-code license. The app source can be MIT while
 5. **Audit any future `@risepeopleinc/*` npm dep** — none in the tree today, but if `@risepeopleinc/rcl` is ever pulled in (mentioned in the icon notes for the Rise-mark provenance) its license needs a separate check.
 6. **Add `THIRD-PARTY-NOTICES.md`** — generate via `license-checker-rseidelsohn` and check in. Several OSS Electron apps ship something equivalent in About / Help, sometimes both.
 
-## Recommendation
+## Historical recommendation
 
-Don't change anything until there's a reason to. The technical answer is: MIT works for the deps. The policy answer is: ask whoever owns the trademark and IP policy at Rise. Until there's a stakeholder asking to open-source it, "UNLICENSED + private" is a perfectly reasonable default for an internal-only tool.
+> The original recommendation was: don't change anything until there's a reason to. The trigger that overrode this was the auto-update bug — `electron-updater` returns 404 on a private repo's Releases feed because `electron-builder.yml` doesn't pass a token. Flipping the repo public was the lowest-effort fix, and once the repo was going public anyway the marginal cost of doing the full MIT flip instead of "public + no LICENSE" was a few hours of paperwork. RAISE-57 captured both.
+
+Original wording, preserved verbatim:
+
+> Don't change anything until there's a reason to. The technical answer is: MIT works for the deps. The policy answer is: ask whoever owns the trademark and IP policy at Rise. Until there's a stakeholder asking to open-source it, "UNLICENSED + private" is a perfectly reasonable default for an internal-only tool.
+
+## What actually shipped in RAISE-57
+
+1. `LICENSE` — MIT text with `Copyright © 2026 Rise People Inc.` and a closing paragraph pointing readers to `BRAND.md` for the trademark carve-out.
+2. `BRAND.md` — explicit list of reserved Rise marks (word marks, logo, `--rise-*` design tokens, product name) and a "what forks must change" checklist.
+3. `package.json` — `"license"` flipped from `"UNLICENSED"` to `"MIT"`. `"private": true` stayed (it gates npm publish, not GitHub visibility, and we don't publish to npm).
+4. `THIRD-PARTY-NOTICES.md` — generated from `license-checker-rseidelsohn` against the production dep tree.
+5. `CODE_OF_CONDUCT.md` — adopts Contributor Covenant v2.1 by reference (not inlined verbatim) with `conduct@risepeople.com` as the reporting contact.
+6. `SECURITY.md` — vulnerability-reporting policy pointing to GitHub private advisories with `security@risepeople.com` as the backup channel.
+7. README, CLAUDE.md, CHANGELOG.md updates to match the new posture.
+
+Templates were audited (`src/resources/templates/claude-md-template.md`, `skill-md-template.md`) and found to contain no Rise-confidential content — they're generic scaffolds that happen to be shipped by a Rise product.
+
+The `@risepeopleinc/rcl` dep is still not pulled into the tree. The Rise mark in `build/icon.svg` was authored fresh by tracing the canonical RCL SVG; the BRAND.md carve-out covers it.

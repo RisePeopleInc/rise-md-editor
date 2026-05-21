@@ -11,7 +11,7 @@
   "bugs": {
     "url": "https://github.com/RisePeopleInc/rise-md-editor/issues"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "main": "out/main/index.js",
   "author": "Rise People",
