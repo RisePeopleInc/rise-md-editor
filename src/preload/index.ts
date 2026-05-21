@@ -11,6 +11,7 @@ export type MenuActionType =
   | 'save'
   | 'save-as'
   | 'export-pdf'
+  | 'export-html'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -60,10 +61,7 @@ const files = {
     ipcRenderer.invoke('files:open-path', filePath),
   save: (filePath: string, content: string): Promise<void> =>
     ipcRenderer.invoke('files:save', filePath, content),
-  saveAs: (
-    content: string,
-    suggestedName?: string,
-  ): Promise<{ path: string } | null> =>
+  saveAs: (content: string, suggestedName?: string): Promise<{ path: string } | null> =>
     ipcRenderer.invoke('files:save-as', content, suggestedName),
   // webUtils.getPathForFile replaces the old File.path getter (removed in
   // Electron 32+) — needed for drag-and-drop in the sandboxed renderer.
@@ -77,13 +75,7 @@ export interface TreeNode {
   children?: TreeNode[];
 }
 
-export type ItemMenuAction =
-  | 'new-file'
-  | 'new-folder'
-  | 'rename'
-  | 'delete'
-  | 'reveal'
-  | 'open';
+export type ItemMenuAction = 'new-file' | 'new-folder' | 'rename' | 'delete' | 'reveal' | 'open';
 
 export type TemplateKind = 'claude' | 'skill';
 
@@ -112,8 +104,7 @@ const update = {
   getState: (): Promise<UpdateState> => ipcRenderer.invoke('update:get-state'),
   /** Subscribe to state transitions pushed from main. */
   onStateChange: (callback: (state: UpdateState) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, state: UpdateState): void =>
-      callback(state);
+    const handler = (_: Electron.IpcRendererEvent, state: UpdateState): void => callback(state);
     ipcRenderer.on('update:state', handler);
     return () => {
       ipcRenderer.off('update:state', handler);
@@ -153,8 +144,7 @@ export interface ThemeState {
 
 const theme = {
   get: (): Promise<ThemeState> => ipcRenderer.invoke('theme:get'),
-  setApp: (pref: ThemePreference): Promise<ThemeState> =>
-    ipcRenderer.invoke('theme:set-app', pref),
+  setApp: (pref: ThemePreference): Promise<ThemeState> => ipcRenderer.invoke('theme:set-app', pref),
   setEditor: (payload: {
     preference?: ThemePreference;
     contrast?: EditorContrast;
@@ -170,8 +160,7 @@ const theme = {
     ipcRenderer.invoke('theme:toggle-editor-word-wrap'),
   /** Subscribe to OS theme flips and explicit set events from main. */
   onChange: (callback: (state: ThemeState) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, state: ThemeState): void =>
-      callback(state);
+    const handler = (_: Electron.IpcRendererEvent, state: ThemeState): void => callback(state);
     ipcRenderer.on('theme:updated', handler);
     return () => {
       ipcRenderer.off('theme:updated', handler);
@@ -229,9 +218,26 @@ export type ExportPdfResult =
   | { status: 'canceled' }
   | { status: 'error'; message: string };
 
+/** RAISE-53: Export-to-HTML bridge. */
+export type ExportHtmlImageMode = 'inline' | 'external';
+export interface ExportHtmlOptions {
+  html: string;
+  defaultBaseName: string;
+  defaultDir: string | null;
+  imageMode: ExportHtmlImageMode;
+  markdownPath: string | null;
+  openAfter: boolean;
+}
+export type ExportHtmlResult =
+  | { status: 'saved'; path: string }
+  | { status: 'canceled' }
+  | { status: 'error'; message: string };
+
 const exportApi = {
   toPdf: (opts: ExportPdfOptions): Promise<ExportPdfResult> =>
     ipcRenderer.invoke('export:to-pdf', opts),
+  toHtml: (opts: ExportHtmlOptions): Promise<ExportHtmlResult> =>
+    ipcRenderer.invoke('export:to-html', opts),
 };
 
 const assets = {
@@ -257,10 +263,7 @@ const templates = {
    * workspace, the body is handed back so the renderer can populate an
    * untitled tab from template content.
    */
-  create: (
-    kind: TemplateKind,
-    rootPath: string | null,
-  ): Promise<TemplateCreateResult> =>
+  create: (kind: TemplateKind, rootPath: string | null): Promise<TemplateCreateResult> =>
     ipcRenderer.invoke('templates:create', { kind, rootPath }),
   claudeMdExists: (rootPath: string): Promise<boolean> =>
     ipcRenderer.invoke('templates:claude-md-exists', rootPath),
@@ -273,8 +276,7 @@ const templates = {
 
 const folder = {
   /** Show the folder dialog, populate the sidebar, and start watching. */
-  open: (): Promise<{ path: string; tree: TreeNode } | null> =>
-    ipcRenderer.invoke('folder:open'),
+  open: (): Promise<{ path: string; tree: TreeNode } | null> => ipcRenderer.invoke('folder:open'),
   /** Open a known folder path (e.g., from drag-drop or restore). */
   openPath: (folderPath: string): Promise<{ path: string; tree: TreeNode }> =>
     ipcRenderer.invoke('folder:open-path', folderPath),
@@ -293,8 +295,7 @@ const folder = {
     ipcRenderer.invoke('folder:create-folder', parentPath, name),
   rename: (oldPath: string, newName: string): Promise<string> =>
     ipcRenderer.invoke('folder:rename', oldPath, newName),
-  trash: (itemPath: string): Promise<void> =>
-    ipcRenderer.invoke('folder:trash', itemPath),
+  trash: (itemPath: string): Promise<void> => ipcRenderer.invoke('folder:trash', itemPath),
   reveal: (itemPath: string): void => {
     ipcRenderer.send('folder:reveal', itemPath);
   },
@@ -305,8 +306,7 @@ const folder = {
   showItemMenu: (payload: {
     isDirectory: boolean;
     isMarkdown: boolean;
-  }): Promise<ItemMenuAction | null> =>
-    ipcRenderer.invoke('folder:show-item-menu', payload),
+  }): Promise<ItemMenuAction | null> => ipcRenderer.invoke('folder:show-item-menu', payload),
 
   getSidebarPref: (): Promise<{ width: number; visible: boolean }> =>
     ipcRenderer.invoke('folder:get-sidebar-pref'),
@@ -343,11 +343,7 @@ const folder = {
  * select-all); only `Copy as Markdown` (WYSIWYG only) routes back
  * through `menu:action` for the renderer to execute.
  */
-export type EditorContextMode =
-  | 'wysiwyg'
-  | 'source'
-  | 'preview'
-  | 'frontmatter';
+export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter';
 const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;
@@ -398,11 +394,7 @@ const api = {
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved
   // decision can never read a stale flag immediately after a keystroke.
-  pushFileMeta: (meta: {
-    path: string | null;
-    isDirty: boolean;
-    dirtyCount: number;
-  }): void => {
+  pushFileMeta: (meta: { path: string | null; isDirty: boolean; dirtyCount: number }): void => {
     ipcRenderer.send('file:meta', meta);
   },
   getRecent: (): Promise<string[]> => ipcRenderer.invoke('recent:get'),
@@ -413,16 +405,13 @@ const api = {
     ipcRenderer.send('recent:clear');
   },
   onMenuAction: (callback: (event: MenuActionEvent) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, event: MenuActionEvent): void =>
-      callback(event);
+    const handler = (_: Electron.IpcRendererEvent, event: MenuActionEvent): void => callback(event);
     ipcRenderer.on('menu:action', handler);
     return () => {
       ipcRenderer.off('menu:action', handler);
     };
   },
-  onFileSavedAs: (
-    callback: (event: { path: string; content: string }) => void,
-  ): (() => void) => {
+  onFileSavedAs: (callback: (event: { path: string; content: string }) => void): (() => void) => {
     const handler = (
       _: Electron.IpcRendererEvent,
       event: { path: string; content: string },
@@ -435,9 +424,7 @@ const api = {
   // Window-close dirty-tab resolution. Main asks the renderer to either
   // save every dirty tab in one shot ('save-all') or walk through them
   // tab-by-tab ('review'). The renderer replies with the aggregate result.
-  onResolveDirty: (
-    callback: (mode: 'save-all' | 'review') => void,
-  ): (() => void) => {
+  onResolveDirty: (callback: (mode: 'save-all' | 'review') => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, mode: 'save-all' | 'review'): void =>
       callback(mode);
     ipcRenderer.on('window:resolve-dirty', handler);

@@ -83,6 +83,19 @@ import fontTokensCss from '../styles/font-tokens.css?inline';
  */
 export const PRINT_FONT_PLACEHOLDER = '<!-- RAISE_PRINT_FONTS -->';
 
+/**
+ * What's being built — affects which CSS files get inlined.
+ *
+ * RAISE-53 introduced the split: HTML export gets a leaner bundle
+ * that matches the WYSIWYG visual (centered max-width, surface-tone
+ * code blocks) instead of the print-tuned overrides (full-width,
+ * near-white code blocks, @page rules, page-break-avoid). Both
+ * modes share the markdown-it pipeline + the prose CSS + the font
+ * substitution; they diverge only in the trailing print/html
+ * stylesheet.
+ */
+export type PrintHtmlOutputMode = 'pdf' | 'html';
+
 interface BuildHtmlOptions {
   /** Document title — used for the print header `{title}` placeholder and the HTML `<title>`. */
   title: string;
@@ -92,6 +105,71 @@ interface BuildHtmlOptions {
   markdownPath: string | null;
   /** Strip review-style comments (`<!-- … -->`, `// …`) before rendering. Matches the dominant convention across competitor markdown editors (Obsidian, iA Writer, Typora, Marked 2 all hide comments in exports). Code-region aware — comments inside fenced code blocks survive verbatim. */
   stripComments: boolean;
+  /** RAISE-53: which output is being built. Defaults to 'pdf' to preserve the original PDF-export behaviour. */
+  outputMode?: PrintHtmlOutputMode;
+}
+
+/**
+ * RAISE-53: HTML-export-specific CSS. Replaces `print.css` for the
+ * 'html' output mode. Two responsibilities:
+ *
+ *   1. Constrain the body to a centered max-width column (matches
+ *      WYSIWYG's `mx-auto max-w-[720px] px-6 py-8` layout, so the
+ *      exported HTML feels visually identical to the editor view
+ *      the author was working in).
+ *
+ *   2. Strip print-only quirks the user wouldn't expect in a
+ *      browser-viewed HTML page: @page rules, page-break-avoid,
+ *      print-toned `pre`/`code` overrides that diverge from the
+ *      surface-elevated wash the WYSIWYG editor shows.
+ *
+ * Kept inline (not a separate CSS file) because it's small, tightly
+ * coupled to this output mode, and reduces the bundle's import
+ * graph by one entry. If it grows past ~40 lines, promote to its
+ * own `.css?inline` import.
+ */
+const htmlExportCss = `
+body.rise-md-prose {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  background: var(--rise-app, #ffffff);
+}
+`;
+
+/**
+ * Lightweight CSS minifier — strips `/* … *‍/` comments and collapses
+ * whitespace around structural punctuation. Applied only to the
+ * HTML-export path (`outputMode === 'html'`); PDF gets the
+ * unminified CSS so a future debugging session inspecting the
+ * print-window's DevTools still sees readable source.
+ *
+ * Smoke-test feedback from the RAISE-53 review: the inlined
+ * CSS in exported HTML was several hundred lines of comments and
+ * documentation, dwarfing the actual rules. The user pointed out
+ * the bloat and asked for at-minimum minification.
+ *
+ * The minifier is deliberately conservative — no name shortening,
+ * no rule de-duplication, no dead-code elimination. Those are
+ * harder problems (especially with the WYSIWYG-only `.ProseMirror`
+ * selectors in `milkdown.css`) and risk introducing regressions
+ * for tiny wins. Comment+whitespace stripping alone takes the
+ * exported `<style>` block from ~20KB to ~6KB without changing
+ * any rendered byte.
+ *
+ * Safe against the CSS in this project: no `url(…)` references
+ * with embedded spaces, no `content: "…"` string literals (both
+ * verified at minifier-introduction time). The @font-face `url(…)`
+ * declarations come from main-process substitution AFTER renderer
+ * minification, so their base64 payloads are untouched.
+ */
+function minifyCss(css: string): string {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, '')      // strip block comments
+    .replace(/\s+/g, ' ')                   // collapse whitespace runs
+    .replace(/\s*([{}:;,>])\s*/g, '$1')     // tighten around structural punctuation
+    .replace(/;}/g, '}')                    // drop redundant trailing semicolons
+    .trim();
 }
 
 /**
@@ -112,6 +190,53 @@ const LINE_COMMENT_RE = /^[ \t]*\/\/.*(?:\r?\n)?/gm;
 
 function stripCommentsInPlainText(text: string): string {
   return text.replace(HTML_COMMENT_RE, '').replace(LINE_COMMENT_RE, '');
+}
+
+/**
+ * Single-tilde strikethrough — Milkdown's GFM input rule accepts
+ * both `~text~` and `~~text~~` (matches the pattern
+ * `(?<![\w:/])(~{1,2})(.+?)\1(?!\w|\/)/`), so the WYSIWYG editor
+ * renders single-tilde input as strikethrough. markdown-it's
+ * built-in strikethrough rule, by contrast, hard-rejects runs
+ * shorter than two tildes (`if (len < 2) return false`). Without
+ * intervention `~text~` renders fine in WYSIWYG but as plain text
+ * in preview/split/HTML-export — a confusing inconsistency.
+ *
+ * Fix: rewrite single-tilde pairs to double tildes before parsing,
+ * so markdown-it's existing `~~`-handling renders them. Mirrors
+ * Milkdown's boundary conditions:
+ *   - opening `~` not preceded by a word char or tilde; not
+ *     followed by another tilde or whitespace
+ *   - closing `~` not preceded by whitespace or tilde; not
+ *     followed by a word char or tilde
+ *
+ * Same code-region-aware split as `stripComments` so single tildes
+ * inside fenced/inline code (e.g. a shell snippet showing
+ * `~/foo`) pass through untouched.
+ */
+const SINGLE_TILDE_RE = /(?<![\w~])~(?!~|\s)([^~\n]+?)(?<!\s|~)~(?!\w|~)/g;
+
+function expandSingleTildeInPlainText(text: string): string {
+  return text.replace(SINGLE_TILDE_RE, '~~$1~~');
+}
+
+export function expandSingleTildeStrikethrough(markdown: string): string {
+  if (!markdown || !markdown.includes('~')) return markdown;
+  let result = '';
+  let cursor = 0;
+  CODE_REGION_RE.lastIndex = 0;
+  let codeMatch: RegExpExecArray | null;
+  while ((codeMatch = CODE_REGION_RE.exec(markdown)) !== null) {
+    if (codeMatch.index > cursor) {
+      result += expandSingleTildeInPlainText(markdown.slice(cursor, codeMatch.index));
+    }
+    result += codeMatch[0];
+    cursor = codeMatch.index + codeMatch[0].length;
+  }
+  if (cursor < markdown.length) {
+    result += expandSingleTildeInPlainText(markdown.slice(cursor));
+  }
+  return result;
 }
 
 /**
@@ -297,7 +422,11 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
   // level strip (vs CSS-hiding) keeps the resulting PDF byte-
   // clean: no invisible comment text dragged along in the PDF
   // for a recipient to extract.
-  const renderSource = opts.stripComments ? stripComments(body) : body;
+  const commentStripped = opts.stripComments ? stripComments(body) : body;
+  // Single-tilde strikethrough — keep the export visually consistent
+  // with the WYSIWYG editor, which renders `~text~` as <del> via
+  // Milkdown's GFM input rule.
+  const renderSource = expandSingleTildeStrikethrough(commentStripped);
   const bodyHtml = md.render(renderSource);
   let bodyContent = bodyHtml;
   if (frontmatter !== null) {
@@ -307,6 +436,22 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
       bodyHtml;
   }
 
+  // RAISE-53: pick the trailing stylesheet based on output mode.
+  // PDF gets print.css (page-break rules, near-white code blocks
+  // optimised for paper). HTML gets the inline htmlExportCss
+  // (centered max-width, no @page rules, code blocks inherit the
+  // WYSIWYG-tone styling from proseCss). proseCss + themesCss +
+  // fontTokensCss are shared.
+  const outputMode = opts.outputMode ?? 'pdf';
+  const trailingCss = outputMode === 'html' ? htmlExportCss : printCss;
+
+  // HTML export: minify the inlined stylesheet to keep the output
+  // file lean (smoke-test feedback for RAISE-53). PDF stays
+  // unminified — the off-screen print window's DevTools is a
+  // useful debugging surface when print layouts misbehave.
+  const composedCss = `${fontTokensCss}\n${themesCss}\n${proseCss}\n${trailingCss}`;
+  const finalCss = outputMode === 'html' ? minifyCss(composedCss) : composedCss;
+
   return `<!doctype html>
 <html lang="en" data-theme="light">
 <head>
@@ -314,10 +459,7 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
 <title>${escapeHtml(opts.title)}</title>
 <style>
 ${PRINT_FONT_PLACEHOLDER}
-${fontTokensCss}
-${themesCss}
-${proseCss}
-${printCss}
+${finalCss}
 </style>
 </head>
 <body class="rise-md-prose">

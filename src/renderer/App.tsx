@@ -6,15 +6,10 @@ import { WorkspaceBanner } from './components/WorkspaceBanner';
 import { TemplateHintBanner } from './components/TemplateHintBanner';
 import { UpdateBanner } from './components/UpdateBanner';
 import { EditorContainer } from './components/editors/EditorContainer';
-import {
-  type CursorPosition,
-  type SourceEditorHandle,
-} from './components/editors/SourceEditor';
+import { type CursorPosition, type SourceEditorHandle } from './components/editors/SourceEditor';
 import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
-import {
-  ExportPdfModal,
-  type ExportPdfSubmitPayload,
-} from './components/ExportPdfModal';
+import { ExportPdfModal, type ExportPdfSubmitPayload } from './components/ExportPdfModal';
+import { ExportHtmlModal, type ExportHtmlSubmitPayload } from './components/ExportHtmlModal';
 import { buildPrintHtml } from './state/exportPdfHtml';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
@@ -73,15 +68,12 @@ function AppContent() {
   // dismissible hint banner above the editor reminding the user to fill
   // in the placeholders. Cleared when the user dismisses or when the
   // tab is closed.
-  const [templateHintTabIds, setTemplateHintTabIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [templateHintTabIds, setTemplateHintTabIds] = useState<Set<string>>(() => new Set());
   // Visibility of the workspace-level "no CLAUDE.md found" banner. Driven
   // by an effect below: re-checked whenever the open folder changes and
   // when the tree refreshes (so the banner clears as soon as the user
   // creates the file via this banner OR via File → New CLAUDE.md).
-  const [showMissingClaudeBanner, setShowMissingClaudeBanner] =
-    useState<boolean>(false);
+  const [showMissingClaudeBanner, setShowMissingClaudeBanner] = useState<boolean>(false);
   // RAISE-42: Export-to-PDF modal state. The modal opens via the
   // `export-pdf` menu action (File → Export → PDF…, the
   // Cmd/Ctrl+Shift+E accelerator, or context-menu later). The
@@ -94,6 +86,14 @@ function AppContent() {
   // selection at click time rather than recomputed live.
   const [exportPdfHasSelection, setExportPdfHasSelection] = useState(false);
   const [exportPdfSelectionText, setExportPdfSelectionText] = useState('');
+  // RAISE-53: HTML export uses the same selection-capture pattern as
+  // PDF — Monaco's `getSelectionText` returns the markdown source
+  // slice for the highlighted range; WYSIWYG selection-to-markdown
+  // isn't implemented (same follow-up gap as PDF), so the modal
+  // shows the "Selection only" radio disabled in WYSIWYG mode.
+  const [showExportHtmlModal, setShowExportHtmlModal] = useState(false);
+  const [exportHtmlHasSelection, setExportHtmlHasSelection] = useState(false);
+  const [exportHtmlSelectionText, setExportHtmlSelectionText] = useState('');
 
   const isWysiwyg = file.activeTab?.editorMode === 'wysiwyg';
   // Source-style editor (Monaco) drives undo/redo for both Source AND Split.
@@ -171,10 +171,7 @@ function AppContent() {
   const handleCreateFromTemplate = useCallback(
     async (kind: TemplateKind): Promise<void> => {
       try {
-        const result = await window.api.templates.create(
-          kind,
-          sidebar.rootPath,
-        );
+        const result = await window.api.templates.create(kind, sidebar.rootPath);
         let hintId: string | null = null;
         if (result.status === 'created') {
           hintId = file.loadFile(result.path, result.content);
@@ -199,9 +196,7 @@ function AppContent() {
         }
       } catch (err) {
         window.api.showError(
-          kind === 'claude'
-            ? 'Could not create CLAUDE.md'
-            : 'Could not create skill file',
+          kind === 'claude' ? 'Could not create CLAUDE.md' : 'Could not create skill file',
           err instanceof Error ? err.message : String(err),
         );
       }
@@ -358,10 +353,7 @@ function AppContent() {
         return;
       }
       if (newName.includes('/') || newName.includes('\\')) {
-        window.api.showError(
-          'Invalid name',
-          'Names cannot contain "/" or "\\".',
-        );
+        window.api.showError('Invalid name', 'Names cannot contain "/" or "\\".');
         return; // Keep the input open so the user can correct.
       }
       try {
@@ -393,10 +385,7 @@ function AppContent() {
         return;
       }
       if (name.includes('/') || name.includes('\\')) {
-        window.api.showError(
-          'Invalid name',
-          'Names cannot contain "/" or "\\".',
-        );
+        window.api.showError('Invalid name', 'Names cannot contain "/" or "\\".');
         return;
       }
       try {
@@ -483,17 +472,14 @@ function AppContent() {
         payload.range === 'selection' && exportPdfSelectionText
           ? exportPdfSelectionText.trim()
           : tab.content;
-      const baseName = tab.path
-        ? basenameOfPath(tab.path).replace(/\.[^.]+$/, '')
-        : 'Untitled';
-      const docDir = tab.path
-        ? tab.path.replace(/[\\/][^\\/]*$/, '')
-        : null;
+      const baseName = tab.path ? basenameOfPath(tab.path).replace(/\.[^.]+$/, '') : 'Untitled';
+      const docDir = tab.path ? tab.path.replace(/[\\/][^\\/]*$/, '') : null;
       const html = buildPrintHtml({
         title: baseName,
         markdownSource: sourceMarkdown,
         markdownPath: tab.path,
         stripComments: payload.stripComments,
+        outputMode: 'pdf',
       });
       const result = await window.api.export.toPdf({
         html,
@@ -511,6 +497,57 @@ function AppContent() {
       }
     },
     [file.activeTab, exportPdfSelectionText],
+  );
+
+  // RAISE-53: open-handler for the HTML export modal. Mirrors the
+  // PDF open handler — same selection capture, same Monaco/WYSIWYG
+  // mode gate. Differs only in which modal state it flips.
+  const openExportHtmlModal = useCallback(() => {
+    let selectionText = '';
+    if (isMonacoActive) {
+      selectionText = editorRef.current?.getSelectionText() ?? '';
+    }
+    setExportHtmlSelectionText(selectionText);
+    setExportHtmlHasSelection(selectionText.trim().length > 0);
+    setShowExportHtmlModal(true);
+  }, [isMonacoActive]);
+
+  // RAISE-53: submit-handler for the HTML export modal. Shares the
+  // renderer-side print HTML pipeline with PDF (so the output is
+  // visually identical to what `Export to PDF` would produce). Main
+  // does the additional image-source transformation — either
+  // inlining as data URIs or copying into a zip's assets/ folder.
+  const handleExportHtmlSubmit = useCallback(
+    async (payload: ExportHtmlSubmitPayload) => {
+      setShowExportHtmlModal(false);
+      const tab = file.activeTab;
+      if (!tab) return;
+      const sourceMarkdown =
+        payload.range === 'selection' && exportHtmlSelectionText
+          ? exportHtmlSelectionText.trim()
+          : tab.content;
+      const baseName = tab.path ? basenameOfPath(tab.path).replace(/\.[^.]+$/, '') : 'Untitled';
+      const docDir = tab.path ? tab.path.replace(/[\\/][^\\/]*$/, '') : null;
+      const html = buildPrintHtml({
+        title: baseName,
+        markdownSource: sourceMarkdown,
+        markdownPath: tab.path,
+        stripComments: payload.stripComments,
+        outputMode: 'html',
+      });
+      const result = await window.api.export.toHtml({
+        html,
+        defaultBaseName: baseName,
+        defaultDir: docDir,
+        imageMode: payload.imageMode,
+        markdownPath: tab.path,
+        openAfter: payload.openAfter,
+      });
+      if (result.status === 'error') {
+        window.api.showError('Export to HTML failed', result.message);
+      }
+    },
+    [file.activeTab, exportHtmlSelectionText],
   );
 
   const handleCloseActive = useCallback(() => {
@@ -570,9 +607,7 @@ function AppContent() {
       if (kind === 'file') {
         // Only open recognised text/markdown extensions to match the
         // explicit filter on the Open File dialog.
-        const target = Array.from(dropped).find((f) =>
-          ACCEPTED_EXTENSIONS.test(f.name),
-        );
+        const target = Array.from(dropped).find((f) => ACCEPTED_EXTENSIONS.test(f.name));
         if (!target) return;
         const filePath = window.api.files.getPathForFile(target);
         if (filePath) void handleOpenPath(filePath);
@@ -627,6 +662,10 @@ function AppContent() {
           // markdown-it render, ships HTML to main, kicks the save
           // dialog flow.
           openExportPdfModal();
+          break;
+        case 'export-html':
+          // RAISE-53: same shape as export-pdf, different modal.
+          openExportHtmlModal();
           break;
         case 'close-tab':
           handleCloseActive();
@@ -794,6 +833,7 @@ function AppContent() {
     handleCycleMode,
     handleModeChange,
     openExportPdfModal,
+    openExportHtmlModal,
   ]);
 
   // RAISE-56: external-change handling. When chokidar reports a content
@@ -935,9 +975,7 @@ function AppContent() {
               editingPath={sidebar.editingPath}
               creating={sidebar.creating}
               onRenameSubmit={(p, name) => void handleRenameSubmit(p, name)}
-              onCreateSubmit={(parent, kind, name) =>
-                void handleCreateSubmit(parent, kind, name)
-              }
+              onCreateSubmit={(parent, kind, name) => void handleCreateSubmit(parent, kind, name)}
               onEditCancel={sidebar.cancelEdit}
             />
           )}
@@ -1026,6 +1064,18 @@ function AppContent() {
           onCancel={() => setShowExportPdfModal(false)}
           onSubmit={(payload) => {
             void handleExportPdfSubmit(payload);
+          }}
+        />
+      )}
+      {/* RAISE-53: HTML export modal. Same mount-at-app-root pattern as
+          the PDF modal — survives mode swaps and tab switches, single
+          instance per app session. */}
+      {showExportHtmlModal && (
+        <ExportHtmlModal
+          hasSelection={exportHtmlHasSelection}
+          onCancel={() => setShowExportHtmlModal(false)}
+          onSubmit={(payload) => {
+            void handleExportHtmlSubmit(payload);
           }}
         />
       )}

@@ -20,6 +20,7 @@ import { resolveAssetUrl } from '../../state/assetUrl';
 import { looksLikeFilenameExtension } from '../../state/filenameExtensions';
 import { splitFrontmatter } from '../../state/markdown';
 import { markdownItComments } from '../../state/markdownItComments';
+import { expandSingleTildeStrikethrough } from '../../state/exportPdfHtml';
 import type { WordWrap } from '../../env';
 
 interface SplitViewProps {
@@ -253,8 +254,15 @@ export function SplitView({
     // shows frontmatter in its own dedicated textarea above the
     // prose surface.
     const { frontmatter, body, bodyLineOffset } = splitFrontmatter(content);
+    // Rewrite single-tilde strikethrough (`~text~`) to double tildes
+    // before parsing, so the preview matches the WYSIWYG editor's
+    // behaviour (Milkdown's GFM input rule accepts both forms, but
+    // markdown-it's built-in strikethrough rule requires `~~`).
+    // Source line numbers for task-list mapping are preserved because
+    // the rewrite is in-line and never adds or removes newlines.
+    const preprocessed = expandSingleTildeStrikethrough(body);
     const env = {};
-    const tokens = md.parse(body, env);
+    const tokens = md.parse(preprocessed, env);
     const bodyHtml = md.renderer.render(tokens, md.options, env);
     const lines: number[] = [];
     for (const t of tokens) {
