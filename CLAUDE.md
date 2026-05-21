@@ -19,7 +19,7 @@ This repo is MIT-licensed and publicly visible at <https://github.com/RisePeople
 | Layer          | What                       | Notes                                                   |
 | -------------- | -------------------------- | ------------------------------------------------------- |
 | Shell          | Electron 33                | Hardened renderer, contextIsolation, no nodeIntegration |
-| Bundler        | electron-vite (Vite 5)     | Three Vite builds (main / preload / renderer)           |
+| Bundler        | electron-vite 3 (Vite 6)   | Three Vite builds (main / preload / renderer)           |
 | Source editor  | Monaco                     | VS Code's editor; six Gruvbox theme variants            |
 | WYSIWYG editor | Milkdown 7                 | ProseMirror underneath; commonmark + gfm presets        |
 | UI             | React 19 + Tailwind CSS 4  | No global state library — composed React hooks          |

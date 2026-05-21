@@ -59,7 +59,7 @@ src/
 │   └── templates.ts       Bundled CLAUDE.md / SKILL.md scaffolds (?raw)
 ├── preload/
 │   └── index.ts           contextBridge — typed `window.api` surface (~450 lines)
-├── renderer/              Electron renderer (React 19 + Vite 5)
+├── renderer/              Electron renderer (React 19 + Vite 6)
 │   ├── App.tsx
 │   ├── main.tsx           React mount point + monaco-setup + font imports
 │   ├── monaco-setup.ts    Monaco web-worker wiring
