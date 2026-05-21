@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { buildMenu, type MenuDeps } from './menu';
 import { showEditorContextMenu, type ShowEditorContextMenuPayload } from './contextMenu';
 import * as assetOps from './assetOps';
-import { initAutoUpdater } from './autoUpdater';
+import { getLastUpdateState, initAutoUpdater, quitAndInstallNow } from './autoUpdater';
 import * as fileOps from './fileOperations';
 import * as folderOps from './folderOps';
 import * as folderWatcher from './folderWatcher';
@@ -125,6 +125,21 @@ let quitting = false;
 app.on('before-quit', () => {
   quitting = true;
 });
+
+// RAISE-19: set by the `update:install` IPC handler so the existing
+// close-with-dirty flow can route to `autoUpdater.quitAndInstall` instead
+// of a plain `app.quit()` once the user has resolved (or skipped) the
+// unsaved-changes prompt. Consumed and cleared by the close handler.
+//
+// Why a module-level flag and not "just call quitAndInstall directly when
+// the renderer clicks Restart": Electron's `quitAndInstall(false, true)`
+// closes windows then quits, so it WOULD fire our `close` handler — but
+// the dirty-tab dialog would say "You have unsaved changes." with no
+// install context, and worse, a user who picks Cancel would have a
+// half-torn-down autoUpdater state and a banner that no-ops until the
+// next launch. Routing through the close handler explicitly keeps the
+// banner intact on Cancel and lets us tailor the dialog copy.
+let pendingInstallAfterClose = false;
 
 function dispatchMenuAction(type: string, payload?: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
@@ -249,8 +264,31 @@ async function promptUnsavedChanges(filename = displayName()): Promise<UnsavedCh
 
 type CloseChoice = 'save-all' | 'review' | 'discard' | 'cancel';
 
-async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
+// RAISE-19: the dirty-tab prompt is now reused by the auto-update install
+// path. When the user clicks "Restart to update" with dirty work open, the
+// dialog needs to mention the install — otherwise they hit Restart, see a
+// "You have unsaved changes" dialog, and reasonably wonder what they did
+// to trigger a quit. Passing a `reason` of 'install' swaps the message
+// copy to reference the pending version.
+type DirtyCloseReason = 'close' | 'install';
+
+interface PromptCloseOptions {
+  reason?: DirtyCloseReason;
+  /** Pending update version (e.g. '0.2.0') — required when reason is 'install'. */
+  installVersion?: string;
+}
+
+async function promptCloseWithUnsavedTabs(
+  count: number,
+  options: PromptCloseOptions = {},
+): Promise<CloseChoice> {
   if (!mainWindow) return 'discard';
+  const { reason = 'close', installVersion } = options;
+  // Install-aware copy. `installVersion` may be undefined if the update state
+  // was already consumed (shouldn't happen in the wired flow, but defending
+  // against a race) — in that case fall back to a generic "install update"
+  // string so the prompt still makes sense.
+  const installLabel = installVersion ? `${APP_NAME} ${installVersion}` : `the ${APP_NAME} update`;
   // With a single dirty tab "Review Each" is identical to "Save", so we
   // collapse to the original 3-button shape; multi-dirty surfaces both.
   if (count === 1) {
@@ -259,7 +297,10 @@ async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
       buttons: ['Save', "Don't Save", 'Cancel'],
       defaultId: 0,
       cancelId: 2,
-      message: 'You have unsaved changes.',
+      message:
+        reason === 'install'
+          ? `Save changes before restarting to install ${installLabel}?`
+          : 'You have unsaved changes.',
       detail: "Your changes will be lost if you don't save them.",
     });
     if (choice.response === 0) return 'save-all';
@@ -271,7 +312,10 @@ async function promptCloseWithUnsavedTabs(count: number): Promise<CloseChoice> {
     buttons: ['Save All', 'Review Each…', "Don't Save", 'Cancel'],
     defaultId: 0,
     cancelId: 3,
-    message: `You have unsaved changes in ${count} files.`,
+    message:
+      reason === 'install'
+        ? `Save changes in ${count} files before restarting to install ${installLabel}?`
+        : `You have unsaved changes in ${count} files.`,
     detail:
       'Save All writes every dirty tab. Review Each walks through them one by one so you can choose per file.',
   });
@@ -350,20 +394,64 @@ function createWindow(): void {
   });
 
   mainWindow.on('close', (e) => {
-    if (allowClose || fileState.dirtyCount === 0) return;
+    if (allowClose || fileState.dirtyCount === 0) {
+      // RAISE-19: install supersedes a plain close. quitAndInstall
+      // handles its own shutdown (closing remaining windows, spawning
+      // the installer, relaunching) — we prevent this close from
+      // proceeding so it doesn't race with quitAndInstall's teardown
+      // (especially on Win/Linux where `window-all-closed` would
+      // otherwise fire `app.quit()` before electron-updater spawns the
+      // installer).
+      if (pendingInstallAfterClose) {
+        pendingInstallAfterClose = false;
+        e.preventDefault();
+        quitAndInstallNow();
+      }
+      return;
+    }
     e.preventDefault();
     // Snapshot+consume so a Cancel doesn't leave the flag tainting the next
     // window-only close (red X / Cmd+W) into a full app quit.
     const wasQuitting = quitting;
     quitting = false;
+    // RAISE-19: snapshot+consume the install flag for the same reason —
+    // if the user cancels the dirty-tab prompt, the next close (red X
+    // alone) shouldn't fire an install. The flag is re-applied below if
+    // the user resolves through to a real close.
+    const wasInstalling = pendingInstallAfterClose;
+    pendingInstallAfterClose = false;
+    // Pending version is read once up front because the autoUpdater can
+    // (in theory) churn its state between now and when the dialog closes,
+    // and we want the prompt to mention the version the user just clicked
+    // Restart for.
+    const installVersion = wasInstalling ? getLastUpdateState().version : undefined;
     void (async () => {
-      const choice = await promptCloseWithUnsavedTabs(fileState.dirtyCount);
-      if (choice === 'cancel') return;
+      const choice = await promptCloseWithUnsavedTabs(fileState.dirtyCount, {
+        reason: wasInstalling ? 'install' : 'close',
+        installVersion,
+      });
+      if (choice === 'cancel') {
+        // Stay open. The renderer's banner state is still `downloaded`
+        // (we never reset it on this side), so a subsequent Restart click
+        // walks through this same flow again.
+        return;
+      }
       if (choice === 'save-all' || choice === 'review') {
         const ok = await requestResolveDirtyFromRenderer(choice);
         if (!ok) return;
       }
       allowClose = true;
+      // RAISE-19: install supersedes a plain quit — the install path
+      // already relaunches with `isForceRunAfter: true`, so calling
+      // `app.quit()` first would short-circuit electron-updater's spawn
+      // of the installer process. Re-arm the flag so the upcoming
+      // re-entry into `close` (via mainWindow.close()) hits the fast-path
+      // branch above and fires quitAndInstall.
+      if (wasInstalling) {
+        pendingInstallAfterClose = true;
+        mainWindow?.close();
+        return;
+      }
       // If the user originally hit Cmd+Q we need to resume the quit; just
       // closing this window would leave the macOS app running with no UI.
       if (wasQuitting) {
@@ -678,6 +766,28 @@ ipcMain.on(
 
 ipcMain.on('window:close', () => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+});
+
+// RAISE-19: auto-update install. The handler lives here (not in
+// `autoUpdater.ts`) because it has to coordinate with the close-with-
+// dirty-tabs flow above. Setting `pendingInstallAfterClose` and calling
+// `mainWindow.close()` reuses the existing prompt + Save All / Review
+// machinery — the close handler reads the flag, customizes the dialog
+// copy ("Save changes before restarting to install …?"), and on a real
+// resolve routes to `quitAndInstall` instead of a plain `app.quit()`.
+// On Cancel, the flag is cleared and the banner stays in `downloaded`,
+// so the user can click Restart again later.
+//
+// No window? Skip the prompt and install immediately. This is the
+// degenerate macOS "app running with no windows" case — there's nothing
+// dirty to save because the renderer is gone.
+ipcMain.on('update:install', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    quitAndInstallNow();
+    return;
+  }
+  pendingInstallAfterClose = true;
+  mainWindow.close();
 });
 
 // Renderer signals it has subscribed to menu:action and is safe to dispatch
