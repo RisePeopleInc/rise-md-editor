@@ -1067,14 +1067,25 @@ function AppContent() {
             <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
           )}
         </main>
-        {file.activeTab && (
-          <StatusBar
-            line={cursor.line}
-            column={cursor.column}
-            wordCount={wordCount}
-            mode={modeLabel(file.activeTab.editorMode)}
-          />
-        )}
+        {file.activeTab && (() => {
+          // RAISE-60 follow-up: Ln/Col only makes sense in modes
+          // backed by a source view (Source, Split). In Read there's
+          // no cursor at all; in WYSIWYG the ProseMirror offset
+          // doesn't translate to source line/col cheaply. Pass
+          // undefined in those modes so the statusbar renders blank
+          // instead of stale Monaco state from the last time the
+          // user was in Source/Split.
+          const mode = file.activeTab.editorMode;
+          const hasCursor = mode === 'source' || mode === 'split';
+          return (
+            <StatusBar
+              line={hasCursor ? cursor.line : undefined}
+              column={hasCursor ? cursor.column : undefined}
+              wordCount={wordCount}
+              mode={modeLabel(mode)}
+            />
+          );
+        })()}
       </div>
       {/* RAISE-42: Export-to-PDF modal. Mounted here (top-level
           App layout) rather than inside the editor surfaces so a

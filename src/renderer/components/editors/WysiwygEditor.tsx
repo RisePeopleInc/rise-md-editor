@@ -369,17 +369,29 @@ function MilkdownBody({
             onChangeRef.current(processed);
           }
         });
-        // Once Milkdown finishes its initial mount, jump the caret to the
-        // captured ProseMirror offset (clamped). This is the WYSIWYG
-        // analogue of SourceEditor's onMount cursor restore.
+        // Once Milkdown finishes its initial mount, focus the editor view
+        // and (if we have a captured offset from a prior session in this
+        // tab) jump the caret to it. WYSIWYG analogue of SourceEditor's
+        // onMount cursor restore.
+        //
+        // RAISE-60 follow-up: previously this gated BOTH the focus and the
+        // cursor restore behind `if (!offset) return`. That meant a freshly-
+        // opened file in Edit mode (offset === 0) never received focus —
+        // the user had to click in to start typing. And even with a saved
+        // offset > 0, the cursor was positioned but the view wasn't
+        // focused, so the first keystroke went to whatever document body
+        // happened to have keyboard focus. Now always focus on mount; the
+        // cursor-restore is the conditional part.
         ctx.get(listenerCtx).mounted((mountedCtx) => {
-          const offset = initialCursorOffsetRef.current;
-          if (!offset) return;
           const view = mountedCtx.get(editorViewCtx);
-          const max = view.state.doc.content.size;
-          const safe = Math.min(Math.max(offset, 0), max);
-          const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, safe));
-          view.dispatch(tr);
+          const offset = initialCursorOffsetRef.current;
+          if (offset) {
+            const max = view.state.doc.content.size;
+            const safe = Math.min(Math.max(offset, 0), max);
+            const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, safe));
+            view.dispatch(tr);
+          }
+          view.focus();
         });
         // RAISE-11: image drop / paste interception. ProseMirror's
         // editor view exposes `handleDrop` / `handlePaste` hooks that
