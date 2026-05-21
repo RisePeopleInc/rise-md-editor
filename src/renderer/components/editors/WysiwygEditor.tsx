@@ -846,12 +846,20 @@ function MilkdownBody({
           const view = ctx.get(editorViewCtx);
           const { schema } = view.state;
           // Build a Fragment of inline content: text runs separated
-          // by `hard_break` for newlines. This matches the ticket
-          // spec ("single text run if the clipboard had a single
-          // line; hard_break-separated runs if it had newlines")
-          // and Works In Any Inline Context — body paragraph,
-          // table cell, heading, list item — because hard_break is
+          // by `hardbreak` for newlines. Matches the ticket spec
+          // ("single text run if the clipboard had a single line;
+          // hard_break-separated runs if it had newlines") and
+          // works in any inline context (body paragraph, table
+          // cell, heading, list item) because `hardbreak` is
           // schema-valid in every inline group.
+          //
+          // ⚠ Node name is `hardbreak` (lowercase, no underscore) —
+          // Milkdown's commonmark preset names it that way, not the
+          // standard-ProseMirror `hard_break`. The smoke-test version
+          // of this code used `hard_break` and silently failed on
+          // every multi-line paste because `schema.nodes['hard_break']`
+          // is undefined under Milkdown's schema. (The single-line
+          // path happens to work because the lookup never runs.)
           //
           // Why not `tr.insertText(text)`? ProseMirror's
           // `insertText` inserts the string as text content into
@@ -859,14 +867,27 @@ function MilkdownBody({
           // characters land as literal newlines in the text node,
           // which renders as a single line with the newlines
           // collapsed to spaces by the contenteditable layout
-          // engine. Splitting on `\n` and emitting `hard_break`
+          // engine. Splitting on `\n` and emitting `hardbreak`
           // nodes is the only way to get visible line breaks.
+          //
+          // Defensive: if the schema doesn't expose `hardbreak`
+          // (a future schema swap, a custom preset), fall back to
+          // a single text node with spaces in place of newlines.
+          // The content survives; the visible line breaks don't.
+          // Strictly better than throwing inside dispatch and
+          // having the user's paste silently disappear.
+          const hardbreakType = schema.nodes['hardbreak'];
           const inlineNodes: ProseNode[] = [];
           const lines = text.split('\n');
-          lines.forEach((line, i) => {
-            if (i > 0) inlineNodes.push(schema.nodes['hard_break']!.create());
-            if (line.length > 0) inlineNodes.push(schema.text(line));
-          });
+          if (!hardbreakType) {
+            const flattened = lines.join(' ');
+            if (flattened.length > 0) inlineNodes.push(schema.text(flattened));
+          } else {
+            lines.forEach((line, i) => {
+              if (i > 0) inlineNodes.push(hardbreakType.create());
+              if (line.length > 0) inlineNodes.push(schema.text(line));
+            });
+          }
           if (inlineNodes.length === 0) return;
           const slice = new Slice(Fragment.from(inlineNodes), 0, 0);
           view.dispatch(view.state.tr.replaceSelection(slice));
