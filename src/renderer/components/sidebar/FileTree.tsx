@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { TreeNode } from '../../env';
 import { isOpenable, type CreatingState } from '../../state/sidebarState';
+import { RAISE_TREE_DND_TYPE } from '../../state/sidebarDrop';
 
 interface FileTreeProps {
   root: TreeNode;
@@ -42,18 +43,11 @@ interface FileTreeProps {
   onCopy: (srcPath: string, destDir: string) => void;
 }
 
-/**
- * Custom MIME-ish format used to mark a drag as originating from our
- * own tree — distinct from text/uri-list (drag from Finder) so we
- * can ignore foreign drags during `onDragOver`. The browser only
- * exposes `types` (not data) during the dragover event, so this is
- * the only signal available pre-drop. Value of the entry isn't
- * read — the source path is read from a module-scoped ref during
- * the over/drop handlers to avoid any platform quirks around
- * `getData()` mid-drag (Firefox + some Chromium builds return ''
- * for non-text/plain types during dragover).
- */
-const RAISE_DND_TYPE = 'application/x-rise-tree-move';
+// `RAISE_TREE_DND_TYPE` lives in `state/sidebarDrop.ts` so the editor
+// drop handlers (WysiwygEditor / SourceEditor) can detect our own
+// drags too. See the comment block in that file for the full
+// rationale on why a marker type is needed pre-drop.
+const RAISE_DND_TYPE = RAISE_TREE_DND_TYPE;
 
 /**
  * Extract the parent-directory portion of an absolute path without
@@ -408,12 +402,13 @@ function Row(props: RowProps) {
       // and not trigger our move flow.
       e.dataTransfer.setData(RAISE_DND_TYPE, node.path);
       e.dataTransfer.setData('text/plain', node.path);
-      // `copyMove` so the user can switch between move (default)
-      // and copy (Opt-drag / Ctrl-drag) mid-drag via modifier
-      // keys — the OS cursor updates in response to `dropEffect`
-      // set during dragover. Setting just `'move'` here would
-      // lock copies out regardless of modifier state.
-      e.dataTransfer.effectAllowed = 'copyMove';
+      // `all` lets the user switch between move (default), copy
+      // (Opt-drag / Ctrl-drag mid-drag), AND link (when dropped on
+      // the editor area — handled by WysiwygEditor / SourceEditor).
+      // The OS cursor updates in response to `dropEffect` set
+      // during dragover, so the affordance reads correctly per
+      // surface (move arrow / copy `+` / link curve).
+      e.dataTransfer.effectAllowed = 'all';
       dragSourceRef.current = node.path;
     },
     [isRoot, node.path, dragSourceRef],

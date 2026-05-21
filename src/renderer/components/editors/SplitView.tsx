@@ -513,6 +513,7 @@ export function SplitView({
           wordWrap={wordWrap}
           onImageDrop={onImageDrop}
           onImagePaste={onImagePaste}
+          markdownPath={markdownPath}
         />
       </div>
       <div
