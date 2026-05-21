@@ -398,16 +398,29 @@ function createWindow(): void {
   }
 }
 
-// Find a markdown/text file argument among the platform's launch argv.
-// Skips the executable (or the script in dev) and any flag-style entries.
-function findFileArg(argv: readonly string[]): string | null {
+// Find every markdown / text file argument in the platform's launch
+// argv. Skips the executable (packaged) or the script (dev) and any
+// flag-style entries. Returns an array so multi-select from Explorer
+// (which concatenates all selected paths into one launch's argv on
+// Windows) opens every file rather than just the first.
+//
+// Extension list matches the `fileAssociations` block in
+// `electron-builder.yml` PLUS `.txt`. We don't CLAIM `.txt` in the
+// installer (too generic — would steal from system defaults), but if
+// a user has manually set us as the default app for `.txt`, the OS
+// will still pass us those files via argv. Accepting them here is the
+// "no surprise" behaviour: the user chose us, we open the file.
+const MARKDOWN_ARG_RE = /\.(md|markdown|mdown|mkd|mkdn|mdwn|mdtxt|mdtext|txt)$/i;
+
+function findFileArgs(argv: readonly string[]): string[] {
   const start = app.isPackaged ? 1 : 2;
+  const out: string[] = [];
   for (let i = start; i < argv.length; i++) {
     const a = argv[i];
     if (!a || a.startsWith('-')) continue;
-    if (/\.(md|markdown|txt)$/i.test(a)) return a;
+    if (MARKDOWN_ARG_RE.test(a)) out.push(a);
   }
-  return null;
+  return out;
 }
 
 // Single-instance lock: a second launch with a file arg should focus the
@@ -421,8 +434,15 @@ if (!gotLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
-    const filePath = findFileArg(argv);
-    if (filePath) dispatchMenuAction('open-path', { path: filePath });
+    // RAISE-44: Explorer multi-select concatenates every selected
+    // file's path into the second-instance argv. Dispatch one
+    // `open-path` action per file so each lands in its own tab.
+    // `fromOs: true` matches the launch-arg path (RAISE-60) so the
+    // tabs open in Read mode — the user clicked from Explorer,
+    // not from inside the app.
+    for (const filePath of findFileArgs(argv)) {
+      dispatchMenuAction('open-path', { path: filePath, fromOs: true });
+    }
   });
 
   app.whenReady().then(() => {
@@ -482,8 +502,12 @@ if (!gotLock) {
     // RAISE-60: tag with `fromOs: true` so the renderer opens this tab
     // in Read mode by default (Finder/Explorer double-click and
     // "Open With" → Rise MD Editor both land here).
-    const filePath = findFileArg(process.argv);
-    if (filePath) dispatchMenuAction('open-path', { path: filePath, fromOs: true });
+    // RAISE-44: multi-select from Explorer concatenates every selected
+    // file's path into argv on a single launch. Dispatch one action
+    // per file so each opens in its own tab.
+    for (const filePath of findFileArgs(process.argv)) {
+      dispatchMenuAction('open-path', { path: filePath, fromOs: true });
+    }
 
     // RAISE-42: sweep `<userData>/pdf-export-tmp/` for stale `print-*.html`
     // leftovers older than 24h. Each export's finally-block usually
