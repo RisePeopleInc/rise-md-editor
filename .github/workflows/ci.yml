@@ -1,0 +1,57 @@
+# Rise MD Editor — PR / branch CI ([RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14)).
+#
+# Runs on every push to a non-main branch and on every PR targeting
+# main. Mirrors the local pre-commit gate (typecheck + lint + build +
+# test) so a green CI run means "the same four checks the author was
+# meant to run locally all passed."
+#
+# Not the release pipeline — that's release.yml, triggered by `v*`
+# tags and `workflow_dispatch`, and does signing / notarization. CI
+# here is fast and unsigned; runs in ~3-4 minutes on ubuntu-latest.
+#
+# Action versions match release.yml (@v6) so future GHA upgrades
+# happen in one PR across both workflows.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+# Don't pile up parallel runs for the same ref — superseding commits
+# on a branch should cancel the in-flight run. Safe to cancel because
+# CI produces no artifacts the team relies on outside of the run
+# status itself.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Typecheck, lint, build, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
