@@ -365,6 +365,37 @@ function AppContent() {
   // on success. On error the inline input stays mounted with the user's
   // typed value preserved — they can fix the conflict and re-press Enter
   // without retyping from scratch.
+  // RAISE-13: drag-and-drop move. FileTree validates renderer-side
+  // (no-op moves, self-into-self, descendant-of-self all disable the
+  // drop before this fires), so by the time we get here the move
+  // *should* succeed. Main re-validates and surfaces collision /
+  // cross-device errors as throws — we map those to user-facing
+  // dialogs and otherwise rely on chokidar's onTreeChanged signal
+  // to re-render the tree from disk.
+  const handleMove = useCallback(
+    async (srcPath: string, destDir: string) => {
+      try {
+        const newPath = await window.api.folder.move(srcPath, destDir);
+        // Keep open tabs aligned with the new path. `relocateTabs`
+        // also rewrites descendants of a moved folder, so a file
+        // open inside `srcPath/sub/foo.md` follows the move
+        // automatically.
+        file.relocateTabs(srcPath, newPath);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        window.api.showError(
+          'Could not move',
+          /EEXIST/i.test(message)
+            ? message.includes('already exists')
+              ? message
+              : `An item with that name already exists in the destination folder.`
+            : message,
+        );
+      }
+    },
+    [file],
+  );
+
   const handleRenameSubmit = useCallback(
     async (oldPath: string, newName: string) => {
       if (newName === '') {
@@ -1062,6 +1093,7 @@ function AppContent() {
               onRenameSubmit={(p, name) => void handleRenameSubmit(p, name)}
               onCreateSubmit={(parent, kind, name) => void handleCreateSubmit(parent, kind, name)}
               onEditCancel={sidebar.cancelEdit}
+              onMove={(src, dest) => void handleMove(src, dest)}
             />
           )}
         </Sidebar>

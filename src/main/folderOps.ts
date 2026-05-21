@@ -137,6 +137,85 @@ export async function renamePath(oldPath: string, newName: string): Promise<stri
 }
 
 /**
+ * Move a file or folder into a new parent directory
+ * ([RAISE-13](https://risepeople.atlassian.net/browse/RAISE-13)).
+ *
+ * Validates and rejects:
+ *
+ *   - `destDir === path.dirname(srcPath)` — no-op move, same parent.
+ *   - `destDir === srcPath` — moving into itself.
+ *   - `destDir` is a descendant of `srcPath` — moving a folder into
+ *     a path inside itself (would corrupt the tree).
+ *   - A file or folder with the same name already exists in `destDir`
+ *     — refuse rather than silently overwrite. `fs.rename` on POSIX
+ *     overwrites a same-named TARGET by default; on Windows it errors
+ *     (EEXIST). Pre-checking and throwing a synthetic EEXIST gives
+ *     the renderer a consistent surface to handle.
+ *
+ * Cross-device moves: `fs.rename` returns EXDEV when src and dest
+ * live on different filesystems (a workspace folder on an external
+ * drive with `destDir` on the system disk, for example). We don't
+ * implement the copy+delete fallback in this pass — re-throw a
+ * clearer message so the renderer can surface the right dialog.
+ */
+export async function movePath(srcPath: string, destDir: string): Promise<string> {
+  // Defence in depth — these are also validated renderer-side.
+  const srcParent = path.dirname(srcPath);
+  if (destDir === srcParent) {
+    throw new Error('Item is already in that folder');
+  }
+  if (destDir === srcPath) {
+    throw new Error('Cannot move an item into itself');
+  }
+  // Trailing-separator guard so `/foo/bar` isn't treated as a
+  // descendant of `/foo/ba`. `path.sep` is the platform-correct
+  // separator; we also check the opposite separator because the
+  // path strings can come from main on either platform.
+  const srcWithSep = srcPath + path.sep;
+  const srcWithAltSep = srcPath + (path.sep === '/' ? '\\' : '/');
+  if (destDir.startsWith(srcWithSep) || destDir.startsWith(srcWithAltSep)) {
+    throw new Error('Cannot move a folder into one of its own descendants');
+  }
+
+  const target = path.join(destDir, path.basename(srcPath));
+
+  // Pre-check for an existing entry at the target. `fs.rename`'s
+  // overwrite-by-default on POSIX would silently clobber a same-named
+  // file at destDir; we want a clear error instead.
+  try {
+    await fs.stat(target);
+    // No throw → an entry exists. Synthesise an EEXIST so the
+    // renderer's existing error-handling treats it consistently
+    // with rename / create.
+    const err: NodeJS.ErrnoException = new Error(
+      `An item named "${path.basename(srcPath)}" already exists in the destination`,
+    );
+    err.code = 'EEXIST';
+    throw err;
+  } catch (err) {
+    const errno = (err as NodeJS.ErrnoException).code;
+    // ENOENT = nothing there, all good. Other codes (EEXIST from our
+    // synthetic above, permission errors, etc.) propagate.
+    if (errno !== 'ENOENT') throw err;
+  }
+
+  try {
+    await fs.rename(srcPath, target);
+  } catch (err) {
+    const errno = (err as NodeJS.ErrnoException).code;
+    if (errno === 'EXDEV') {
+      // Cross-device — out of scope for the current ticket. The
+      // user can still move the file manually via Finder / Explorer.
+      throw new Error(
+        'Cannot move across different drives or filesystems. Move the item using your file manager instead.',
+      );
+    }
+    throw err;
+  }
+  return target;
+}
+
+/**
  * Move a file or folder to the system trash. Uses Electron's shell.trashItem
  * which is reversible via the OS trash UI.
  */

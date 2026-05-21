@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
@@ -22,6 +23,83 @@ interface FileTreeProps {
   onRenameSubmit: (path: string, newName: string) => void;
   onCreateSubmit: (parentPath: string, kind: 'file' | 'folder', name: string) => void;
   onEditCancel: () => void;
+  /**
+   * RAISE-13: drag-and-drop move handler. `srcPath` is the dragged
+   * row's path; `destDir` is the resolved destination folder
+   * (folder-row drops use the folder itself; file-row drops use the
+   * file's parent). Validation already passed renderer-side; main
+   * re-validates and surfaces collision / cross-device errors via
+   * `window.api.showError`. The renderer never sees a success
+   * without a real fs.rename.
+   */
+  onMove: (srcPath: string, destDir: string) => void;
+}
+
+/**
+ * Custom MIME-ish format used to mark a drag as originating from our
+ * own tree — distinct from text/uri-list (drag from Finder) so we
+ * can ignore foreign drags during `onDragOver`. The browser only
+ * exposes `types` (not data) during the dragover event, so this is
+ * the only signal available pre-drop. Value of the entry isn't
+ * read — the source path is read from a module-scoped ref during
+ * the over/drop handlers to avoid any platform quirks around
+ * `getData()` mid-drag (Firefox + some Chromium builds return ''
+ * for non-text/plain types during dragover).
+ */
+const RAISE_DND_TYPE = 'application/x-rise-tree-move';
+
+/**
+ * Extract the parent-directory portion of an absolute path without
+ * relying on the Node `path` module (which doesn't ship to the
+ * renderer in this sandboxed build). Splits on the last forward or
+ * backslash, whichever appears later. For workspace-rooted paths
+ * (which is all this tree ever sees) the result is the immediate
+ * parent dir.
+ */
+function dirnameOf(p: string): string {
+  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return idx > 0 ? p.slice(0, idx) : p;
+}
+
+/**
+ * True if `candidate` is a descendant of `ancestor` — i.e., the
+ * absolute path begins with `ancestor` followed by a path
+ * separator. Trailing-separator guard so `/foo/bar` isn't a
+ * descendant of `/foo/ba`. Handles both POSIX and Windows
+ * separators because path strings from main are platform-native
+ * but the renderer doesn't normalise them.
+ */
+function isDescendantOf(candidate: string, ancestor: string): boolean {
+  return candidate.startsWith(ancestor + '/') || candidate.startsWith(ancestor + '\\');
+}
+
+/**
+ * Resolve a drop-target row to the destination folder the move would
+ * land in. Dropping on a folder lands inside that folder; dropping
+ * on a file lands in that file's parent.
+ */
+function effectiveDestDir(node: TreeNode): string {
+  return node.isDirectory ? node.path : dirnameOf(node.path);
+}
+
+/**
+ * Renderer-side validity check for a move. Mirrors the rules
+ * `folderOps.movePath` enforces in main; we duplicate them here so
+ * we can disable the drop visual and `dropEffect` *during* the
+ * drag (the user sees a "no" cursor before they release), not just
+ * after they've committed.
+ *
+ *   - `src === ''` — no drag in progress.
+ *   - `dest === srcParent` — moving into the same parent is a no-op.
+ *   - `dest === src` — folder onto itself.
+ *   - `src is ancestor of dest` — folder into one of its descendants.
+ */
+function isValidMove(srcPath: string, destDir: string): boolean {
+  if (!srcPath) return false;
+  if (destDir === srcPath) return false;
+  if (destDir === dirnameOf(srcPath)) return false;
+  if (isDescendantOf(destDir, srcPath)) return false;
+  return true;
 }
 
 const ROW_HEIGHT = 'py-0.5';
@@ -229,6 +307,8 @@ interface RowProps {
   node: TreeNode;
   depth: number;
   expanded: Set<string>;
+  /** True for the root node — drives the "root isn't draggable" rule. */
+  isRoot: boolean;
   onToggle: (path: string) => void;
   onOpenFile: (filePath: string) => void;
   onContextMenu: (node: TreeNode, e: MouseEvent) => void;
@@ -237,6 +317,17 @@ interface RowProps {
   onRenameSubmit: (path: string, newName: string) => void;
   onCreateSubmit: (parentPath: string, kind: 'file' | 'folder', name: string) => void;
   onEditCancel: () => void;
+  /**
+   * RAISE-13: drag-and-drop coordination. The source path is held in
+   * a ref at the FileTree level (DataTransfer can't be read during
+   * dragover on all browsers, and the source path is the same for
+   * every dragover event in a single drag). The dropTarget is React
+   * state so the highlight re-renders as the user moves between rows.
+   */
+  dragSourceRef: React.RefObject<string | null>;
+  dropTargetPath: string | null;
+  setDropTargetPath: (p: string | null) => void;
+  onMove: (srcPath: string, destDir: string) => void;
 }
 
 function Row(props: RowProps) {
@@ -244,6 +335,7 @@ function Row(props: RowProps) {
     node,
     depth,
     expanded,
+    isRoot,
     onToggle,
     onOpenFile,
     onContextMenu,
@@ -252,6 +344,10 @@ function Row(props: RowProps) {
     onRenameSubmit,
     onCreateSubmit,
     onEditCancel,
+    dragSourceRef,
+    dropTargetPath,
+    setDropTargetPath,
+    onMove,
   } = props;
 
   const isOpen = expanded.has(node.path);
@@ -274,8 +370,94 @@ function Row(props: RowProps) {
     [node, onContextMenu],
   );
 
+  // RAISE-13: drag-and-drop. The handlers below are no-ops on the
+  // root row (`isRoot === true`) for the drag SOURCE side — root
+  // can't be moved — but root IS a valid drop target (drop a file
+  // onto the workspace folder name to move it to the top level).
+  const handleDragStart = useCallback(
+    (e: ReactDragEvent<HTMLDivElement>) => {
+      if (isRoot) {
+        e.preventDefault();
+        return;
+      }
+      // Marker type lets `onDragOver` distinguish our own tree
+      // drags from foreign drags (Finder file drops, browser link
+      // drops, etc.) — those should keep their existing semantics
+      // and not trigger our move flow.
+      e.dataTransfer.setData(RAISE_DND_TYPE, node.path);
+      e.dataTransfer.setData('text/plain', node.path);
+      e.dataTransfer.effectAllowed = 'move';
+      dragSourceRef.current = node.path;
+    },
+    [isRoot, node.path, dragSourceRef],
+  );
+
+  const handleDragEnd = useCallback(() => {
+    dragSourceRef.current = null;
+    setDropTargetPath(null);
+  }, [dragSourceRef, setDropTargetPath]);
+
+  const handleDragOver = useCallback(
+    (e: ReactDragEvent<HTMLDivElement>) => {
+      // Foreign drag (Finder file drop, etc.) — let the existing
+      // window-level drop handler in App.tsx handle it. Without
+      // this guard we'd swallow file-from-OS drops here.
+      if (!e.dataTransfer.types.includes(RAISE_DND_TYPE)) return;
+      const src = dragSourceRef.current;
+      if (!src) return;
+      const dest = effectiveDestDir(node);
+      if (!isValidMove(src, dest)) {
+        e.dataTransfer.dropEffect = 'none';
+        return;
+      }
+      // preventDefault is what enables a `drop` event. Without it
+      // the row never receives `onDrop`.
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dropTargetPath !== dest) setDropTargetPath(dest);
+    },
+    [node, dragSourceRef, dropTargetPath, setDropTargetPath],
+  );
+
+  const handleDragLeave = useCallback(
+    (e: ReactDragEvent<HTMLDivElement>) => {
+      // Clear the highlight only if the pointer is leaving this
+      // row's bounds entirely (the related target isn't a child).
+      // Without the contains-check, dragging over an icon inside
+      // the row fires dragleave on the parent and the highlight
+      // flickers.
+      const next = e.relatedTarget as Node | null;
+      if (next && e.currentTarget.contains(next)) return;
+      const dest = effectiveDestDir(node);
+      if (dropTargetPath === dest) setDropTargetPath(null);
+    },
+    [node, dropTargetPath, setDropTargetPath],
+  );
+
+  const handleDrop = useCallback(
+    (e: ReactDragEvent<HTMLDivElement>) => {
+      if (!e.dataTransfer.types.includes(RAISE_DND_TYPE)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const src = dragSourceRef.current ?? e.dataTransfer.getData(RAISE_DND_TYPE);
+      const dest = effectiveDestDir(node);
+      dragSourceRef.current = null;
+      setDropTargetPath(null);
+      if (!isValidMove(src, dest)) return;
+      onMove(src, dest);
+    },
+    [node, dragSourceRef, setDropTargetPath, onMove],
+  );
+
   const indent = depth * 12;
   const childIndent = (depth + 1) * 12;
+  // The drop-target highlight lights up the folder the drop would
+  // land in. For folder rows that's themselves; for file rows
+  // it's the file's parent — but the file row doesn't host the
+  // highlight because that would visually misalign with the
+  // destination. Only folder rows render the highlight.
+  const isDropTargetHighlighted =
+    node.isDirectory && dropTargetPath === node.path;
 
   return (
     <>
@@ -296,6 +478,17 @@ function Row(props: RowProps) {
           aria-expanded={node.isDirectory ? isOpen : undefined}
           onClick={handleClick}
           onContextMenu={handleContextMenu}
+          // RAISE-13: source side is gated by `isRoot` inside the
+          // dragstart handler — `draggable` is on every row so the
+          // OS shows the drag affordance, but root rejects in
+          // dragstart so it can't be moved. Drop side is on every
+          // row including root (root is a valid destination).
+          draggable={!isRoot}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
           className={[
             'flex w-full cursor-pointer select-none items-center gap-1.5 rounded pr-2 text-sm',
             ROW_HEIGHT,
@@ -304,6 +497,12 @@ function Row(props: RowProps) {
               : openable
                 ? 'text-body hover:bg-elevated'
                 : 'text-disabled cursor-default hover:bg-elevated/40',
+            // RAISE-13: drop-target highlight. Tinted ring + bg so
+            // the user sees exactly which folder the drop will
+            // land in. Brighter than `bg-elevated` (the hover
+            // state) to distinguish "hovering" from "would drop
+            // here on release."
+            isDropTargetHighlighted ? 'bg-interaction/10 ring-1 ring-interaction/50' : '',
           ].join(' ')}
           style={{ paddingLeft: indent + 6 }}
           title={node.path}
@@ -349,6 +548,7 @@ function Row(props: RowProps) {
                 node={child}
                 depth={depth + 1}
                 expanded={expanded}
+                isRoot={false}
                 onToggle={onToggle}
                 onOpenFile={onOpenFile}
                 onContextMenu={onContextMenu}
@@ -357,6 +557,10 @@ function Row(props: RowProps) {
                 onRenameSubmit={onRenameSubmit}
                 onCreateSubmit={onCreateSubmit}
                 onEditCancel={onEditCancel}
+                dragSourceRef={dragSourceRef}
+                dropTargetPath={dropTargetPath}
+                setDropTargetPath={setDropTargetPath}
+                onMove={onMove}
               />
             ))}
         </>
@@ -376,13 +580,23 @@ export function FileTree({
   onRenameSubmit,
   onCreateSubmit,
   onEditCancel,
+  onMove,
 }: FileTreeProps) {
+  // RAISE-13: drag-and-drop coordination. The source-path ref is
+  // populated on dragstart and consulted during dragover/drop —
+  // some platforms restrict DataTransfer.getData to drop-only,
+  // and re-reading types every dragover is cheap. The drop-target
+  // path is React state so the highlight re-renders as the user
+  // moves between rows during the drag.
+  const dragSourceRef = useRef<string | null>(null);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   return (
     <div role="tree" className="flex flex-col py-1">
       <Row
         node={root}
         depth={0}
         expanded={expanded}
+        isRoot
         onToggle={onToggle}
         onOpenFile={onOpenFile}
         onContextMenu={onContextMenu}
@@ -391,6 +605,10 @@ export function FileTree({
         onRenameSubmit={onRenameSubmit}
         onCreateSubmit={onCreateSubmit}
         onEditCancel={onEditCancel}
+        dragSourceRef={dragSourceRef}
+        dropTargetPath={dropTargetPath}
+        setDropTargetPath={setDropTargetPath}
+        onMove={onMove}
       />
     </div>
   );

@@ -795,6 +795,15 @@ ipcMain.handle('folder:rename', async (_, oldPath: string, newName: string) =>
   folderOps.renamePath(oldPath, newName),
 );
 
+// RAISE-13: Move a file or folder into a new parent directory.
+// Drag-and-drop in the sidebar tree calls this. Validation lives in
+// `folderOps.movePath` — no-op moves, self-into-self, descendant-
+// of-self, collisions, and cross-device errors are all surfaced as
+// throws so the renderer can show a clean error dialog.
+ipcMain.handle('folder:move', async (_, srcPath: string, destDir: string) =>
+  folderOps.movePath(srcPath, destDir),
+);
+
 ipcMain.handle('folder:trash', async (_, itemPath: string) => {
   await folderOps.trashPath(itemPath);
 });
