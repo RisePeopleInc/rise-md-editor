@@ -24,7 +24,7 @@ This repo is MIT-licensed and publicly visible at <https://github.com/RisePeople
 | WYSIWYG editor | Milkdown 7                 | ProseMirror underneath; commonmark + gfm presets        |
 | UI             | React 19 + Tailwind CSS 4  | No global state library — composed React hooks          |
 | Persistence    | electron-store (main only) | Renderer never touches it directly                      |
-| Packaging      | electron-builder 25        | Signed/notarized macOS, Azure-Trusted-Signed Windows    |
+| Packaging      | electron-builder 26        | Signed/notarized macOS, Azure-Trusted-Signed Windows    |
 | Auto-update    | electron-updater           | GitHub Releases feed                                    |
 | Test runner    | vitest 3                   | Pure-logic unit tests under `__tests__/`                |
 | Runtime        | Node 22                    | Pinned in `.nvmrc`                                      |
