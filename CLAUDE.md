@@ -12,7 +12,7 @@ This file is the project's instruction layer for AI agents. Read it before makin
 - **Cowork-aware**: understands `CLAUDE.md` and `SKILL.md` as special file types, ships templates and scaffolding.
 - **Simple by default, powerful when needed**: opens a file, you edit, you save. Power users can open a workspace folder and get a project tree.
 
-This repo is internal to Rise. License is `UNLICENSED`. See [`docs/license-rationale.md`](docs/license-rationale.md) for the analysis of an MIT relicense if it ever comes up.
+This repo is MIT-licensed and publicly visible at <https://github.com/RisePeopleInc/rise-md-editor>. The Rise brand assets (logo, `--rise-*` design tokens, product name) are trademark-reserved per [`BRAND.md`](BRAND.md) and not covered by the MIT grant. See [`docs/license-rationale.md`](docs/license-rationale.md) for the historical analysis behind the MIT decision.
 
 ## Tech stack
 

@@ -1,6 +1,8 @@
 # Rise MD Editor
 
-A markdown editor for Rise People — designed for editing the `CLAUDE.md` and `SKILL.md` files that drive our AI workflows.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A markdown editor for Rise People — designed for editing the `CLAUDE.md` and `SKILL.md` files that drive our AI workflows. Open-source under the MIT license; the Rise brand assets shipped alongside it are reserved (see [BRAND.md](BRAND.md)).
 
 ## Features
 
@@ -16,9 +18,9 @@ A markdown editor for Rise People — designed for editing the `CLAUDE.md` and `
 
 ### Prerequisites
 
-- **Node 20 or 22** (see `engines.node` in `package.json`). NVM users:
+- **Node 22** (pinned in [`.nvmrc`](.nvmrc); `engines.node` allows `>=20` for downstream flexibility but development and CI target 22). NVM users:
   ```sh
-  nvm use 22
+  nvm use
   ```
 - **macOS / Windows / Linux** — the dev experience targets all three. Builds are platform-scoped (see below).
 
@@ -314,6 +316,22 @@ Current scope is pure-logic surfaces in renderer and main (input → output func
 5. Address warnings + actionable suggestions; file follow-ups for anything punted.
 6. Squash-merge. Transition the Jira ticket to Done.
 
+## Contributing
+
+External contributions are welcome but the primary audience is Rise internal users, so expect a higher-than-usual bar on scope alignment. The branch / PR conventions in [CLAUDE.md](CLAUDE.md) apply to everyone:
+
+- Branch names start with the Jira ticket key (`RAISE-N-short-slug`). If you don't have Rise Jira access, prefix with `external-` and describe the change in the PR body.
+- PR titles lead with the ticket key.
+- Commits are GPG-signed.
+- `npm run typecheck && npm run lint && npm run build && npm test` all pass before opening a PR.
+- Be patient — maintainer attention is bounded.
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations and [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
 ## License
 
-Internal — UNLICENSED. See the company handbook for distribution policy.
+[MIT](LICENSE) — the source code is freely usable, modifiable, and redistributable with attribution.
+
+**Rise brand assets are reserved.** The Rise word marks, the orange double-ring logo, the `--rise-*` design tokens, and the product name "Rise MD Editor" are not covered by the MIT grant. See [BRAND.md](BRAND.md) for what forks need to do before redistributing.
+
+Third-party dependency licenses are catalogued in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The historical analysis that informed the MIT decision lives in [docs/license-rationale.md](docs/license-rationale.md).
