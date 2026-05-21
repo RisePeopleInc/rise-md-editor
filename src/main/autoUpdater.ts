@@ -53,7 +53,44 @@ export interface UpdateState {
   error?: string;
 }
 
+/**
+ * RAISE-12 deferred the first launch check by 5s so it doesn't compete
+ * with first-paint network and so the renderer has time to subscribe.
+ * Named here so the periodic-check constant below has a peer to follow.
+ */
+const INITIAL_CHECK_DELAY_MS = 5_000;
+
+/**
+ * RAISE-21: re-check the GitHub Releases feed every 6 hours while the
+ * app is running so users who keep the window open over weekends still
+ * pick up security and correctness fixes. Tuned conservatively — the
+ * download itself is bandwidth-cheap but the check is a real network
+ * round-trip and the feed doesn't change that often. Bump down only if
+ * a release cadence change makes 6h feel sluggish.
+ */
+const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 let lastState: UpdateState = { status: 'idle' };
+
+/**
+ * RAISE-21: timer handle for the periodic re-check loop. Held at
+ * module scope so the `before-quit` listener installed by
+ * `initAutoUpdater` can clear it cleanly on quit (AC #2 — no orphaned
+ * timers). `null` while no check loop is running (dev / unpackaged,
+ * or post-teardown).
+ */
+let recheckTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * RAISE-21: gate that the periodic-check loop consults before firing
+ * another `checkForUpdates()`. Skip when a download is already in
+ * flight or finished so we don't duplicate the work the existing
+ * event handlers are already driving (AC #5). Extracted as a pure
+ * function so it's testable without touching electron-updater.
+ */
+export function shouldSkipPeriodicCheck(status: UpdateState['status']): boolean {
+  return status === 'downloading' || status === 'downloaded';
+}
 
 /**
  * RAISE-19: read the most recent UpdateState from outside this module —
@@ -143,5 +180,36 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
         getWindow(),
       );
     });
-  }, 5_000);
+  }, INITIAL_CHECK_DELAY_MS);
+
+  // RAISE-21: periodic re-check for long-running sessions. The launch
+  // check above only fires once; without this loop, a user who keeps
+  // the app open over the weekend misses any release that ships in
+  // the meantime. Failures here are deliberately silent (AC #3) —
+  // intermittent offline / DNS hiccups during a long session aren't a
+  // useful signal to surface in the banner, and the next tick will
+  // recover on its own. Mid-flight downloads are gated out (AC #5)
+  // via `shouldSkipPeriodicCheck` so we don't fight the existing
+  // download / installed flows. If a check does find an update, the
+  // existing `update-available` / `update-downloaded` event handlers
+  // flow into the same `broadcast()` path the launch check uses, so
+  // the renderer banner appears without any extra wiring (AC #4).
+  recheckTimer = setInterval(() => {
+    if (shouldSkipPeriodicCheck(lastState.status)) return;
+    autoUpdater.checkForUpdates().catch(() => {
+      // Silent — periodic check failures shouldn't nag.
+    });
+  }, RECHECK_INTERVAL_MS);
+
+  // RAISE-21: clear the interval on app quit so we don't leak the
+  // timer (AC #2). Scoped to this module — the `before-quit` listener
+  // in `src/main/index.ts` owns its own `quitting` flag and we don't
+  // want to entangle the two. Electron permits multiple listeners on
+  // the same event; both fire on quit.
+  app.on('before-quit', () => {
+    if (recheckTimer) {
+      clearInterval(recheckTimer);
+      recheckTimer = null;
+    }
+  });
 }
