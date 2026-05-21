@@ -475,8 +475,18 @@ export function htmlToPlainText(html: string): string {
   // list items, table rows, blockquotes, and pre — the structural
   // block elements that visually wrap to a new line. `<br>` is the
   // explicit in-paragraph line break.
+  //
+  // Table cells (`</td>` / `</th>`) get a tab character so a
+  // pasted Excel / browser-page table comes through as a
+  // tab-separated grid rather than `"ABC"` row-concatenated. The
+  // tab substitution must precede the row substitution: row text
+  // ends `…cell\tcell\t</tr>` which then closes to `…cell\tcell\t\n`.
+  // Trailing tabs within a row are harmless — preserving them
+  // keeps column alignment intact when the user pastes into a
+  // spreadsheet or further-processed grid.
   const withBreaks = html
     .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:td|th)>/gi, '\t')
     .replace(/<\/(?:p|div|h[1-6]|li|tr|blockquote|pre)>/gi, '\n');
   let text = '';
   try {

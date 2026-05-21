@@ -187,7 +187,16 @@ function isInlineOnlyContext(from: ResolvedPos): boolean {
  */
 function flattenToInline(parsed: ProseNode, schema: ProseNode['type']['schema']): Fragment {
   const inlineNodes: ProseNode[] = [];
-  const breakType = schema.nodes['hard_break'];
+  // RAISE-51 review caught this: node name is `hardbreak`
+  // (Milkdown's commonmark preset name), not `hard_break` (the
+  // standard ProseMirror name). Pre-fix the lookup always
+  // returned undefined under Milkdown's schema and the
+  // `if (breakType)` guard below was always false — so multi-
+  // paragraph paste into a table cell silently dropped its line
+  // breaks instead of getting `<br>`-separated runs as the
+  // surrounding comment claims. Latent bug from RAISE-46 caught
+  // during RAISE-51 paste-plain work.
+  const breakType = schema.nodes['hardbreak'];
   let firstParagraph = true;
 
   parsed.content.forEach((blockNode) => {
