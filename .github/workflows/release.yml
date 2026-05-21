@@ -54,9 +54,9 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -111,7 +111,7 @@ jobs:
           # when notarization succeeded and the staple landed.
           spctl --assess --type execute --verbose=4 "$APP_PATH" 2>&1
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mac-artifacts
           path: |
@@ -140,7 +140,7 @@ jobs:
   # exchange it for Azure access. No long-lived secrets on the runner.
   #
   # Signing flow:
-  #   1. azure/login@v2 exchanges the OIDC token for an Azure access
+  #   1. azure/login@v3 exchanges the OIDC token for an Azure access
   #      token and writes it to the standard credential locations the
   #      .NET DefaultAzureCredential picks up.
   #   2. The Artifact Signing dlib (NuGet package
@@ -153,6 +153,14 @@ jobs:
   #      invokes signtool.exe with the dlib for every .exe.
   build-win:
     name: Build Windows (signed via Azure Artifact Signing)
+    # `windows-latest` is GitHub's rolling label — it points at the
+    # newest stable Windows runner image. Migrations happen
+    # automatically (e.g. the windows-2022 → windows-2025-vs2026
+    # transition on 2026-06-15). The "Locate signtool.exe" step
+    # below globs for the Windows SDK install path so the build
+    # survives those migrations. If signing breaks after a runner
+    # image change, that's the first place to look — the SDK may
+    # have moved to a new versioned directory.
     runs-on: windows-latest
     timeout-minutes: 30
     # OIDC token minting requires id-token: write. contents: read is
@@ -169,9 +177,9 @@ jobs:
     # specific refs (e.g. v* tags only).
     environment: rise-md-editor-signing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -190,7 +198,7 @@ jobs:
       # but pinning here keeps the workflow stable against runner
       # image churn.
       - name: Set up .NET (for the Artifact Signing dlib)
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -276,7 +284,7 @@ jobs:
       # the resulting AZURE_* env vars / credential cache that
       # azure/login populates. No client secret in the secrets store.
       - name: Azure login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -309,7 +317,7 @@ jobs:
             exit 1
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: win-artifacts
           path: |
@@ -336,7 +344,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -345,7 +353,7 @@ jobs:
         run: ls -la dist
 
       - name: Create draft GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true
