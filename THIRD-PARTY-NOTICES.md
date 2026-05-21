@@ -8,7 +8,7 @@ To regenerate after a dependency change:
 node scripts/regenerate-third-party-notices.cjs
 ```
 
-**Total production packages: 301**
+**Total production packages: 300**
 
 ## License summary
 
@@ -17,7 +17,7 @@ node scripts/regenerate-third-party-notices.cjs
 | `(MIT AND Zlib)` | 1 |
 | `(MIT OR CC0-1.0)` | 1 |
 | `(MIT OR GPL-3.0-or-later)` | 1 |
-| `(MPL-2.0 OR Apache-2.0)` | 2 |
+| `(MPL-2.0 OR Apache-2.0)` | 1 |
 | `Apache-2.0` | 1 |
 | `BSD-2-Clause` | 4 |
 | `BSD-3-Clause` | 2 |
@@ -48,10 +48,8 @@ Listed alphabetically within each license group. Each entry: name@version, licen
 - **jszip@3.10.1** — `(MIT OR GPL-3.0-or-later)` — Stuart Knightley
   - https://github.com/Stuk/jszip
 
-### (MPL-2.0 OR Apache-2.0) (2)
+### (MPL-2.0 OR Apache-2.0) (1)
 
-- **dompurify@3.2.7** — `(MPL-2.0 OR Apache-2.0)` — Dr.-Ing. Mario Heiderich, Cure53
-  - https://github.com/cure53/DOMPurify
 - **dompurify@3.4.5** — `(MPL-2.0 OR Apache-2.0)` — Dr.-Ing. Mario Heiderich, Cure53
   - https://github.com/cure53/DOMPurify
 
