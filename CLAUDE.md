@@ -26,6 +26,7 @@ This repo is internal to Rise. License is `UNLICENSED`. See [`docs/license-ratio
 | Persistence    | electron-store (main only) | Renderer never touches it directly                      |
 | Packaging      | electron-builder 25        | Signed/notarized macOS, Azure-Trusted-Signed Windows    |
 | Auto-update    | electron-updater           | GitHub Releases feed                                    |
+| Test runner    | vitest 3                   | Pure-logic unit tests under `__tests__/`                |
 | Runtime        | Node 22                    | Pinned in `.nvmrc`                                      |
 
 **Why two editors?** Markdown is text; ProseMirror is a tree. Round-tripping every edit through serialization would be lossy and slow. Source mode gives power users a byte-perfect path; WYSIWYG gives non-technical users a familiar editing surface. The cost is dual maintenance — every feature change considers both.
@@ -51,13 +52,14 @@ npm run dev                     # Electron + Vite dev with hot reload
 npm run typecheck               # tsc on web + node tsconfigs (must pass before commit)
 npm run lint                    # ESLint flat config (must pass before commit)
 npm run build                   # production bundle into out/ (must pass before commit)
+npm test                        # vitest run — one-shot unit tests (must pass before commit)
 npm run build:mac               # full electron-builder mac packaging (needs signing creds)
 npm run build:win               # Windows packaging
 npm run format                  # Prettier write
 npx prettier --check <files>    # CI-equivalent check; runs against `**/*` minus .prettierignore
 ```
 
-Before opening any PR, run typecheck + lint + build locally. The PR-review skill expects these to pass.
+Before opening any PR, run typecheck + lint + build + test locally. The PR-review skill expects these to pass; CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same four on every push to a non-main branch and every PR.
 
 ## Workflow conventions
 

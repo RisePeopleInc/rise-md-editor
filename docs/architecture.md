@@ -242,9 +242,20 @@ out/ + electron-builder.yml ─[electron-builder]─→  dist/
 
 - **electron-vite** handles three Vite builds in one — main, preload, renderer — with shared TypeScript config and aliasing.
 - **electron-builder** wraps `out/` into platform installers, signs (macOS — Apple Developer ID + notarytool), and emits the auto-update YAML feeds.
-- **GitHub Actions** (`.github/workflows/release.yml`) drives the whole thing on tag push: matrix-builds macOS + Windows, calls electron-builder with `--publish never`, and a third job aggregates artifacts into a draft Release. Operational details: [`docs/release-process.md`](release-process.md).
+- **GitHub Actions** drives two workflows. `.github/workflows/release.yml` runs on `v*` tag push: matrix-builds macOS + Windows, calls electron-builder with `--publish never`, and a third job aggregates artifacts into a draft Release. Operational details: [`docs/release-process.md`](release-process.md). `.github/workflows/ci.yml` runs on every push to a non-main branch and every PR to main: a single ubuntu job that runs `typecheck`, `lint`, `build`, and `test`. Same four checks the author was meant to run locally before pushing.
 
 Vite alias of note: `mdast-util-gfm` is shimmed via `src/renderer/shims/mdastUtilGfmNoAutolinkSerialize.ts` to suppress a remark serializer that was introducing autolinks where we don't want them. This lives in `electron.vite.config.ts`'s renderer section.
+
+## Testing
+
+[vitest](https://vitest.dev/) (the test runner Vite ships) handles the unit-test suite ([RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14)). Vitest re-uses electron-vite's TypeScript + ESM setup so no extra transpilation config is needed — `vitest.config.ts` is a thin glob-narrowing wrapper.
+
+- **Discovery glob**: `src/**/__tests__/**/*.test.{ts,tsx}`. Tests live in `__tests__` folders next to the source they cover (e.g. `src/renderer/state/__tests__/filenameExtensions.test.ts`).
+- **Environment**: `node` by default. The first wave of tests covers pure-logic surfaces (input → output functions) that don't need a DOM. Per-file `// @vitest-environment jsdom` overrides if a future test needs DOM globals; React component rendering is out of scope for now (handled by the manual test plan in PR descriptions).
+- **One-shot mode**: `npm test` runs `vitest run` — exits with the correct code on completion. CI uses this. For interactive watch mode locally, run `npx vitest` (no `run`).
+- **CI integration**: the `ci.yml` workflow runs `npm test` alongside typecheck / lint / build. A failing test fails the PR check.
+
+What stays OUT of scope until separate tickets land: React component rendering (would need `@testing-library/react` + jsdom), Electron main-process integration tests (would need spectron-style harness), end-to-end UI tests. Fixture-coverage tickets (RAISE-35, 40, 41, 50) will add tests for specific pure-logic surfaces on top of this foundation.
 
 ## Cross-cutting subsystems worth knowing about
 

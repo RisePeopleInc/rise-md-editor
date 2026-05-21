@@ -38,16 +38,17 @@ npm run dev
 
 Opens the Electron app with hot module reload for the renderer (Vite) and a watch + restart loop for the main process. Source maps are enabled.
 
-### Lint, type-check, build
+### Lint, type-check, build, test
 
 ```sh
 npm run lint        # ESLint flat config
 npm run typecheck   # tsc --noEmit
 npm run build       # electron-vite build (no installer)
+npm test            # vitest run (unit tests, one-shot CI mode)
 npm run format      # Prettier write
 ```
 
-All three (lint / typecheck / build) should pass before opening a PR. The build step writes to `out/`; it's the same output the dev server consumes.
+All four (lint / typecheck / build / test) should pass before opening a PR. CI runs the same four on every push to a non-main branch and every PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The build step writes to `out/`; it's the same output the dev server consumes.
 
 ## Production builds
 
@@ -300,13 +301,15 @@ The PR title also leads with the ticket key. The PR-review skill cross-reference
 
 ### Tests
 
-[RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14) sets up the test framework (vitest). Until then, manually verify the test plan in each PR's description before merge.
+[vitest](https://vitest.dev/) runs the unit-test suite ([RAISE-14](https://risepeople.atlassian.net/browse/RAISE-14)). Tests live alongside the code they cover under `__tests__/` directories — e.g. `src/renderer/state/__tests__/filenameExtensions.test.ts`. Run them locally with `npm test` (one-shot) or `npx vitest` (watch mode). The discovery glob is in [`vitest.config.ts`](vitest.config.ts).
+
+Current scope is pure-logic surfaces in renderer and main (input → output functions). React component rendering and Electron integration are out of scope for now — the manual test plan in each PR description still covers those. The `pr-review` skill cross-references the test plan against the diff.
 
 ### Adding a feature
 
 1. Pick (or create) a Jira ticket with clear acceptance criteria.
 2. Branch from `main` with the ticket key prefix.
-3. Implement, then `npm run lint && npm run typecheck && npm run build`.
+3. Implement, then `npm run lint && npm run typecheck && npm run build && npm test`.
 4. Open a PR. The PR-review skill (`/pr-review`) runs against it and posts a structured review.
 5. Address warnings + actionable suggestions; file follow-ups for anything punted.
 6. Squash-merge. Transition the Jira ticket to Done.
