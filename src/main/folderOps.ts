@@ -282,17 +282,62 @@ export async function copyPath(srcPath: string, destDir: string): Promise<string
 }
 
 /**
+ * Split a filename into `stem` and `ext` for copy-name allocation.
+ *
+ * The default rule is last-dot — `report.md` → (`report`, `.md`),
+ * matching POSIX `basename` and `path.extname` convention. Two
+ * exceptions worth special-casing:
+ *
+ *   - **Compound `.tar.*` extensions.** `notes.tar.gz` would
+ *     otherwise split to (`notes.tar`, `.gz`), and the copy would
+ *     land as `notes.tar 2.gz` — visibly broken; the `.tar.gz`
+ *     compound was orphaned. macOS Finder treats `.tar.*` as a
+ *     single extension; we follow suit. Covers the dominant
+ *     compound-extension family: `.tar.gz`, `.tar.bz2`,
+ *     `.tar.xz`, `.tar.zst`, `.tar.lz`, `.tar.lzma`. Other
+ *     conventional compounds (`.user.js`, `.min.js`, locale tails
+ *     like `.en.json`) aren't standardized enough to fold in
+ *     without surprising someone — out of scope.
+ *
+ *   - **Leading-dot dotfiles** (`.gitignore`, `.editorconfig`).
+ *     Treat the whole name as the stem so the result is
+ *     `.gitignore 2` rather than `.gitignore .2`. Triggered by
+ *     `lastDot === 0`.
+ *
+ * Folders and files without a dot return the whole name as the
+ * stem with an empty extension — `myfolder` → `myfolder 2`.
+ */
+function splitNameForCopy(name: string): { stem: string; ext: string } {
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot <= 0 || lastDot >= name.length - 1) {
+    return { stem: name, ext: '' };
+  }
+  // Compound `.tar.*` check: look at the penultimate dot-segment.
+  // If it's exactly `.tar` (case-insensitive — `.TAR.gz` is rare
+  // but harmless to accept), treat the last two segments as one
+  // compound extension.
+  const beforeLast = name.slice(0, lastDot);
+  const penultimateDot = beforeLast.lastIndexOf('.');
+  if (
+    penultimateDot > 0 &&
+    beforeLast.slice(penultimateDot).toLowerCase() === '.tar'
+  ) {
+    return {
+      stem: name.slice(0, penultimateDot),
+      ext: name.slice(penultimateDot),
+    };
+  }
+  return { stem: beforeLast, ext: name.slice(lastDot) };
+}
+
+/**
  * Find the lowest-numbered `<stem> N.<ext>` filename in `dir` that
  * doesn't already exist, starting at N=2 (so the first duplicate
- * of `report.md` is `report 2.md`). The split point is the LAST
- * dot in the name; folders (no dot, or leading-dot dotfiles) get
- * the whole name as the stem.
+ * of `report.md` is `report 2.md`). Split via `splitNameForCopy`
+ * so compound extensions like `.tar.gz` survive intact.
  */
 async function allocateCopyName(dir: string, srcName: string): Promise<string> {
-  const lastDot = srcName.lastIndexOf('.');
-  const hasExt = lastDot > 0 && lastDot < srcName.length - 1;
-  const stem = hasExt ? srcName.slice(0, lastDot) : srcName;
-  const ext = hasExt ? srcName.slice(lastDot) : '';
+  const { stem, ext } = splitNameForCopy(srcName);
   for (let n = 2; n < 10_000; n++) {
     const candidate = path.join(dir, `${stem} ${n}${ext}`);
     try {
