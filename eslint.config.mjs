@@ -6,7 +6,21 @@ import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 
 export default [
-  { ignores: ['out/**', 'release/**', 'dist/**', 'node_modules/**'] },
+  {
+    ignores: [
+      'out/**',
+      'release/**',
+      'dist/**',
+      'node_modules/**',
+      // Git worktrees spawned by Claude Code's Agent tool live under
+      // .claude/worktrees/agent-* and contain full copies of the
+      // source tree on whatever branch the agent was running. Without
+      // this ignore, ESLint walks into them and reports duplicate
+      // errors against every file (and even with clean worktrees,
+      // they're not "the code we're checking").
+      '.claude/worktrees/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
