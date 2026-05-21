@@ -98,9 +98,17 @@ function AppContent() {
   const [exportHtmlHasSelection, setExportHtmlHasSelection] = useState(false);
   const [exportHtmlSelectionText, setExportHtmlSelectionText] = useState('');
 
-  const isWysiwyg = file.activeTab?.editorMode === 'wysiwyg';
-  // Source-style editor (Monaco) drives undo/redo for both Source AND Split.
-  const isMonacoActive = !isWysiwyg;
+  const activeMode = file.activeTab?.editorMode;
+  const isWysiwyg = activeMode === 'wysiwyg';
+  // RAISE-60: positive-check rather than `!isWysiwyg`. Pre-Read-mode the
+  // binary `!isWysiwyg` was correct because there were only three modes
+  // and the two non-WYSIWYG ones (Source, Split) both used Monaco. Read
+  // mode is a third non-WYSIWYG mode with NO Monaco editor mounted, so
+  // a negation now lies — it would claim Monaco is active in Read mode
+  // and trigger find/replace / selection-capture against a stale or
+  // null `editorRef`. Source-style editor (Monaco) drives undo/redo for
+  // both Source AND Split; Read mode gets neither.
+  const isMonacoActive = activeMode === 'source' || activeMode === 'split';
 
   // Capture the active editor's cursor/scroll into the (about-to-leave)
   // tab before switching, so a switch back can restore. Each editor has
@@ -739,7 +747,7 @@ function AppContent() {
           editorRef.current?.zoomReset();
           break;
         case 'read-mode':
-          // RAISE-60: Cmd+0 / View → Read Mode. Switches the active
+          // RAISE-60: Cmd+1 / View → Read Mode. Switches the active
           // tab to Read view (read-only rendered markdown).
           handleModeChange('read');
           break;

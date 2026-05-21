@@ -211,7 +211,7 @@ function makeTab(path: string | null, content: string, initialMode: EditorMode =
     // click, "Open With" → Rise MD Editor) start in Read mode. The
     // `initialMode` arg is plumbed through `loadFile` for that case;
     // all other call sites get the WYSIWYG default. Users can flip
-    // per tab via the mode switcher (or Cmd+0/1/2/3, or Cmd+\ to cycle).
+    // per tab via the mode switcher (or Cmd+1/2/3/4, or Cmd+\ to cycle).
     editorMode: initialMode,
     loadEpoch: 0,
   };
