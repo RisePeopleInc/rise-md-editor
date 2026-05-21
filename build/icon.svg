@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  rAIse app icon. Uses the Rise mark from
-  @risepeopleinc/rcl/dist/collection/assets/platform/rise-logo.svg
-  the canonical orange (#FFA31D) double ring logo. Scaled from the
-  source's 24x24 viewBox to fill the centre of a 1024x1024 icon
-  with a white rounded square background.
+  Rise MD Editor app icon. Uses the Rise mark from
+  @risepeopleinc/rcl/dist/collection/assets/platform/rise-logo.svg —
+  the canonical orange (#FFA31D) double-ring logo — on a white
+  rounded square background.
 
-  Maths: 24 x 32 = 768 (75 percent of 1024).
-  Centring offset = (1024 minus 768) divided by 2 = 128.
-  The 180 radius corners match macOS squircle convention.
+  Sizing follows Apple's macOS App Icon template (RAISE-15): the
+  white squircle is 824x824 centred in a 1024x1024 canvas, leaving
+  100px of transparent margin on each side. macOS uses that margin
+  for shadow / depth effects; without it, the icon renders visibly
+  larger than apps following Apple's guidance and looks
+  proportionally oversized in the dock next to system apps.
+
+  Math:
+    Squircle: 824 x 824, top-left at (100, 100), corner radius 145
+      (Apple's recommended corner is ~17.6% of the squircle size,
+      matching the macOS Big Sur squircle convention).
+    Mark: 75% of the squircle = 618 x 618, top-left at (203, 203)
+      (squircle origin 100 + (824 - 618) / 2 = 100 + 103 = 203).
+      The source mark is 24 x 24 — scale factor is 618 / 24 = 25.75.
 
   To regenerate build/icon.png from this SVG (see README — the
   resvg-js CLI takes a fit-width flag).
@@ -19,8 +29,8 @@
 <svg xmlns="http://www.w3.org/2000/svg"
      viewBox="0 0 1024 1024"
      width="1024" height="1024">
-  <rect x="0" y="0" width="1024" height="1024" rx="180" ry="180" fill="#ffffff" />
-  <g transform="translate(128, 128) scale(32)">
+  <rect x="100" y="100" width="824" height="824" rx="145" ry="145" fill="#ffffff" />
+  <g transform="translate(203, 203) scale(25.75)">
     <path fill-rule="evenodd" clip-rule="evenodd"
           d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20Z"
           fill="#FFA31D" />
