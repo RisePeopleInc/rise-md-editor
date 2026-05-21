@@ -38,20 +38,70 @@ publish:
   repo: rise-md-editor
 
 # ---------------------------------------------------------------------------
-# File associations — registers Rise MD Editor as a handler for .md /
-# .markdown / .txt on all platforms. Drag onto the dock, right-click →
-# Open With, and double-click-from-Finder all flow through.
+# File associations (RAISE-44).
+#
+# Claims the markdown extension family on every platform — Finder
+# "Open With" submenu on macOS, Explorer "Open with" / Default Apps
+# on Windows, and .desktop MIME-type registration on Linux. Drag
+# onto the dock, right-click → Open With, and double-click-from-
+# Finder all flow through to `app.on('open-file')` (macOS) or
+# `process.argv` (Win / Linux), dispatched as `open-path` actions
+# in `main/index.ts`.
+#
+# The extension list deliberately omits:
+#
+#   - `.txt` — too generic. Claiming it would steal the system
+#     default for plain text from TextEdit / Notepad / etc., which
+#     no user is asking for. (We still ACCEPT `.txt` in
+#     `findFileArgs` for the rare user who manually sets us as
+#     default for it — registering the claim is what's avoided.)
+#
+#   - `.mdx` — MDX (markdown + JSX) is a separate ecosystem with
+#     editors that understand JSX. Let those tools claim it.
+#
+# electron-builder generates the macOS `CFBundleDocumentTypes` +
+# `UTImportedTypeDeclarations` plist blocks, the Windows NSIS
+# installer registry entries (per-user `HKCU`, no admin elevation
+# needed — matches VS Code's default), and the Linux `.desktop`
+# MimeType field from this one block.
 # ---------------------------------------------------------------------------
 fileAssociations:
   - ext: md
     name: Markdown Document
+    description: Markdown source file
     role: Editor
+    rank: Default
+    mimeType: text/markdown
   - ext: markdown
     name: Markdown Document
+    description: Markdown source file
     role: Editor
-  - ext: txt
-    name: Text Document
+    rank: Default
+    mimeType: text/markdown
+  - ext: mdown
+    name: Markdown Document
     role: Editor
+    mimeType: text/markdown
+  - ext: mkd
+    name: Markdown Document
+    role: Editor
+    mimeType: text/markdown
+  - ext: mkdn
+    name: Markdown Document
+    role: Editor
+    mimeType: text/markdown
+  - ext: mdwn
+    name: Markdown Document
+    role: Editor
+    mimeType: text/markdown
+  - ext: mdtxt
+    name: Markdown Document
+    role: Editor
+    mimeType: text/markdown
+  - ext: mdtext
+    name: Markdown Document
+    role: Editor
+    mimeType: text/markdown
 
 # ---------------------------------------------------------------------------
 # Icons live in build/. icon.svg is the design source (Rise mark on a
