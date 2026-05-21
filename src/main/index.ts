@@ -606,7 +606,15 @@ ipcMain.on('dialog:show-error', (_, payload: { title: string; message: string })
 // sandboxed, so it can't import Electron's `clipboard` module directly —
 // that import gets stripped by the sandbox bundler. Round-trip through
 // IPC instead.
+//
+// Both `text/plain` and `text/html` are exposed because WYSIWYG paste-
+// plain prefers the HTML slot's `textContent` (drops markdown syntax
+// markers — copying a heading and paste-planning gives "Header", not
+// "## Header"), while Source / Split paste-plain prefers `text/plain`
+// (the user is editing raw markdown and wants the markdown source). The
+// renderer picks which slot to use based on the active editor mode.
 ipcMain.handle('clipboard:read-text', (): string => clipboard.readText());
+ipcMain.handle('clipboard:read-html', (): string => clipboard.readHTML());
 
 ipcMain.on('shell:open-external', (_, url: unknown) => {
   if (typeof url !== 'string' || !url) return;

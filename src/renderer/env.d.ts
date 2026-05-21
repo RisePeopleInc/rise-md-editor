@@ -225,6 +225,8 @@ export interface RaiseContextMenuApi {
 export interface RaiseClipboardApi {
   /** Returns the clipboard's `text/plain` slot, or `''` if absent. */
   readText: () => Promise<string>;
+  /** Returns the clipboard's `text/html` slot, or `''` if absent. */
+  readHTML: () => Promise<string>;
 }
 
 export type ExportPdfPageSize = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';

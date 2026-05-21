@@ -384,6 +384,14 @@ export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter'
  */
 const clipboardApi = {
   readText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
+  /**
+   * RAISE-51 smoke-test follow-up: WYSIWYG paste-plain prefers the
+   * `text/html` slot and reduces it to `textContent` so a heading
+   * copied from inside the app pastes as "Header" rather than
+   * "## Header". Returns the raw HTML; the renderer's
+   * `htmlToPlainText` helper does the reduction.
+   */
+  readHTML: (): Promise<string> => ipcRenderer.invoke('clipboard:read-html'),
 };
 
 const contextMenu = {

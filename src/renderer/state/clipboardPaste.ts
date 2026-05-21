@@ -441,3 +441,52 @@ export function getPlainTextFromClipboard(cd: DataTransfer): string | null {
   const text = cd.getData('text/plain');
   return text || null;
 }
+
+/**
+ * RAISE-51 smoke-test follow-up: reduce a clipboard `text/html` slot
+ * to its visible text content, with block-level boundaries preserved
+ * as newlines.
+ *
+ * Why not just `element.textContent`? `textContent` walks every text
+ * node and concatenates them with no separator — `<p>Hello</p><p>World</p>`
+ * comes out as `"HelloWorld"`, swallowing the paragraph break. We
+ * want `"Hello\n\nWorld"`. The fix: substitute newlines for
+ * `<br>` and for the *closing* tag of every block-level element
+ * before extracting `textContent`, so the boundaries land in the
+ * output even though `textContent` itself doesn't know about them.
+ *
+ * Drives the WYSIWYG paste-plain behaviour. The user reported:
+ * copying a heading from Edit mode (Milkdown puts markdown
+ * `## Header` in text/plain AND HTML `<h2>Header</h2>` in
+ * text/html) and pasting plain inserts the literal `## Header`.
+ * Expected behaviour matches macOS native "Paste and Match Style":
+ * drop the formatting markers, paste just the visible text.
+ * Using `text/html` and reducing to its visible content is the
+ * standard way to achieve that.
+ *
+ * Source / Split modes deliberately keep using `text/plain` (raw
+ * markdown is what the user is editing there); this helper is
+ * only called on the WYSIWYG paste-plain path.
+ */
+export function htmlToPlainText(html: string): string {
+  if (!html) return '';
+  // Inject newlines at block boundaries before parsing. The
+  // closing-tag substitution covers paragraphs, divs, headings,
+  // list items, table rows, blockquotes, and pre — the structural
+  // block elements that visually wrap to a new line. `<br>` is the
+  // explicit in-paragraph line break.
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|h[1-6]|li|tr|blockquote|pre)>/gi, '\n');
+  let text = '';
+  try {
+    const doc = new DOMParser().parseFromString(withBreaks, 'text/html');
+    text = doc.body?.textContent ?? '';
+  } catch {
+    return '';
+  }
+  // The closing-tag substitution can produce 3+ consecutive
+  // newlines around nested blocks (`</p></div>` → "\n\n"). Collapse
+  // to at most two so paste output doesn't accumulate blank lines.
+  return text.replace(/\n{3,}/g, '\n\n').trim();
+}
