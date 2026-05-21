@@ -2,6 +2,22 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 /**
+ * RAISE-19: install trigger lives outside this module. The `update:install`
+ * IPC handler is owned by `src/main/index.ts` because it needs to coordinate
+ * with the main window's dirty-tab close prompt — if any tab is dirty, the
+ * install runs only after the user has resolved the prompt (Save All /
+ * Review / Discard). Re-exporting the underlying call lets that handler
+ * fire the install without needing a back-reference to electron-updater.
+ *
+ * `isSilent: false` → show the installer UI (Windows). `isForceRunAfter: true`
+ * → relaunch into the new version after install completes. These match the
+ * RAISE-12 wiring; do not change them without a release-process review.
+ */
+export function quitAndInstallNow(): void {
+  autoUpdater.quitAndInstall(false, true);
+}
+
+/**
  * RAISE-12: auto-update wiring.
  *
  * Flow:
@@ -39,6 +55,16 @@ export interface UpdateState {
 
 let lastState: UpdateState = { status: 'idle' };
 
+/**
+ * RAISE-19: read the most recent UpdateState from outside this module —
+ * `src/main/index.ts` needs the pending version string for the dirty-tab
+ * dialog copy ("Save changes before restarting to install Rise MD Editor
+ * 0.2.0?"). Returns a defensive copy so callers can't mutate the cache.
+ */
+export function getLastUpdateState(): UpdateState {
+  return { ...lastState };
+}
+
 function broadcast(state: UpdateState, window: BrowserWindow | null): void {
   lastState = state;
   if (!window || window.isDestroyed()) return;
@@ -74,10 +100,7 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
     // The 'downloading' status keeps the banner saying "downloading…"
     // until the 'update-downloaded' event flips it to ready-to-install.
     if (lastState.status !== 'downloading') {
-      broadcast(
-        { status: 'downloading', version: lastState.version },
-        getWindow(),
-      );
+      broadcast({ status: 'downloading', version: lastState.version }, getWindow());
     }
   });
 
@@ -97,12 +120,11 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   // (rare, but possible on slow machines) still shows up.
   ipcMain.handle('update:get-state', async (): Promise<UpdateState> => lastState);
 
-  ipcMain.on('update:install', () => {
-    // quitAndInstall closes all windows + relaunches with the new
-    // version. `false, false` = don't be silent (show progress) and
-    // run after install (open the new app).
-    autoUpdater.quitAndInstall(false, true);
-  });
+  // RAISE-19: `update:install` is registered in `src/main/index.ts` so the
+  // close handler there can intercept the install attempt, surface the
+  // dirty-tab prompt with install-aware copy, and only fire `quitAndInstall`
+  // after the user has resolved (or cancelled, in which case we leave the
+  // banner intact so they can click Restart again later).
 
   // Skip the actual check in dev / unpackaged. autoUpdater would log a
   // benign error ("update info file not found") otherwise.
