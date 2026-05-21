@@ -158,14 +158,27 @@ export function useThemeState(): UseThemeStateResult {
   }, []);
 
   // Initial fetch + subscription. Empty deps: runs once.
+  //
+  // Subscribe-then-fetch ordering to close the initial-state race
+  // ([RAISE-20](https://risepeople.atlassian.net/browse/RAISE-20)). If
+  // main pushes a `theme:updated` event between `theme.get()` being
+  // dispatched and its response landing (e.g. the user toggles the OS
+  // theme in the same tick the renderer attaches), the subscription
+  // must be registered first so the live value isn't lost. The
+  // `receivedFromSubscription` flag then prevents the now-stale
+  // `theme.get()` reply from overwriting the fresh value.
   useEffect(() => {
     let cancelled = false;
+    let receivedFromSubscription = false;
+    const off = window.api.theme.onChange((next) => {
+      receivedFromSubscription = true;
+      apply(next);
+    });
     void (async () => {
       const initial = await window.api.theme.get();
-      if (cancelled) return;
+      if (cancelled || receivedFromSubscription) return;
       apply(initial);
     })();
-    const off = window.api.theme.onChange((next) => apply(next));
     return () => {
       cancelled = true;
       off();
