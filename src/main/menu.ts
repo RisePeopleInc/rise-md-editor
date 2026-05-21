@@ -34,6 +34,7 @@ export type MenuAction =
   | 'source-mode'
   | 'split-mode'
   | 'cycle-mode'
+  | 'paste-plain'
   | 'theme-system'
   | 'theme-light'
   | 'theme-dark'
@@ -252,6 +253,19 @@ export function buildMenu(deps: MenuDeps): Menu {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
+        // RAISE-51: Paste and Match Style (macOS naming convention) /
+        // Paste without Formatting (Windows/Linux). Bypasses the
+        // markdown / Turndown / image pipeline that the regular
+        // `role: 'paste'` routes through — drops `text/html`, drops
+        // image clipboard items, and inserts the raw `text/plain`
+        // slot verbatim at the cursor. Same accelerator across both
+        // platforms (`CmdOrCtrl+Shift+V`) matches Word / Google Docs /
+        // Notion / Obsidian / Bear / iA Writer / Typora convention.
+        {
+          label: isMac ? 'Paste and Match Style' : 'Paste without Formatting',
+          accelerator: 'CmdOrCtrl+Shift+V',
+          click: () => send(deps, 'paste-plain'),
+        },
         {
           // Mirror of the WYSIWYG context-menu item. No-op when the
           // active tab isn't in WYSIWYG mode — the renderer's

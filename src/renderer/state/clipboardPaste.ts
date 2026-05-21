@@ -421,3 +421,23 @@ export function getMarkdownFromClipboard(cd: DataTransfer): string | null {
 
   return text || null;
 }
+
+/**
+ * RAISE-51 companion to `getMarkdownFromClipboard`. Returns ONLY the
+ * clipboard's `text/plain` slot — no Turndown conversion, no markdown
+ * heuristic, no Google-Docs cleanup. Drives the Paste and Match Style
+ * (Cmd/Ctrl+Shift+V) flow. Returns `null` on an empty / `text/plain`-less
+ * clipboard (image-only sources, etc.) — callers treat null as a no-op
+ * paste, matching the ticket's "image clipboards short-circuit" spec.
+ *
+ * Companion shape with `getMarkdownFromClipboard` (DataTransfer in,
+ * string-or-null out) so DOM-paste-event paths can use either helper
+ * interchangeably. The menu-action / context-menu paste-plain flow
+ * doesn't have a DataTransfer (no DOM paste event); it reads the
+ * system clipboard via `window.api.clipboard.readText()` directly and
+ * skips this helper.
+ */
+export function getPlainTextFromClipboard(cd: DataTransfer): string | null {
+  const text = cd.getData('text/plain');
+  return text || null;
+}

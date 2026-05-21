@@ -84,6 +84,15 @@ export function showEditorContextMenu(
   const items: MenuItemConstructorOptions[] = [];
   const hasSel = payload.hasSelection;
   const canPaste = clipboardHasPasteableContent(payload.mode);
+  // RAISE-51: Paste and Match Style needs `text/plain` specifically
+  // — `text/html`-only clipboards (rare, but possible from some
+  // sources) won't have anything to paste-plain. Also gates out
+  // image-only clipboards: ticket spec says image-only short-circuits
+  // to a no-op for paste-plain. Surface the menu item only when
+  // there's actual plain text to insert.
+  const canPastePlain = clipboard.availableFormats().includes('text/plain');
+  const platform = process.platform;
+  const pastePlainLabel = platform === 'darwin' ? 'Paste and Match Style' : 'Paste without Formatting';
 
   // The menu surfaces only the items that would do something useful in
   // the current state. Items that would be greyed out or silently no-op
@@ -118,6 +127,18 @@ export function showEditorContextMenu(
       // Monaco's own selectAll command from the renderer.
       if (hasSel) items.push({ role: 'cut' }, { role: 'copy' });
       if (canPaste) items.push({ role: 'paste' });
+      // RAISE-51: Paste and Match Style sits next to Paste. In Source
+      // mode the user-visible diff vs. regular Paste is small (Monaco
+      // is a code editor — its native paste ignores HTML by default),
+      // but the menu item is offered for cross-mode shortcut parity
+      // with WYSIWYG.
+      if (canPastePlain) {
+        items.push({
+          label: pastePlainLabel,
+          accelerator: 'CmdOrCtrl+Shift+V',
+          click: () => dispatch('paste-plain'),
+        });
+      }
       if (items.length > 0) items.push({ type: 'separator' });
       items.push({
         label: 'Select All',
@@ -132,6 +153,17 @@ export function showEditorContextMenu(
       // built-in `role: 'selectAll'` works as expected.
       if (hasSel) items.push({ role: 'cut' }, { role: 'copy' });
       if (canPaste) items.push({ role: 'paste' });
+      // RAISE-51: Paste and Match Style — the headline use case is
+      // WYSIWYG, where regular Paste runs the markdown / Turndown /
+      // image pipeline and the user often wants to drop that for a
+      // raw plain-text insertion.
+      if (canPastePlain) {
+        items.push({
+          label: pastePlainLabel,
+          accelerator: 'CmdOrCtrl+Shift+V',
+          click: () => dispatch('paste-plain'),
+        });
+      }
       if (items.length > 0) items.push({ type: 'separator' });
       items.push({ role: 'selectAll' });
       break;

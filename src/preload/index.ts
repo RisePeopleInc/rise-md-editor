@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { clipboard, contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export type MenuActionType =
   | 'new'
@@ -41,6 +41,7 @@ export type MenuActionType =
   | 'context-add-link'
   | 'context-source-select-all'
   | 'context-preview-select-all'
+  | 'paste-plain'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -356,6 +357,24 @@ const folder = {
  * through `menu:action` for the renderer to execute.
  */
 export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter';
+/**
+ * RAISE-51: synchronous clipboard read for the Paste and Match Style
+ * flow. Menu accelerators (`Cmd/Ctrl+Shift+V`) don't give the
+ * renderer a `DataTransfer` the way DOM paste events do, so we
+ * need to read the system clipboard out of band. Electron's
+ * `clipboard` module is available directly in the preload script —
+ * no IPC round-trip required. Synchronous return keeps the renderer
+ * paste-handler shape straightforward.
+ *
+ * Returns the empty string when the clipboard has no `text/plain`
+ * slot (image-only clipboards, etc.). The renderer treats empty
+ * as a no-op paste, matching the ticket's "image clipboards
+ * short-circuit" spec.
+ */
+const clipboardApi = {
+  readText: (): string => clipboard.readText(),
+};
+
 const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;
@@ -402,6 +421,7 @@ const api = {
   assets,
   update,
   contextMenu,
+  clipboard: clipboardApi,
   export: exportApi,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved

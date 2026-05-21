@@ -808,6 +808,32 @@ function AppContent() {
           // we just route the action.
           void wysiwygRef.current?.copyAsMarkdown();
           break;
+        case 'paste-plain': {
+          // RAISE-51: Paste and Match Style (Cmd/Ctrl+Shift+V).
+          // Read the system clipboard via the preload bridge — the
+          // menu accelerator doesn't carry a DataTransfer the way a
+          // DOM paste event would, so we go to `clipboard.readText()`
+          // directly. Route to the active editor's imperative handle:
+          //
+          //   - WYSIWYG → Milkdown insertion as inline text + hard_break
+          //   - Source / Split → Monaco `executeEdits` at the cursor
+          //   - Read → no-op (no editable surface; menu item would
+          //     also be unreachable since context-menu paste-plain
+          //     isn't surfaced for the preview mode)
+          //
+          // Empty string from `readText()` (image-only clipboard
+          // or empty system clipboard) short-circuits to nothing,
+          // matching the ticket's "image clipboards → no plain-text
+          // equivalent, paste is a no-op" spec.
+          const text = window.api.clipboard.readText();
+          if (!text) break;
+          if (isWysiwyg) {
+            wysiwygRef.current?.pastePlain(text);
+          } else if (isMonacoActive) {
+            editorRef.current?.pastePlain(text);
+          }
+          break;
+        }
         case 'context-add-link':
           // RAISE-38: dispatched from the WYSIWYG context menu's
           // "Add Link…" item (selection-only). Routes into the

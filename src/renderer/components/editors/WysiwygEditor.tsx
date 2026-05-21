@@ -74,6 +74,15 @@ export interface WysiwygEditorHandle {
    * surface the same modal as the toolbar.
    */
   promptLink: () => void;
+  /**
+   * RAISE-51: insert raw text at the current selection — no link
+   * marks, no inline formatting marks, no tables / lists /
+   * headings, just plain text runs with `hard_break` between
+   * newlines. Drives the Paste and Match Style flow
+   * (Cmd/Ctrl+Shift+V) which bypasses the regular paste pipeline's
+   * markdown / Turndown / image branches.
+   */
+  pastePlain: (text: string) => void;
 }
 
 interface WysiwygEditorProps {
@@ -828,6 +837,47 @@ function MilkdownBody({
       },
       promptLink: () => {
         toolbarRef.current?.promptLink();
+      },
+      pastePlain: (text) => {
+        if (!text) return;
+        const editor = get();
+        if (!editor) return;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { schema } = view.state;
+          // Build a Fragment of inline content: text runs separated
+          // by `hard_break` for newlines. This matches the ticket
+          // spec ("single text run if the clipboard had a single
+          // line; hard_break-separated runs if it had newlines")
+          // and Works In Any Inline Context — body paragraph,
+          // table cell, heading, list item — because hard_break is
+          // schema-valid in every inline group.
+          //
+          // Why not `tr.insertText(text)`? ProseMirror's
+          // `insertText` inserts the string as text content into
+          // the current selection's parent block; embedded `\n`
+          // characters land as literal newlines in the text node,
+          // which renders as a single line with the newlines
+          // collapsed to spaces by the contenteditable layout
+          // engine. Splitting on `\n` and emitting `hard_break`
+          // nodes is the only way to get visible line breaks.
+          const inlineNodes: ProseNode[] = [];
+          const lines = text.split('\n');
+          lines.forEach((line, i) => {
+            if (i > 0) inlineNodes.push(schema.nodes['hard_break']!.create());
+            if (line.length > 0) inlineNodes.push(schema.text(line));
+          });
+          if (inlineNodes.length === 0) return;
+          const slice = new Slice(Fragment.from(inlineNodes), 0, 0);
+          view.dispatch(view.state.tr.replaceSelection(slice));
+          // Focus after dispatch — the menu accelerator's IPC
+          // round-trip can interrupt ProseMirror's focus tracking,
+          // and without an explicit refocus the inserted caret
+          // sits at the right model position but typing goes to
+          // the previously-focused element (toolbar button, body
+          // chrome, etc.).
+          view.focus();
+        });
       },
     }),
     [get, scrollContainerRef, toolbarRef],
