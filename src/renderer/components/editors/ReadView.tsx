@@ -257,6 +257,40 @@ export function ReadView({
     };
   }, []);
 
+  // Cmd/Ctrl+A select-all, scoped to the preview content. Without this
+  // binding the default `webContents.selectAll()` would select the
+  // entire renderer document (sidebar, mode pill, statusbar) — not
+  // what the user means by "select all" while reading. The keydown
+  // listener attaches only to the preview container, so other modes
+  // (Source / WYSIWYG / Split) keep their own native or Monaco-managed
+  // Cmd+A behaviour. Matches the scope-to-preview-node logic used by
+  // the right-click `Select All` menu item (`context-preview-select-all`).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleKeydown = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        e.stopPropagation();
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(container);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    };
+    // Keydown on `window` rather than the container: the read pane
+    // isn't keyboard-focusable by default (no tabindex, no editor),
+    // so keystrokes don't land on it. `window` catches Cmd+A
+    // regardless of focus, and the `mode === 'read'` mount/unmount
+    // gating happens for free — this listener only exists while
+    // ReadView is mounted.
+    window.addEventListener('keydown', handleKeydown);
+    return () => {
+      window.removeEventListener('keydown', handleKeydown);
+    };
+  }, []);
+
   // Right-click context menu — Copy / Select All only, no Cut / Paste
   // since Read is read-only. Mirrors SplitView's preview-pane menu.
   useEffect(() => {
