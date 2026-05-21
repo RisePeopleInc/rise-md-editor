@@ -17,6 +17,7 @@ export type MenuActionType =
   | 'save'
   | 'save-as'
   | 'export-pdf'
+  | 'export-html'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -75,13 +76,7 @@ export interface TreeNode {
   children?: TreeNode[];
 }
 
-export type ItemMenuAction =
-  | 'new-file'
-  | 'new-folder'
-  | 'rename'
-  | 'delete'
-  | 'reveal'
-  | 'open';
+export type ItemMenuAction = 'new-file' | 'new-folder' | 'rename' | 'delete' | 'reveal' | 'open';
 
 export type TemplateKind = 'claude' | 'skill';
 
@@ -196,11 +191,7 @@ export interface RaiseFolderApi {
 }
 
 /** RAISE-28: editor-surface context-menu requests (right-click). */
-export type EditorContextMode =
-  | 'wysiwyg'
-  | 'source'
-  | 'preview'
-  | 'frontmatter';
+export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter';
 export interface RaiseContextMenuApi {
   showEditor: (payload: {
     mode: EditorContextMode;
@@ -211,13 +202,7 @@ export interface RaiseContextMenuApi {
   }) => Promise<void>;
 }
 
-export type ExportPdfPageSize =
-  | 'Letter'
-  | 'Legal'
-  | 'Tabloid'
-  | 'A3'
-  | 'A4'
-  | 'A5';
+export type ExportPdfPageSize = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';
 export interface ExportPdfCustomPageSize {
   width: number;
   height: number;
@@ -248,8 +233,23 @@ export type ExportPdfResult =
   | { status: 'saved'; path: string }
   | { status: 'canceled' }
   | { status: 'error'; message: string };
+/** RAISE-53: Export-to-HTML bridge. */
+export type ExportHtmlImageMode = 'inline' | 'external';
+export interface ExportHtmlOptions {
+  html: string;
+  defaultBaseName: string;
+  defaultDir: string | null;
+  imageMode: ExportHtmlImageMode;
+  markdownPath: string | null;
+  openAfter: boolean;
+}
+export type ExportHtmlResult =
+  | { status: 'saved'; path: string }
+  | { status: 'canceled' }
+  | { status: 'error'; message: string };
 export interface RaiseExportApi {
   toPdf: (opts: ExportPdfOptions) => Promise<ExportPdfResult>;
+  toHtml: (opts: ExportHtmlOptions) => Promise<ExportHtmlResult>;
 }
 
 export interface RaiseApi {
@@ -277,18 +277,12 @@ export interface RaiseApi {
   contextMenu: RaiseContextMenuApi;
   /** RAISE-42: Export-to-PDF bridge. */
   export: RaiseExportApi;
-  pushFileMeta: (meta: {
-    path: string | null;
-    isDirty: boolean;
-    dirtyCount: number;
-  }) => void;
+  pushFileMeta: (meta: { path: string | null; isDirty: boolean; dirtyCount: number }) => void;
   getRecent: () => Promise<string[]>;
   addRecent: (filePath: string) => void;
   clearRecent: () => void;
   onMenuAction: (callback: (event: MenuActionEvent) => void) => () => void;
-  onFileSavedAs: (
-    callback: (event: { path: string; content: string }) => void,
-  ) => () => void;
+  onFileSavedAs: (callback: (event: { path: string; content: string }) => void) => () => void;
   onResolveDirty: (callback: (mode: 'save-all' | 'review') => void) => () => void;
   respondResolveDirty: (ok: boolean) => void;
 }

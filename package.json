@@ -48,6 +48,7 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3",
     "gemoji": "^8.1.0",
+    "jszip": "^3.10.1",
     "markdown-it": "^14.1.1",
     "markdown-it-emoji": "^3.0.0",
     "markdown-it-task-lists": "^2.1.1",

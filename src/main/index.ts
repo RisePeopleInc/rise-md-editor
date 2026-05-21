@@ -30,6 +30,7 @@ import {
   type ExportPdfOptions,
   type ExportPdfResult,
 } from './exportPdf';
+import { exportToHtml, type ExportHtmlOptions, type ExportHtmlResult } from './exportHtml';
 
 const APP_NAME = 'Rise MD Editor';
 
@@ -540,6 +541,18 @@ ipcMain.handle('export:to-pdf', async (_, opts: ExportPdfOptions): Promise<Expor
     return { status: 'error', message: 'No active window' };
   }
   return exportToPdf(mainWindow, opts);
+});
+
+// RAISE-53: Export-to-HTML. Same renderer-side `buildPrintHtml`
+// pipeline as PDF; main applies the @font-face substitution and
+// transforms `file://` image srcs into either inline data URIs
+// (single-file mode) or relative paths in a zipped assets/ folder
+// (zip mode). See `exportHtml.ts` for the full flow.
+ipcMain.handle('export:to-html', async (_, opts: ExportHtmlOptions): Promise<ExportHtmlResult> => {
+  if (!mainWindow) {
+    return { status: 'error', message: 'No active window' };
+  }
+  return exportToHtml(mainWindow, opts);
 });
 
 ipcMain.handle(

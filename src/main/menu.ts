@@ -1,4 +1,12 @@
-import { app, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, nativeImage, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  MenuItemConstructorOptions,
+  nativeImage,
+  shell,
+} from 'electron';
 import path from 'node:path';
 
 export type MenuAction =
@@ -12,6 +20,7 @@ export type MenuAction =
   | 'save'
   | 'save-as'
   | 'export-pdf'
+  | 'export-html'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -193,6 +202,16 @@ export function buildMenu(deps: MenuDeps): Menu {
               accelerator: 'CmdOrCtrl+Shift+E',
               click: () => send(deps, 'export-pdf'),
             },
+            // RAISE-53: HTML export. No accelerator — the modal is
+            // fast enough that menu drill is acceptable, and we're
+            // out of un-conflicted Cmd+Shift+letter combinations
+            // around `Cmd+Shift+E` / `Cmd+Shift+H` (the latter is
+            // a system-wide "hide others" shortcut on macOS we
+            // don't want to override).
+            {
+              label: 'HTML…',
+              click: () => send(deps, 'export-html'),
+            },
           ],
         },
         { type: 'separator' },
@@ -209,9 +228,7 @@ export function buildMenu(deps: MenuDeps): Menu {
           accelerator: 'CmdOrCtrl+W',
           click: () => send(deps, 'close-tab'),
         },
-        ...(isMac
-          ? []
-          : ([{ role: 'quit' as const }] satisfies MenuItemConstructorOptions[])),
+        ...(isMac ? [] : ([{ role: 'quit' as const }] satisfies MenuItemConstructorOptions[])),
       ],
     },
     {
