@@ -20,6 +20,7 @@ export type MenuActionType =
   | 'find'
   | 'replace'
   | 'toggle-sidebar'
+  | 'read-mode'
   | 'wysiwyg-mode'
   | 'source-mode'
   | 'split-mode'
@@ -52,7 +53,18 @@ export interface OpenedFile {
 
 export interface MenuActionEvent {
   type: MenuActionType;
-  payload?: { path?: string; content?: string };
+  payload?: {
+    path?: string;
+    content?: string;
+    /**
+     * RAISE-60: hint that this menu action was triggered by an
+     * OS-level file-open event (macOS `app.on('open-file')` or
+     * Win/Linux argv file-association). Drives the "open new tabs
+     * in Read mode" default — sidebar clicks, drag-drop, and the
+     * `File → Open…` dialog never set this, so they stay in WYSIWYG.
+     */
+    fromOs?: boolean;
+  };
 }
 
 const files = {

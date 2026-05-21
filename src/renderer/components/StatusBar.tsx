@@ -1,4 +1,7 @@
-export type EditorMode = 'Source' | 'WYSIWYG' | 'Split';
+// RAISE-60: added 'Read' alongside the existing labels. The
+// statusbar shows a single string, so the label union is just the
+// rendered text — not the same union as `EditorMode` in fileState.
+export type EditorMode = 'Read' | 'Source' | 'WYSIWYG' | 'Split';
 
 interface StatusBarProps {
   line: number;

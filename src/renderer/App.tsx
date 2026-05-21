@@ -32,15 +32,18 @@ function countWords(text: string): number {
   return matches ? matches.length : 0;
 }
 
-// Cycle order for Cmd+\: WYSIWYG → Source → Split → WYSIWYG.
-const MODE_CYCLE: EditorMode[] = ['wysiwyg', 'source', 'split'];
+// Cycle order for Cmd+\: Read → WYSIWYG → Source → Split → Read.
+// RAISE-60 added Read at the head of the cycle to match its leftmost
+// position in the ModeSwitcher pill.
+const MODE_CYCLE: EditorMode[] = ['read', 'wysiwyg', 'source', 'split'];
 
 function nextMode(mode: EditorMode): EditorMode {
   const idx = MODE_CYCLE.indexOf(mode);
   return MODE_CYCLE[(idx + 1) % MODE_CYCLE.length] ?? 'wysiwyg';
 }
 
-function modeLabel(mode: EditorMode): 'Source' | 'WYSIWYG' | 'Split' {
+function modeLabel(mode: EditorMode): 'Read' | 'Source' | 'WYSIWYG' | 'Split' {
+  if (mode === 'read') return 'Read';
   if (mode === 'wysiwyg') return 'WYSIWYG';
   if (mode === 'split') return 'Split';
   return 'Source';
@@ -145,10 +148,17 @@ function AppContent() {
   }, [file]);
 
   const handleOpenPath = useCallback(
-    async (filePath: string) => {
+    // RAISE-60: `fromOs` distinguishes Finder/Explorer launches from
+    // in-app opens (sidebar click, drag-drop, Open dialog, recents).
+    // OS-launched opens default the new tab to Read mode; in-app opens
+    // keep the existing WYSIWYG default. Already-open tabs are
+    // unaffected — `loadFile` deliberately doesn't touch `editorMode`
+    // on re-open so a user editing in WYSIWYG isn't yanked into Read
+    // by a Finder double-click of the same file.
+    async (filePath: string, fromOs = false) => {
       try {
         const result = await window.api.files.openPath(filePath);
-        file.loadFile(result.path, result.content);
+        file.loadFile(result.path, result.content, fromOs ? 'read' : undefined);
         window.api.addRecent(result.path);
       } catch (err) {
         window.api.showError(
@@ -638,7 +648,12 @@ function AppContent() {
           void handleOpenFile();
           break;
         case 'open-path':
-          if (event.payload?.path) void handleOpenPath(event.payload.path);
+          // RAISE-60: `fromOs` is set by macOS `app.on('open-file')`
+          // and the Win/Linux argv file-association path in main.
+          // It drives the "open in Read mode" default for those launches.
+          if (event.payload?.path) {
+            void handleOpenPath(event.payload.path, event.payload.fromOs ?? false);
+          }
           break;
         case 'open-folder':
           // Route through the sidebar's openFolderDialog so the menu
@@ -722,6 +737,11 @@ function AppContent() {
           break;
         case 'font-zoom-reset':
           editorRef.current?.zoomReset();
+          break;
+        case 'read-mode':
+          // RAISE-60: Cmd+0 / View → Read Mode. Switches the active
+          // tab to Read view (read-only rendered markdown).
+          handleModeChange('read');
           break;
         case 'source-mode':
           handleModeChange('source');
@@ -1033,6 +1053,7 @@ function AppContent() {
               onContentBaseline={file.setMarkdownBaseline}
               onModeChange={handleModeChange}
               onCursorChange={setCursor}
+              onReadScrollChange={file.setActiveReadScroll}
               sourceRef={editorRef}
               wysiwygRef={wysiwygRef}
               monacoThemeId={theme.monacoThemeId}

@@ -29,6 +29,7 @@ export type MenuAction =
   | 'find'
   | 'replace'
   | 'toggle-sidebar'
+  | 'read-mode'
   | 'wysiwyg-mode'
   | 'source-mode'
   | 'split-mode'
@@ -284,6 +285,15 @@ export function buildMenu(deps: MenuDeps): Menu {
           click: () => send(deps, 'toggle-sidebar'),
         },
         { type: 'separator' },
+        // RAISE-60: Read mode — read-only rendered markdown. First in
+        // the View → mode list to match the ModeSwitcher pill's order.
+        // Accelerator `Cmd+0` slots in before the existing Cmd+1/+2/+3
+        // bindings, which stay unchanged to preserve muscle memory.
+        {
+          label: 'Read Mode',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => send(deps, 'read-mode'),
+        },
         {
           label: 'WYSIWYG Mode',
           accelerator: 'CmdOrCtrl+1',
