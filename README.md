@@ -133,9 +133,24 @@ xcrun stapler validate dist/Rise MD Editor-*-universal.dmg
 
 ### Code signing setup (Windows)
 
-**Currently unsigned** — Windows code signing is deferred while Azure Artifact Signing is being provisioned (~$120/yr, SOC 2 Type II, FIPS 140-2 Level 3 HSM-backed). The CI `build-win` job in `.github/workflows/release.yml` produces an unsigned NSIS installer; SmartScreen Defender warns end users on first download for a brief reputation-build window.
+Windows installers are signed via [**Azure Artifact Signing**](https://learn.microsoft.com/en-us/azure/trusted-signing/) — Microsoft's HSM-hosted code signing service (FIPS 140-2 Level 3, SOC 2 Type II via Azure's underlying compliance). ~$10/month (Basic tier). The cert never leaves Microsoft's HSM; the build runner authenticates via OIDC federation and the actual private-key operation happens server-side.
 
-When the Azure path is set up, `electron-builder.yml`'s `win` block will gain a `signtoolOptions.sign` callback that shells out to the Azure trusted-signing client against an OIDC-federated workload identity (no `.pfx` on the runner). See [`docs/release-process.md`](docs/release-process.md) "Windows signing — deferred" for the integration shape.
+> Microsoft rebranded "Trusted Signing" → "Artifact Signing" in the Azure portal. Microsoft Learn docs and the NuGet client package (`Microsoft.Trusted.Signing.Client`) still use the older name; the service is the same.
+
+Signing flow:
+
+1. The `build-win` job in `.github/workflows/release.yml` declares `environment: rise-md-editor-signing` and requests `id-token: write` permissions.
+2. `azure/login@v2` exchanges GitHub's OIDC token for an Azure access token.
+3. The job installs Microsoft's Artifact Signing dlib (NuGet package `Microsoft.Trusted.Signing.Client`).
+4. electron-builder's `signtoolOptions.sign` callback ([`scripts/sign-windows.cjs`](scripts/sign-windows.cjs)) shells out to `signtool.exe` with the dlib for every `.exe` it produces.
+5. The dlib calls into Azure for the signing operation against cert profile `rise-md-editor-public` in account `rise-md-editor-signing`.
+
+No `.pfx` on the runner, no long-lived service-principal secret. The federated credential is scoped to this repo's `rise-md-editor-signing` environment, so only workflow runs that opt into that environment can sign.
+
+For local `npm run build:win` (no Azure auth), the sign callback logs a "skipping" warning and returns — producing an unsigned `.exe`. Same behavior as before for dev builds.
+
+- Operational release guide (cutting releases, secrets, troubleshooting): [`docs/release-process.md`](docs/release-process.md)
+- One-time Azure provisioning recipe (resource topology, identity validation, app registration, federated credential): [`docs/azure-signing-setup.md`](docs/azure-signing-setup.md)
 
 ### Cert management — responsible practices
 

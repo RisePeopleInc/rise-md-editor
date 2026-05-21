@@ -54,9 +54,9 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -111,7 +111,7 @@ jobs:
           # when notarization succeeded and the staple landed.
           spctl --assess --type execute --verbose=4 "$APP_PATH" 2>&1
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mac-artifacts
           path: |
@@ -123,27 +123,63 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # Windows — UNSIGNED (signing deferred, see docs/release-process.md)
+  # Windows — signed via Azure Artifact Signing (RAISE-58)
   # ---------------------------------------------------------------------------
   #
-  # Phase 1 of RAISE-45 ships unsigned Windows installers. SmartScreen
-  # will warn end users on first download for a brief reputation-build
-  # window; that's an acceptable tradeoff to unblock CI now while the
-  # Azure Artifact Signing path is being provisioned.
+  # Azure rebranded "Trusted Signing" to "Artifact Signing" in the
+  # portal UI. Microsoft Learn docs and many third-party tutorials
+  # still use the old name; the NuGet package and DLL retain
+  # `Trusted.Signing` / `CodeSigning` literals. Full setup recipe
+  # in docs/azure-signing-setup.md.
   #
-  # When signing is wired up later, the build will gain:
-  #   - Azure tenant + workload-identity OIDC federation (no static secrets)
-  #   - electron-builder `signtoolOptions.sign` callback that shells out
-  #     to the Azure trusted-signing client
-  # No long-lived `.pfx` ever lives on the runner.
+  # Auth: OIDC federation between GitHub Actions and the Entra app
+  # registration `rise-md-editor-github-signing`. The `id-token: write`
+  # permission below lets the runner mint an OIDC token; the
+  # `environment:` declaration scopes the federated credential so only
+  # this job (and other jobs that opt into the same environment) can
+  # exchange it for Azure access. No long-lived secrets on the runner.
+  #
+  # Signing flow:
+  #   1. azure/login@v3 exchanges the OIDC token for an Azure access
+  #      token and writes it to the standard credential locations the
+  #      .NET DefaultAzureCredential picks up.
+  #   2. The Artifact Signing dlib (NuGet package
+  #      `Microsoft.Trusted.Signing.Client`) is installed and its
+  #      path captured for the sign callback.
+  #   3. A metadata JSON file is written, naming the Artifact Signing
+  #      account + cert profile to sign against.
+  #   4. electron-builder runs the normal `--win` build; its
+  #      `signtoolOptions.sign` callback (scripts/sign-windows.cjs)
+  #      invokes signtool.exe with the dlib for every .exe.
   build-win:
-    name: Build Windows (unsigned — signing deferred)
+    name: Build Windows (signed via Azure Artifact Signing)
+    # `windows-latest` is GitHub's rolling label — it points at the
+    # newest stable Windows runner image. Migrations happen
+    # automatically (e.g. the windows-2022 → windows-2025-vs2026
+    # transition on 2026-06-15). The "Locate signtool.exe" step
+    # below globs for the Windows SDK install path so the build
+    # survives those migrations. If signing breaks after a runner
+    # image change, that's the first place to look — the SDK may
+    # have moved to a new versioned directory.
     runs-on: windows-latest
     timeout-minutes: 30
+    # OIDC token minting requires id-token: write. contents: read is
+    # the default for any checkout-using job; spelled out for clarity.
+    permissions:
+      id-token: write
+      contents: read
+    # Environment-gated signing access. The Entra app registration's
+    # federated credential is keyed to this environment name — only
+    # workflow runs that declare `environment: rise-md-editor-signing`
+    # can exchange their OIDC token for the cert-profile signing role.
+    # Configure protection rules (allowed branches/tags) on the
+    # environment in GitHub Settings if you want to gate signing on
+    # specific refs (e.g. v* tags only).
+    environment: rise-md-editor-signing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -157,15 +193,131 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build Windows (unsigned)
+      # Microsoft's Artifact Signing dlib is a .NET assembly. The
+      # windows-latest runner already has .NET SDKs preinstalled,
+      # but pinning here keeps the workflow stable against runner
+      # image churn.
+      - name: Set up .NET (for the Artifact Signing dlib)
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      # Install the Artifact Signing client NuGet package and capture
+      # the path to Azure.CodeSigning.Dlib.dll. (The NuGet package
+      # name retains the older `Trusted.Signing` literal — that's
+      # outside our control.) Version is pinned to a known-good
+      # release; bump deliberately and verify against
+      # https://www.nuget.org/packages/Microsoft.Trusted.Signing.Client
+      # before merging. The dlib path is resolved by globbing rather
+      # than string-templating the version, so a future version bump
+      # only needs the version constant updated above this comment.
+      - name: Install Artifact Signing dlib
+        shell: pwsh
+        run: |
+          $packageVersion = '1.0.95'  # latest as of 2026-05; bump after verifying on nuget.org
+          nuget install Microsoft.Trusted.Signing.Client -Version $packageVersion -OutputDirectory "$env:RUNNER_TEMP\artifact-signing"
+          # Glob for the dlib — the file path includes the version
+          # number, so resolving by search keeps the lookup decoupled
+          # from the pin above. -Recurse handles the bin/x64/ subpath
+          # without us hardcoding it.
+          $dlib = Get-ChildItem -Path "$env:RUNNER_TEMP\artifact-signing" -Recurse -Filter 'Azure.CodeSigning.Dlib.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dlib) {
+            Write-Error "Azure.CodeSigning.Dlib.dll not found anywhere under $env:RUNNER_TEMP\artifact-signing. NuGet install probably failed silently — scroll up for diagnostics."
+            Get-ChildItem -Path "$env:RUNNER_TEMP\artifact-signing" -Recurse | Select-Object -First 30 FullName
+            exit 1
+          }
+          "AZURE_ARTIFACT_SIGNING_DLIB_PATH=$($dlib.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "Dlib path: $($dlib.FullName)"
+
+      # The dlib reads account + cert-profile config from a JSON file
+      # path passed to signtool's /dmdf flag. Endpoint and names are
+      # NOT secrets — they're just config — so we keep them in the
+      # workflow YAML for visibility.
+      # signtool.exe ships with the Windows SDK (preinstalled on
+      # windows-latest), but the SDK's versioned bin directory isn't
+      # on PATH. Resolve the latest installed copy and export its
+      # full path via $GITHUB_ENV so the sign callback can invoke it
+      # without relying on PATH lookup.
+      - name: Locate signtool.exe
+        shell: pwsh
+        run: |
+          # Windows Kits 10 install paths are reasonably stable. Look
+          # under both Program Files (x86) (host-arch-independent) and
+          # Program Files for completeness. The version directories
+          # sort lexically in version order (5-digit components mean
+          # 10.0.22621 > 10.0.19041 correctly).
+          $candidates = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe",
+            "C:\Program Files\Windows Kits\10\bin\*\x64\signtool.exe"
+          )
+          $signtool = $null
+          foreach ($pattern in $candidates) {
+            $found = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | Sort-Object -Property FullName -Descending | Select-Object -First 1
+            if ($found) {
+              $signtool = $found
+              break
+            }
+          }
+          if (-not $signtool) {
+            Write-Error "signtool.exe not found under any Windows Kits 10 bin directory. Runner image may have changed; check actions/runner-images for the current SDK install path."
+            exit 1
+          }
+          "SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "signtool.exe: $($signtool.FullName)"
+
+      - name: Write Artifact Signing metadata
+        shell: pwsh
+        run: |
+          $metadataPath = "$env:RUNNER_TEMP\artifact-signing-metadata.json"
+          @'
+          {
+            "Endpoint": "https://eus.codesigning.azure.net/",
+            "CodeSigningAccountName": "rise-md-editor-signing",
+            "CertificateProfileName": "rise-md-editor-public"
+          }
+          '@ | Out-File -Encoding utf8 $metadataPath
+          "AZURE_ARTIFACT_SIGNING_METADATA_PATH=$metadataPath" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "Metadata path: $metadataPath"
+
+      # Exchange the GitHub OIDC token for an Azure access token.
+      # DefaultAzureCredential (used internally by the dlib) reads
+      # the resulting AZURE_* env vars / credential cache that
+      # azure/login populates. No client secret in the secrets store.
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build & sign Windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # No CSC_* env vars are set, so electron-builder skips signing
-        # and writes a plain unsigned NSIS installer. The warning in the
-        # build log is expected.
         run: npm run build:win -- --publish never
 
-      - uses: actions/upload-artifact@v4
+      # Quick verification — Get-AuthenticodeSignature reads the
+      # embedded signature from the .exe and surfaces the signer's
+      # subject name. If signing silently failed (e.g. dlib couldn't
+      # reach Azure), this would be NotSigned and the step would fail
+      # the job. SignerCertificate.Subject contains the cert subject
+      # (e.g. "CN=Rise People Inc, O=...").
+      - name: Verify signature on the installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path dist -Filter '*-Setup.exe' | Select-Object -First 1
+          if (-not $installer) {
+            Write-Error "No NSIS installer found under dist/"
+            exit 1
+          }
+          $sig = Get-AuthenticodeSignature $installer.FullName
+          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+          Write-Host "Status: $($sig.Status)"
+          if ($sig.Status -ne 'Valid') {
+            Write-Error "Signature status is $($sig.Status); expected Valid"
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@v7
         with:
           name: win-artifacts
           path: |
@@ -192,7 +344,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -201,7 +353,7 @@ jobs:
         run: ls -la dist
 
       - name: Create draft GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true
