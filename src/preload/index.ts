@@ -315,6 +315,13 @@ const folder = {
    */
   move: (srcPath: string, destDir: string): Promise<string> =>
     ipcRenderer.invoke('folder:move', srcPath, destDir),
+  /**
+   * RAISE-13 follow-up: copy a file or folder into a new parent
+   * directory. Same-parent copies auto-rename (`report.md` →
+   * `report 2.md`); cross-parent copies require an unused name.
+   */
+  copy: (srcPath: string, destDir: string): Promise<string> =>
+    ipcRenderer.invoke('folder:copy', srcPath, destDir),
   trash: (itemPath: string): Promise<void> => ipcRenderer.invoke('folder:trash', itemPath),
   reveal: (itemPath: string): void => {
     ipcRenderer.send('folder:reveal', itemPath);

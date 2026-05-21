@@ -190,6 +190,10 @@ export interface RaiseFolderApi {
    *  Returns the new absolute path. Throws on collision /
    *  self-into-self / descendant-of-self / cross-device. */
   move: (srcPath: string, destDir: string) => Promise<string>;
+  /** RAISE-13 follow-up: copy a file or folder into a new parent
+   *  directory. Same-parent copies auto-rename (`report.md` →
+   *  `report 2.md`); cross-parent collisions throw EEXIST. */
+  copy: (srcPath: string, destDir: string) => Promise<string>;
   trash: (itemPath: string) => Promise<void>;
   reveal: (itemPath: string) => void;
   confirmDelete: (name: string, isDirectory: boolean) => Promise<boolean>;

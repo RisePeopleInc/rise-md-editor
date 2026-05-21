@@ -33,6 +33,13 @@ interface FileTreeProps {
    * without a real fs.rename.
    */
   onMove: (srcPath: string, destDir: string) => void;
+  /**
+   * RAISE-13 follow-up: opt-drag / ctrl-drag copy handler. Same
+   * shape as `onMove`. Same-parent drops are valid for copy
+   * (main auto-renames `report.md` → `report 2.md`); cross-parent
+   * collisions still error out.
+   */
+  onCopy: (srcPath: string, destDir: string) => void;
 }
 
 /**
@@ -83,23 +90,36 @@ function effectiveDestDir(node: TreeNode): string {
 }
 
 /**
- * Renderer-side validity check for a move. Mirrors the rules
- * `folderOps.movePath` enforces in main; we duplicate them here so
- * we can disable the drop visual and `dropEffect` *during* the
- * drag (the user sees a "no" cursor before they release), not just
- * after they've committed.
+ * Renderer-side validity check for a drop. Mirrors the rules
+ * `folderOps.{movePath,copyPath}` enforce in main; we duplicate them
+ * here so we can disable the drop visual and `dropEffect` *during*
+ * the drag (the user sees a "no" cursor before they release), not
+ * just after they've committed.
  *
  *   - `src === ''` — no drag in progress.
- *   - `dest === srcParent` — moving into the same parent is a no-op.
- *   - `dest === src` — folder onto itself.
- *   - `src is ancestor of dest` — folder into one of its descendants.
+ *   - `dest === src` — onto itself (move OR copy).
+ *   - `src is ancestor of dest` — folder into one of its descendants
+ *     (move OR copy).
+ *   - `dest === srcParent` — same-parent is a no-op for move but
+ *     VALID for copy (main auto-renames). The `isCopy` flag flips
+ *     this one rule.
  */
-function isValidMove(srcPath: string, destDir: string): boolean {
+function isValidDrop(srcPath: string, destDir: string, isCopy: boolean): boolean {
   if (!srcPath) return false;
   if (destDir === srcPath) return false;
-  if (destDir === dirnameOf(srcPath)) return false;
   if (isDescendantOf(destDir, srcPath)) return false;
+  if (!isCopy && destDir === dirnameOf(srcPath)) return false;
   return true;
+}
+
+/**
+ * Read the OS-level copy modifier from a drag event. macOS = Option;
+ * Win/Linux = Ctrl. Supporting both keeps cross-OS muscle memory
+ * intact — a macOS user dragging on a Windows install (and vice
+ * versa) still gets the expected behaviour.
+ */
+function isCopyModifier(e: ReactDragEvent<HTMLDivElement>): boolean {
+  return e.altKey || e.ctrlKey;
 }
 
 const ROW_HEIGHT = 'py-0.5';
@@ -328,6 +348,7 @@ interface RowProps {
   dropTargetPath: string | null;
   setDropTargetPath: (p: string | null) => void;
   onMove: (srcPath: string, destDir: string) => void;
+  onCopy: (srcPath: string, destDir: string) => void;
 }
 
 function Row(props: RowProps) {
@@ -348,6 +369,7 @@ function Row(props: RowProps) {
     dropTargetPath,
     setDropTargetPath,
     onMove,
+    onCopy,
   } = props;
 
   const isOpen = expanded.has(node.path);
@@ -386,7 +408,12 @@ function Row(props: RowProps) {
       // and not trigger our move flow.
       e.dataTransfer.setData(RAISE_DND_TYPE, node.path);
       e.dataTransfer.setData('text/plain', node.path);
-      e.dataTransfer.effectAllowed = 'move';
+      // `copyMove` so the user can switch between move (default)
+      // and copy (Opt-drag / Ctrl-drag) mid-drag via modifier
+      // keys — the OS cursor updates in response to `dropEffect`
+      // set during dragover. Setting just `'move'` here would
+      // lock copies out regardless of modifier state.
+      e.dataTransfer.effectAllowed = 'copyMove';
       dragSourceRef.current = node.path;
     },
     [isRoot, node.path, dragSourceRef],
@@ -406,14 +433,19 @@ function Row(props: RowProps) {
       const src = dragSourceRef.current;
       if (!src) return;
       const dest = effectiveDestDir(node);
-      if (!isValidMove(src, dest)) {
+      const isCopy = isCopyModifier(e);
+      if (!isValidDrop(src, dest, isCopy)) {
         e.dataTransfer.dropEffect = 'none';
         return;
       }
       // preventDefault is what enables a `drop` event. Without it
-      // the row never receives `onDrop`.
+      // the row never receives `onDrop`. Setting `dropEffect`
+      // here is what the OS uses to pick the cursor — `'copy'`
+      // shows the + sign, `'move'` shows the arrow. The cursor
+      // updates live as the user presses / releases the modifier
+      // (each dragover re-reads `e.altKey`).
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
+      e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
       if (dropTargetPath !== dest) setDropTargetPath(dest);
     },
     [node, dragSourceRef, dropTargetPath, setDropTargetPath],
@@ -441,12 +473,14 @@ function Row(props: RowProps) {
       e.stopPropagation();
       const src = dragSourceRef.current ?? e.dataTransfer.getData(RAISE_DND_TYPE);
       const dest = effectiveDestDir(node);
+      const isCopy = isCopyModifier(e);
       dragSourceRef.current = null;
       setDropTargetPath(null);
-      if (!isValidMove(src, dest)) return;
-      onMove(src, dest);
+      if (!isValidDrop(src, dest, isCopy)) return;
+      if (isCopy) onCopy(src, dest);
+      else onMove(src, dest);
     },
-    [node, dragSourceRef, setDropTargetPath, onMove],
+    [node, dragSourceRef, setDropTargetPath, onMove, onCopy],
   );
 
   const indent = depth * 12;
@@ -561,6 +595,7 @@ function Row(props: RowProps) {
                 dropTargetPath={dropTargetPath}
                 setDropTargetPath={setDropTargetPath}
                 onMove={onMove}
+                onCopy={onCopy}
               />
             ))}
         </>
@@ -581,6 +616,7 @@ export function FileTree({
   onCreateSubmit,
   onEditCancel,
   onMove,
+  onCopy,
 }: FileTreeProps) {
   // RAISE-13: drag-and-drop coordination. The source-path ref is
   // populated on dragstart and consulted during dragover/drop —
@@ -609,6 +645,7 @@ export function FileTree({
         dropTargetPath={dropTargetPath}
         setDropTargetPath={setDropTargetPath}
         onMove={onMove}
+        onCopy={onCopy}
       />
     </div>
   );

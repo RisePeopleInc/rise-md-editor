@@ -396,6 +396,28 @@ function AppContent() {
     [file],
   );
 
+  // RAISE-13 follow-up: opt-drag / ctrl-drag duplicates the dragged
+  // item. Unlike move, the source is unchanged — no `relocateTabs`
+  // call needed. chokidar's tree-changed signal repaints the
+  // sidebar with the new file. Same-parent copies auto-rename
+  // (main does the allocation); cross-parent collisions throw
+  // EEXIST just like move.
+  const handleCopy = useCallback(async (srcPath: string, destDir: string) => {
+    try {
+      await window.api.folder.copy(srcPath, destDir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      window.api.showError(
+        'Could not copy',
+        /EEXIST/i.test(message)
+          ? message.includes('already exists')
+            ? message
+            : `An item with that name already exists in the destination folder.`
+          : message,
+      );
+    }
+  }, []);
+
   const handleRenameSubmit = useCallback(
     async (oldPath: string, newName: string) => {
       if (newName === '') {
@@ -1094,6 +1116,7 @@ function AppContent() {
               onCreateSubmit={(parent, kind, name) => void handleCreateSubmit(parent, kind, name)}
               onEditCancel={sidebar.cancelEdit}
               onMove={(src, dest) => void handleMove(src, dest)}
+              onCopy={(src, dest) => void handleCopy(src, dest)}
             />
           )}
         </Sidebar>

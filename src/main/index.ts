@@ -804,6 +804,13 @@ ipcMain.handle('folder:move', async (_, srcPath: string, destDir: string) =>
   folderOps.movePath(srcPath, destDir),
 );
 
+// RAISE-13 follow-up: Opt-drag (macOS) / Ctrl-drag (Win/Linux) creates
+// a copy instead of a move. Same-parent copies auto-rename
+// (`report.md` → `report 2.md`); cross-parent collisions throw EEXIST.
+ipcMain.handle('folder:copy', async (_, srcPath: string, destDir: string) =>
+  folderOps.copyPath(srcPath, destDir),
+);
+
 ipcMain.handle('folder:trash', async (_, itemPath: string) => {
   await folderOps.trashPath(itemPath);
 });

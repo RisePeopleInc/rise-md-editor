@@ -216,6 +216,102 @@ export async function movePath(srcPath: string, destDir: string): Promise<string
 }
 
 /**
+ * Copy a file or folder into a new parent directory
+ * ([RAISE-13](https://risepeople.atlassian.net/browse/RAISE-13) follow-up).
+ *
+ * Mirrors `movePath` for validation (no self-into-self, no folder-
+ * into-descendant) but with one key difference: a SAME-PARENT copy
+ * is valid and auto-renames to avoid the inevitable collision. The
+ * generated name is `<stem> 2.<ext>`, `<stem> 3.<ext>`, etc. —
+ * lowest available integer, Finder-style.
+ *
+ * For cross-parent copies, a name collision in the destination is
+ * an error (consistent with `movePath`). The user explicitly chose
+ * a destination; silently overwriting or auto-renaming would
+ * surprise them.
+ *
+ * Uses `fs.cp` with `recursive: true` so folders get their full
+ * subtree copied. Works across filesystems unlike `fs.rename`,
+ * so there's no cross-device error path here.
+ */
+export async function copyPath(srcPath: string, destDir: string): Promise<string> {
+  const srcParent = path.dirname(srcPath);
+  if (destDir === srcPath) {
+    throw new Error('Cannot copy an item into itself');
+  }
+  const srcWithSep = srcPath + path.sep;
+  const srcWithAltSep = srcPath + (path.sep === '/' ? '\\' : '/');
+  if (destDir.startsWith(srcWithSep) || destDir.startsWith(srcWithAltSep)) {
+    throw new Error('Cannot copy a folder into one of its own descendants');
+  }
+
+  const srcName = path.basename(srcPath);
+  let target: string;
+
+  if (destDir === srcParent) {
+    // Same-parent copy → auto-rename. Split name into stem and
+    // extension at the LAST dot (so `foo.tar.gz` becomes
+    // `foo.tar 2.gz`, matching the dominant file-manager
+    // convention). Folders have no extension; the whole name is
+    // the stem.
+    target = await allocateCopyName(destDir, srcName);
+  } else {
+    target = path.join(destDir, srcName);
+    // Cross-parent collision — refuse rather than overwrite or
+    // auto-rename. Same shape as `movePath`'s pre-check.
+    try {
+      await fs.stat(target);
+      const err: NodeJS.ErrnoException = new Error(
+        `An item named "${srcName}" already exists in the destination`,
+      );
+      err.code = 'EEXIST';
+      throw err;
+    } catch (err) {
+      const errno = (err as NodeJS.ErrnoException).code;
+      if (errno !== 'ENOENT') throw err;
+    }
+  }
+
+  // `errorOnExist: true` is defensive — the pre-check above (for
+  // cross-parent) and the allocator (for same-parent) already
+  // guarantee the target doesn't exist, but a concurrent
+  // file-system change between check and copy could race. Better
+  // to surface an error than to overwrite.
+  await fs.cp(srcPath, target, { recursive: true, errorOnExist: true, force: false });
+  return target;
+}
+
+/**
+ * Find the lowest-numbered `<stem> N.<ext>` filename in `dir` that
+ * doesn't already exist, starting at N=2 (so the first duplicate
+ * of `report.md` is `report 2.md`). The split point is the LAST
+ * dot in the name; folders (no dot, or leading-dot dotfiles) get
+ * the whole name as the stem.
+ */
+async function allocateCopyName(dir: string, srcName: string): Promise<string> {
+  const lastDot = srcName.lastIndexOf('.');
+  const hasExt = lastDot > 0 && lastDot < srcName.length - 1;
+  const stem = hasExt ? srcName.slice(0, lastDot) : srcName;
+  const ext = hasExt ? srcName.slice(lastDot) : '';
+  for (let n = 2; n < 10_000; n++) {
+    const candidate = path.join(dir, `${stem} ${n}${ext}`);
+    try {
+      await fs.stat(candidate);
+      // Exists — keep walking.
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return candidate;
+      }
+      throw err;
+    }
+  }
+  // Astronomically unlikely — 10k existing duplicates means
+  // something has gone very wrong. Fall through to a
+  // disambiguating error rather than spin forever.
+  throw new Error(`Could not allocate a copy name for "${srcName}"`);
+}
+
+/**
  * Move a file or folder to the system trash. Uses Electron's shell.trashItem
  * which is reversible via the OS trash UI.
  */
