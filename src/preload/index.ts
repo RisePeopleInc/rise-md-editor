@@ -41,6 +41,7 @@ export type MenuActionType =
   | 'context-add-link'
   | 'context-source-select-all'
   | 'context-preview-select-all'
+  | 'paste-plain'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -356,6 +357,43 @@ const folder = {
  * through `menu:action` for the renderer to execute.
  */
 export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter';
+/**
+ * RAISE-51: clipboard read for the Paste and Match Style flow.
+ * Menu accelerators (`Cmd/Ctrl+Shift+V`) don't give the renderer
+ * a `DataTransfer` the way DOM paste events do, so we read the
+ * system clipboard out of band.
+ *
+ * Initial implementation tried `import { clipboard } from 'electron'`
+ * directly in the preload and exposed a sync function. That doesn't
+ * work: `webPreferences.sandbox: true` (set in `main/index.ts`'s
+ * BrowserWindow) bundles the preload through Electron's sandbox
+ * bundler, which strips every `electron` module except `contextBridge`,
+ * `ipcRenderer`, `webFrame`, `webUtils`, and `crashReporter`. The
+ * `clipboard` symbol becomes `undefined` at runtime, and the
+ * sync-call shape throws inside the contextBridge proxy with the
+ * error invisible to the renderer (silent paste no-op — the symptom
+ * the smoke-test caught).
+ *
+ * IPC round-trip — async — is the correct shape. `clipboard.readText()`
+ * runs in main where it's actually available, and the renderer awaits.
+ *
+ * Returns the empty string when the clipboard has no `text/plain`
+ * slot (image-only clipboards, etc.). The renderer treats empty
+ * as a no-op paste, matching the ticket's "image clipboards
+ * short-circuit" spec.
+ */
+const clipboardApi = {
+  readText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
+  /**
+   * RAISE-51 smoke-test follow-up: WYSIWYG paste-plain prefers the
+   * `text/html` slot and reduces it to `textContent` so a heading
+   * copied from inside the app pastes as "Header" rather than
+   * "## Header". Returns the raw HTML; the renderer's
+   * `htmlToPlainText` helper does the reduction.
+   */
+  readHTML: (): Promise<string> => ipcRenderer.invoke('clipboard:read-html'),
+};
+
 const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;
@@ -402,6 +440,7 @@ const api = {
   assets,
   update,
   contextMenu,
+  clipboard: clipboardApi,
   export: exportApi,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed
   // synchronously on every change so main's title and close-with-unsaved

@@ -74,6 +74,15 @@ export interface WysiwygEditorHandle {
    * surface the same modal as the toolbar.
    */
   promptLink: () => void;
+  /**
+   * RAISE-51: insert raw text at the current selection — no link
+   * marks, no inline formatting marks, no tables / lists /
+   * headings, just plain text runs with `hard_break` between
+   * newlines. Drives the Paste and Match Style flow
+   * (Cmd/Ctrl+Shift+V) which bypasses the regular paste pipeline's
+   * markdown / Turndown / image branches.
+   */
+  pastePlain: (text: string) => void;
 }
 
 interface WysiwygEditorProps {
@@ -178,7 +187,16 @@ function isInlineOnlyContext(from: ResolvedPos): boolean {
  */
 function flattenToInline(parsed: ProseNode, schema: ProseNode['type']['schema']): Fragment {
   const inlineNodes: ProseNode[] = [];
-  const breakType = schema.nodes['hard_break'];
+  // RAISE-51 review caught this: node name is `hardbreak`
+  // (Milkdown's commonmark preset name), not `hard_break` (the
+  // standard ProseMirror name). Pre-fix the lookup always
+  // returned undefined under Milkdown's schema and the
+  // `if (breakType)` guard below was always false — so multi-
+  // paragraph paste into a table cell silently dropped its line
+  // breaks instead of getting `<br>`-separated runs as the
+  // surrounding comment claims. Latent bug from RAISE-46 caught
+  // during RAISE-51 paste-plain work.
+  const breakType = schema.nodes['hardbreak'];
   let firstParagraph = true;
 
   parsed.content.forEach((blockNode) => {
@@ -828,6 +846,68 @@ function MilkdownBody({
       },
       promptLink: () => {
         toolbarRef.current?.promptLink();
+      },
+      pastePlain: (text) => {
+        if (!text) return;
+        const editor = get();
+        if (!editor) return;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { schema } = view.state;
+          // Build a Fragment of inline content: text runs separated
+          // by `hardbreak` for newlines. Matches the ticket spec
+          // ("single text run if the clipboard had a single line;
+          // hard_break-separated runs if it had newlines") and
+          // works in any inline context (body paragraph, table
+          // cell, heading, list item) because `hardbreak` is
+          // schema-valid in every inline group.
+          //
+          // ⚠ Node name is `hardbreak` (lowercase, no underscore) —
+          // Milkdown's commonmark preset names it that way, not the
+          // standard-ProseMirror `hard_break`. The smoke-test version
+          // of this code used `hard_break` and silently failed on
+          // every multi-line paste because `schema.nodes['hard_break']`
+          // is undefined under Milkdown's schema. (The single-line
+          // path happens to work because the lookup never runs.)
+          //
+          // Why not `tr.insertText(text)`? ProseMirror's
+          // `insertText` inserts the string as text content into
+          // the current selection's parent block; embedded `\n`
+          // characters land as literal newlines in the text node,
+          // which renders as a single line with the newlines
+          // collapsed to spaces by the contenteditable layout
+          // engine. Splitting on `\n` and emitting `hardbreak`
+          // nodes is the only way to get visible line breaks.
+          //
+          // Defensive: if the schema doesn't expose `hardbreak`
+          // (a future schema swap, a custom preset), fall back to
+          // a single text node with spaces in place of newlines.
+          // The content survives; the visible line breaks don't.
+          // Strictly better than throwing inside dispatch and
+          // having the user's paste silently disappear.
+          const hardbreakType = schema.nodes['hardbreak'];
+          const inlineNodes: ProseNode[] = [];
+          const lines = text.split('\n');
+          if (!hardbreakType) {
+            const flattened = lines.join(' ');
+            if (flattened.length > 0) inlineNodes.push(schema.text(flattened));
+          } else {
+            lines.forEach((line, i) => {
+              if (i > 0) inlineNodes.push(hardbreakType.create());
+              if (line.length > 0) inlineNodes.push(schema.text(line));
+            });
+          }
+          if (inlineNodes.length === 0) return;
+          const slice = new Slice(Fragment.from(inlineNodes), 0, 0);
+          view.dispatch(view.state.tr.replaceSelection(slice));
+          // Focus after dispatch — the menu accelerator's IPC
+          // round-trip can interrupt ProseMirror's focus tracking,
+          // and without an explicit refocus the inserted caret
+          // sits at the right model position but typing goes to
+          // the previously-focused element (toolbar button, body
+          // chrome, etc.).
+          view.focus();
+        });
       },
     }),
     [get, scrollContainerRef, toolbarRef],

@@ -47,6 +47,7 @@ export type MenuActionType =
   | 'context-add-link'
   | 'context-source-select-all'
   | 'context-preview-select-all'
+  | 'paste-plain'
   | 'font-zoom-in'
   | 'font-zoom-out'
   | 'font-zoom-reset'
@@ -214,6 +215,20 @@ export interface RaiseContextMenuApi {
   }) => Promise<void>;
 }
 
+/**
+ * RAISE-51: minimal clipboard read surface for the Paste and Match
+ * Style flow. Menu accelerators don't supply a DOM `DataTransfer`,
+ * so we read the system clipboard out of band — via IPC, because
+ * the sandboxed preload can't import Electron's `clipboard` module
+ * directly (the sandbox bundler strips it).
+ */
+export interface RaiseClipboardApi {
+  /** Returns the clipboard's `text/plain` slot, or `''` if absent. */
+  readText: () => Promise<string>;
+  /** Returns the clipboard's `text/html` slot, or `''` if absent. */
+  readHTML: () => Promise<string>;
+}
+
 export type ExportPdfPageSize = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';
 export interface ExportPdfCustomPageSize {
   width: number;
@@ -287,6 +302,8 @@ export interface RaiseApi {
   assets: RaiseAssetsApi;
   update: RaiseUpdateApi;
   contextMenu: RaiseContextMenuApi;
+  /** RAISE-51: synchronous clipboard read for the Paste and Match Style flow. */
+  clipboard: RaiseClipboardApi;
   /** RAISE-42: Export-to-PDF bridge. */
   export: RaiseExportApi;
   pushFileMeta: (meta: { path: string | null; isDirty: boolean; dirtyCount: number }) => void;

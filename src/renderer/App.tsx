@@ -11,6 +11,7 @@ import { type WysiwygEditorHandle } from './components/editors/WysiwygEditor';
 import { ExportPdfModal, type ExportPdfSubmitPayload } from './components/ExportPdfModal';
 import { ExportHtmlModal, type ExportHtmlSubmitPayload } from './components/ExportHtmlModal';
 import { buildPrintHtml } from './state/exportPdfHtml';
+import { htmlToPlainText, normalizeInvisibleSpaces } from './state/clipboardPaste';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { FileTree } from './components/sidebar/FileTree';
 import { FileProvider, isTabDirty, useFileState, type EditorMode } from './state/fileState';
@@ -808,6 +809,62 @@ function AppContent() {
           // we just route the action.
           void wysiwygRef.current?.copyAsMarkdown();
           break;
+        case 'paste-plain': {
+          // RAISE-51: Paste and Match Style (Cmd/Ctrl+Shift+V).
+          // Read the system clipboard via the preload bridge (async
+          // IPC — the sandboxed preload can't access Electron's
+          // `clipboard` module directly, so main does the read).
+          //
+          // Mode-specific source slot:
+          //
+          //   - **WYSIWYG**: prefer `text/html` reduced to its visible
+          //     text content (via `htmlToPlainText`). Drops every
+          //     styling marker including markdown syntax. Copying a
+          //     heading from Edit mode pastes "Header", not "## Header"
+          //     (Milkdown puts both markdown in text/plain AND HTML
+          //     in text/html on copy — the smoke-test bug was that
+          //     we always used text/plain). Falls back to text/plain
+          //     when no HTML slot exists (e.g. clipboard from a
+          //     terminal, plain-text-only clipboard write).
+          //   - **Source / Split**: use `text/plain` verbatim. The
+          //     user is editing raw markdown there; if they copied
+          //     `## Header` they want `## Header` back.
+          //   - **Read**: no-op (no editable surface; the context-
+          //     menu paste-plain item is also unreachable in Read).
+          //
+          // Empty result short-circuits to nothing, matching the
+          // ticket's "image clipboards → no plain-text equivalent,
+          // paste is a no-op" spec.
+          //
+          // Capture the mode flags into locals before the await —
+          // by the time the promise resolves the user could have
+          // switched modes; we want the paste to land where the
+          // accelerator was pressed.
+          const wantWysiwyg = isWysiwyg;
+          const wantMonaco = isMonacoActive;
+          void (async () => {
+            if (wantWysiwyg) {
+              const html = await window.api.clipboard.readHTML();
+              // `htmlToPlainText` already normalises U+00A0 / U+FEFF.
+              const fromHtml = html ? htmlToPlainText(html) : '';
+              const text =
+                fromHtml ||
+                normalizeInvisibleSpaces(await window.api.clipboard.readText());
+              if (!text) return;
+              wysiwygRef.current?.pastePlain(text);
+            } else if (wantMonaco) {
+              // Source / Split also benefit from U+00A0 normalisation
+              // — pasted webpage text into Monaco would otherwise
+              // leave non-breaking spaces in the markdown source.
+              const text = normalizeInvisibleSpaces(
+                await window.api.clipboard.readText(),
+              );
+              if (!text) return;
+              editorRef.current?.pastePlain(text);
+            }
+          })();
+          break;
+        }
         case 'context-add-link':
           // RAISE-38: dispatched from the WYSIWYG context menu's
           // "Add Link…" item (selection-only). Routes into the

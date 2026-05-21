@@ -56,6 +56,22 @@ export interface SourceEditorHandle {
    * needs this dedicated path.
    */
   getSelectionText: () => string;
+  /**
+   * RAISE-51: insert raw text at the current selection,
+   * verbatim, bypassing any clipboard-derived formatting. Used
+   * by the Paste and Match Style flow (Cmd/Ctrl+Shift+V) — the
+   * menu accelerator doesn't carry a DOM paste event, so the
+   * App-level handler reads the system clipboard via
+   * `window.api.clipboard.readText()` and threads the text in
+   * here.
+   *
+   * In Source mode the user-visible diff vs. regular Paste is
+   * small (Monaco is a code editor, native paste ignores
+   * `text/html` already), but the cross-mode shortcut parity
+   * matters: users don't have to remember which mode swallows
+   * formatting and which doesn't.
+   */
+  pastePlain: (text: string) => void;
 }
 
 interface SourceEditorProps {
@@ -222,6 +238,32 @@ export function SourceEditor({
         const sel = ed?.getSelection();
         if (!ed || !model || !sel || sel.isEmpty()) return '';
         return model.getValueInRange(sel);
+      },
+      pastePlain: (text) => {
+        // Insert verbatim at the current selection. Use
+        // `executeEdits` (matches the image-insert and clipboard-
+        // paste paths elsewhere in this file) so Monaco's undo
+        // stack treats the insertion as a single edit. No selection
+        // → insert at the cursor; live selection → replace.
+        const ed = editorRef.current;
+        const model = ed?.getModel();
+        if (!ed || !model) return;
+        const selection = ed.getSelection();
+        const range = selection
+          ? new monaco.Range(
+              selection.startLineNumber,
+              selection.startColumn,
+              selection.endLineNumber,
+              selection.endColumn,
+            )
+          : (() => {
+              const pos = ed.getPosition();
+              if (!pos) return null;
+              return new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column);
+            })();
+        if (!range) return;
+        ed.executeEdits('paste-plain', [{ range, text, forceMoveMarkers: true }]);
+        ed.focus();
       },
     }),
     [],
