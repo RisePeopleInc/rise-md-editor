@@ -18,9 +18,21 @@ const PKG = require(path.join(ROOT, 'package.json'));
 const SELF_KEY = `${PKG.name}@${PKG.version}`;
 const OUT_PATH = path.join(ROOT, 'THIRD-PARTY-NOTICES.md');
 
+function assertNodeModulesPresent() {
+  // license-checker-rseidelsohn reads metadata from the installed tree.
+  // Without node_modules/ it fails with a cryptic "Cannot find module"
+  // error several frames deep — short-circuit with a clearer message.
+  const nm = path.join(ROOT, 'node_modules');
+  if (!fs.existsSync(nm)) {
+    process.stderr.write(
+      `node_modules/ not found at ${nm}\n` +
+        `Run \`npm install\` before regenerating THIRD-PARTY-NOTICES.md.\n`,
+    );
+    process.exit(1);
+  }
+}
+
 function runChecker() {
-  // license-checker-rseidelsohn runs against the installed tree, so a fresh
-  // `npm install --omit=optional` should be done before invoking this.
   const out = execFileSync(
     'npx',
     [
@@ -37,7 +49,10 @@ function runChecker() {
 }
 
 function buildMarkdown(j) {
-  const date = new Date().toISOString().slice(0, 10);
+  // Intentionally NO date in the output: the file is auto-generated from
+  // package-lock.json and should be byte-identical across regenerations
+  // that don't change the dep tree. A timestamp would produce a diff on
+  // every run and defeat any future CI staleness check.
   const pkgs = Object.keys(j).sort((a, b) =>
     a.toLowerCase().localeCompare(b.toLowerCase()),
   );
@@ -53,7 +68,7 @@ function buildMarkdown(j) {
   lines.push('# Third-party notices');
   lines.push('');
   lines.push(
-    `Rise MD Editor bundles open-source software. This file lists every production dependency in the npm tree along with its license, repository, and publisher. Generated against \`package-lock.json\` on ${date}.`,
+    'Rise MD Editor bundles open-source software. This file lists every production dependency in the npm tree along with its license, repository, and publisher. Auto-generated from `package-lock.json` — see the regeneration command below.',
   );
   lines.push('');
   lines.push('To regenerate after a dependency change:');
@@ -100,6 +115,7 @@ function buildMarkdown(j) {
 }
 
 function main() {
+  assertNodeModulesPresent();
   process.stdout.write('Running license-checker against production tree...\n');
   const data = runChecker();
   const md = buildMarkdown(data);

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Rise MD Editor bundles open-source software. This file lists every production dependency in the npm tree along with its license, repository, and publisher. Generated against `package-lock.json` on 2026-05-21.
+Rise MD Editor bundles open-source software. This file lists every production dependency in the npm tree along with its license, repository, and publisher. Auto-generated from `package-lock.json` — see the regeneration command below.
 
 To regenerate after a dependency change:
 

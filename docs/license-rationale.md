@@ -78,8 +78,8 @@ Original wording, preserved verbatim:
 2. `BRAND.md` — explicit list of reserved Rise marks (word marks, logo, `--rise-*` design tokens, product name) and a "what forks must change" checklist.
 3. `package.json` — `"license"` flipped from `"UNLICENSED"` to `"MIT"`. `"private": true` stayed (it gates npm publish, not GitHub visibility, and we don't publish to npm).
 4. `THIRD-PARTY-NOTICES.md` — generated from `license-checker-rseidelsohn` against the production dep tree.
-5. `CODE_OF_CONDUCT.md` — adopts Contributor Covenant v2.1 by reference (not inlined verbatim) with `conduct@risepeople.com` as the reporting contact.
-6. `SECURITY.md` — vulnerability-reporting policy pointing to GitHub private advisories with `security@risepeople.com` as the backup channel.
+5. `CODE_OF_CONDUCT.md` — adopts Contributor Covenant v2.1 by reference (not inlined verbatim) as a statement of community expectations. No formal reporting or enforcement channel — the project is maintained on a best-effort basis and points users at GitHub's platform-level abuse tools for any escalation.
+6. `SECURITY.md` — explicitly best-effort, as-is posture. `security@risepeople.com` is listed as a courtesy channel with no commitment to acknowledge, triage, or fix. Not in scope for any bug bounty program.
 7. README, CLAUDE.md, CHANGELOG.md updates to match the new posture.
 
 Templates were audited (`src/resources/templates/claude-md-template.md`, `skill-md-template.md`) and found to contain no Rise-confidential content — they're generic scaffolds that happen to be shipped by a Rise product.

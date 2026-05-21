@@ -18,9 +18,9 @@ A markdown editor for Rise People — designed for editing the `CLAUDE.md` and `
 
 ### Prerequisites
 
-- **Node 20 or 22** (see `engines.node` in `package.json`). NVM users:
+- **Node 22** (pinned in [`.nvmrc`](.nvmrc); `engines.node` allows `>=20` for downstream flexibility but development and CI target 22). NVM users:
   ```sh
-  nvm use 22
+  nvm use
   ```
 - **macOS / Windows / Linux** — the dev experience targets all three. Builds are platform-scoped (see below).
 

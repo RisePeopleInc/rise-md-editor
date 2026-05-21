@@ -56,9 +56,9 @@ wiring, the IPC channels, the markdown rendering, the file-tree component,
 the auto-update plumbing, the build pipeline, etc. — is covered by the MIT
 grant and can be reused freely with attribution per the LICENSE.
 
-## Questions
+## Unsure?
 
-If your use case isn't covered here and you'd like permission to use a
-specific Rise mark — for example, integrating Rise MD Editor into a third-
-party product offered to Rise customers — contact `legal@risepeople.com`
-before shipping.
+If you're uncertain whether your intended use is covered by the MIT grant
+or the trademark carve-out, the safe default is to assume Rise marks are
+reserved. For any redistributable fork, replace the brand assets per the
+checklist above rather than relying on permission you haven't received.
