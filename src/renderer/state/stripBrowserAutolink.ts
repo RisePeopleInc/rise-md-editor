@@ -90,7 +90,9 @@ interface MarkRange {
  * Now we only strip when the URL is filename-shaped — the user
  * said `www.cbc.ca` should stay clickable.
  */
-function isSyntheticAutolinkMark(textRun: string, href: string): boolean {
+// Exported for unit tests (RAISE-50). Internal to the plugin
+// otherwise.
+export function isSyntheticAutolinkMark(textRun: string, href: string): boolean {
   if (!href || !textRun) return false;
   if (href.startsWith('mailto:')) return false;
   if (SCHEME_RE.test(textRun)) return false;
@@ -122,8 +124,7 @@ function isSyntheticAutolinkMark(textRun: string, href: string): boolean {
   // common case is that this only fires for browser-injected
   // marks and the few weird-paste cases collapse to "the user
   // gets plain text, which is what they probably wanted".
-  const exactMatch =
-    href === `http://${textRun}` || href === `https://${textRun}`;
+  const exactMatch = href === `http://${textRun}` || href === `https://${textRun}`;
   const containsMatch = textRun.includes(hostBody);
   if (!exactMatch && !containsMatch) return false;
 

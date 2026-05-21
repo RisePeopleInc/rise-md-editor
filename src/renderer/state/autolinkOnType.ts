@@ -2,10 +2,7 @@ import { Plugin, PluginKey } from '@milkdown/prose/state';
 import type { Node as ProseNode } from '@milkdown/prose/model';
 import { $prose } from '@milkdown/utils';
 import type { MilkdownPlugin } from '@milkdown/ctx';
-import {
-  looksLikeFilenameExtension,
-  looksLikeKnownTld,
-} from './filenameExtensions';
+import { looksLikeFilenameExtension, looksLikeKnownTld } from './filenameExtensions';
 
 /**
  * Autolink URLs and emails as the user types
@@ -89,7 +86,9 @@ const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
 // node (with no trailing whitespace) stay unlinked until the user
 // types a space or a parse cycle re-reads them; that's acceptable
 // friction.
-const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
+// Exported for unit tests (RAISE-50). Internal to the plugin
+// otherwise.
+export const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 
 // `www.`-prefixed URL — same shape as
 // `mdast-util-gfm-autolink-literal`'s `literalAutolinkWww` matcher,
@@ -99,7 +98,8 @@ const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 // match only as `www.x.com` and the `?foo` would split off as
 // trailing text — looking wrong in the editor and saving as
 // `[www.x.com](http://www.x.com)?foo`.
-const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?][^\s<>"'`]*)?/g;
+// Exported for unit tests (RAISE-50).
+export const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?][^\s<>"'`]*)?/g;
 
 // Bare hostname — `host.tld` without a scheme or `www.` prefix.
 // `mdast-util-gfm-autolink-literal` deliberately does NOT catch this
@@ -113,7 +113,9 @@ const WWW_URL_RE = /\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?][^\s<>"'`]*)?/g;
 // `[a-z]{2,}` for the TLD (no digits) keeps version numbers
 // (`1.2.3`) and IP-literal-shaped runs (`192.168.0.1`) from
 // false-matching. Same path/query support as `WWW_URL_RE`.
-const BARE_HOSTNAME_RE = /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:[/?][^\s<>"'`]*)?(?=[\s.,!?;:)\]]|$)/gi;
+// Exported for unit tests (RAISE-50).
+export const BARE_HOSTNAME_RE =
+  /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:[/?][^\s<>"'`]*)?(?=[\s.,!?;:)\]]|$)/gi;
 
 // Email pattern: standard local@host.tld. Anchored on word
 // boundaries so it doesn't match parts of unrelated text.
@@ -128,7 +130,8 @@ const BARE_HOSTNAME_RE = /(?<![\w/@:.-])[a-z][\w-]*(?:\.[\w-]+)*\.[a-z]{2,}(?:[/
 //
 // Same "must be followed by whitespace" boundary check applies
 // in `findCompletedHits` for the same partial-typing reason.
-const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi;
+// Exported for unit tests (RAISE-50).
+export const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi;
 
 // Trailing characters to strip from a matched URL — markdown
 // sentences often end with `.`, `,`, `!`, `?`, `;`, `:`, `)`, `]`,
@@ -137,13 +140,16 @@ const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi;
 // a safe URL char.
 const TRAILING_PUNCT_RE = /[.,!?;:)\]]+$/;
 
-interface Hit {
+// Exported for unit tests (RAISE-50). Internal to the plugin
+// otherwise.
+export interface Hit {
   index: number;
   length: number;
   href: string;
 }
 
-function findCompletedHits(
+// Exported for unit tests (RAISE-50).
+export function findCompletedHits(
   text: string,
   re: RegExp,
   hrefFn: (match: string) => string,
@@ -310,12 +316,7 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         }
 
         // Email autolinks.
-        const emailHits = findCompletedHits(
-          text,
-          EMAIL_RE,
-          (m) => `mailto:${m}`,
-          baseOpts,
-        );
+        const emailHits = findCompletedHits(text, EMAIL_RE, (m) => `mailto:${m}`, baseOpts);
         for (const hit of emailHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
           adds.push({
@@ -331,12 +332,11 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         // serialises as `[www.x.com](http://www.x.com)` because
         // text !== url; that's the documented trade-off for
         // type-time autolinking of bare-domain URLs.
-        const wwwHits = findCompletedHits(
-          text,
-          WWW_URL_RE,
-          (m) => `http://${m}`,
-          { ...baseOpts, skipFilenameExtension: true, requireKnownTld: true },
-        );
+        const wwwHits = findCompletedHits(text, WWW_URL_RE, (m) => `http://${m}`, {
+          ...baseOpts,
+          skipFilenameExtension: true,
+          requireKnownTld: true,
+        });
         for (const hit of wwwHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
           adds.push({
@@ -351,12 +351,11 @@ export const autolinkOnTypePlugin: MilkdownPlugin = $prose(() => {
         // `www.` or explicit scheme. The filename-extension filter
         // skips file references like `notes.txt`, `config.json`,
         // `file.md`. Same href synthesis as `www.`.
-        const hostHits = findCompletedHits(
-          text,
-          BARE_HOSTNAME_RE,
-          (m) => `http://${m}`,
-          { ...baseOpts, skipFilenameExtension: true, requireKnownTld: true },
-        );
+        const hostHits = findCompletedHits(text, BARE_HOSTNAME_RE, (m) => `http://${m}`, {
+          ...baseOpts,
+          skipFilenameExtension: true,
+          requireKnownTld: true,
+        });
         for (const hit of hostHits) {
           if (overlaps(hit.index, hit.index + hit.length)) continue;
           adds.push({

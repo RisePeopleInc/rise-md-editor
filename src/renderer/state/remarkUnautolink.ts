@@ -79,7 +79,9 @@ const SCHEME_RE = /^(?:https?:\/\/|mailto:)/i;
  *      (`.md`, `.txt`, `.json`, etc.) — real-TLD references stay as
  *      autolinks.
  */
-function looksLikeBareAutolink(node: Link): boolean {
+// Exported for unit tests (RAISE-50). Internal to the remark
+// plugin otherwise.
+export function looksLikeBareAutolink(node: Link): boolean {
   if (node.children.length !== 1) return false;
   const child = node.children[0];
   if (!child || child.type !== 'text') return false;
@@ -113,10 +115,7 @@ function remarkUnautolink(): (tree: Root) => void {
   };
 }
 
-const remarkUnautolinkResult = $remark(
-  'remarkUnautolink',
-  () => remarkUnautolink,
-);
+const remarkUnautolinkResult = $remark('remarkUnautolink', () => remarkUnautolink);
 
 // `as unknown as MilkdownPlugin[]` matches the cast pattern in
 // `state/gemojiNode.ts`. Milkdown's `$remark` factory returns a
