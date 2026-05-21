@@ -478,8 +478,11 @@ if (!gotLock) {
 
     // Win/Linux file-association launches deliver the path through argv
     // (macOS uses app.on('open-file') instead — handled below).
+    // RAISE-60: tag with `fromOs: true` so the renderer opens this tab
+    // in Read mode by default (Finder/Explorer double-click and
+    // "Open With" → Rise MD Editor both land here).
     const filePath = findFileArg(process.argv);
-    if (filePath) dispatchMenuAction('open-path', { path: filePath });
+    if (filePath) dispatchMenuAction('open-path', { path: filePath, fromOs: true });
 
     // RAISE-42: sweep `<userData>/pdf-export-tmp/` for stale `print-*.html`
     // leftovers older than 24h. Each export's finally-block usually
@@ -654,10 +657,11 @@ ipcMain.on('recent:clear', () => {
 
 // macOS: files passed via "Open With", Finder, or the dock arrive here.
 // Funnel through the same dispatch — it queues until the renderer is ready
-// and reopens the window if needed.
+// and reopens the window if needed. RAISE-60: tag with `fromOs: true` so
+// the renderer opens the resulting tab in Read mode by default.
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  dispatchMenuAction('open-path', { path: filePath });
+  dispatchMenuAction('open-path', { path: filePath, fromOs: true });
 });
 
 // ---------------------------------------------------------------------------

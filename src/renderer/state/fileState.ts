@@ -15,7 +15,7 @@ export interface CursorPos {
   column: number;
 }
 
-export type EditorMode = 'source' | 'wysiwyg' | 'split';
+export type EditorMode = 'read' | 'wysiwyg' | 'source' | 'split';
 
 export interface Tab {
   id: string;
@@ -27,6 +27,15 @@ export interface Tab {
   scrollPosition: number;
   /** Milkdown's scroll-container offset (pixels), used in WYSIWYG. */
   wysiwygScrollPosition: number;
+  /**
+   * RAISE-60: Read view's scroll-container offset (pixels). Tracked
+   * separately from `scrollPosition` (Monaco) and `wysiwygScrollPosition`
+   * (Milkdown) because the Read view's rendered HTML has a different
+   * intrinsic height than either the source text or the WYSIWYG layout
+   * — restoring one mode's offset into another would jump the user to
+   * the wrong place.
+   */
+  readScrollPosition: number;
   /**
    * ProseMirror selection-from offset (an absolute character position in
    * the parsed doc), used to preserve the WYSIWYG caret across mode
@@ -83,8 +92,14 @@ export interface FileContextValue {
    * Load a file (or refresh an already-open one) into a tab and make it
    * active. Returns the tab id so callers can attach UI state — e.g. the
    * "created from template" hint banner — keyed by id.
+   *
+   * `initialMode` (RAISE-60) sets the starting editor mode for newly-
+   * created tabs only. If a tab for this path already exists, its
+   * current mode is preserved — re-opening a file the user has been
+   * editing in WYSIWYG via, say, a Finder double-click shouldn't yank
+   * them back to Read. Defaults to `'wysiwyg'`.
    */
-  loadFile: (path: string, content: string) => string;
+  loadFile: (path: string, content: string, initialMode?: EditorMode) => string;
   newFile: () => void;
   /**
    * Open a fresh untitled tab pre-populated with the given content. Used
@@ -109,6 +124,8 @@ export interface FileContextValue {
   setActiveCursor: (cursor: CursorPos) => void;
   setActiveScroll: (top: number) => void;
   setActiveWysiwygScroll: (top: number) => void;
+  /** RAISE-60: Read view scroll persistence — same shape as the WYSIWYG one. */
+  setActiveReadScroll: (top: number) => void;
   setActiveWysiwygCursorOffset: (offset: number) => void;
   setActiveEditorMode: (mode: EditorMode) => void;
   /**
@@ -177,7 +194,7 @@ export function isTabDirty(t: Tab): boolean {
   return t.content !== baseline;
 }
 
-function makeTab(path: string | null, content: string): Tab {
+function makeTab(path: string | null, content: string, initialMode: EditorMode = 'wysiwyg'): Tab {
   return {
     id: crypto.randomUUID(),
     path,
@@ -186,11 +203,16 @@ function makeTab(path: string | null, content: string): Tab {
     cursorPosition: { line: 1, column: 1 },
     scrollPosition: 0,
     wysiwygScrollPosition: 0,
+    readScrollPosition: 0,
     wysiwygCursorOffset: 0,
-    // RAISE-7: WYSIWYG is the welcoming default — both new files and freshly
-    // opened files land in formatted mode. Users can flip to Source or Split
-    // per tab via the mode switcher (or Cmd+1/2/3, or Cmd+\ to cycle).
-    editorMode: 'wysiwyg',
+    // RAISE-7: WYSIWYG is the welcoming default — both new files and
+    // most freshly opened files land in formatted mode. RAISE-60
+    // introduced one exception: files opened via the OS (Finder double-
+    // click, "Open With" → Rise MD Editor) start in Read mode. The
+    // `initialMode` arg is plumbed through `loadFile` for that case;
+    // all other call sites get the WYSIWYG default. Users can flip
+    // per tab via the mode switcher (or Cmd+1/2/3/4, or Cmd+\ to cycle).
+    editorMode: initialMode,
     loadEpoch: 0,
   };
 }
@@ -329,11 +351,15 @@ export function FileProvider({ children }: FileProviderProps) {
   );
 
   const loadFile = useCallback(
-    (nextPath: string, nextContent: string): string => {
+    (nextPath: string, nextContent: string, initialMode?: EditorMode): string => {
       // Read + write against the synchronous ref so two `loadFile` calls in
       // the same tick can't both miss an existing tab and create duplicates.
       const existing = tabsRef.current.find((t) => t.path === nextPath);
       if (existing) {
+        // RAISE-60: deliberately do NOT touch `editorMode` on an existing
+        // tab. If the user has been working in WYSIWYG and the OS re-opens
+        // the file (e.g. Finder double-click), they keep their mode. Read
+        // mode is only the *initial* choice for fresh tabs.
         writeTabs(
           tabsRef.current.map((t) =>
             t.id === existing.id
@@ -355,7 +381,7 @@ export function FileProvider({ children }: FileProviderProps) {
         writeActiveTabId(existing.id);
         return existing.id;
       }
-      const tab = makeTab(nextPath, nextContent);
+      const tab = makeTab(nextPath, nextContent, initialMode);
       writeTabs([...tabsRef.current, tab]);
       writeActiveTabId(tab.id);
       return tab.id;
@@ -425,6 +451,15 @@ export function FileProvider({ children }: FileProviderProps) {
       const id = activeTabIdRef.current;
       if (!id) return;
       updateTab(id, { wysiwygScrollPosition: top });
+    },
+    [updateTab],
+  );
+
+  const setActiveReadScroll = useCallback(
+    (top: number) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      updateTab(id, { readScrollPosition: top });
     },
     [updateTab],
   );
@@ -762,6 +797,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveCursor,
       setActiveScroll,
       setActiveWysiwygScroll,
+      setActiveReadScroll,
       setActiveWysiwygCursorOffset,
       setActiveEditorMode,
       refreshTabFromDisk,
@@ -792,6 +828,7 @@ export function FileProvider({ children }: FileProviderProps) {
       setActiveCursor,
       setActiveScroll,
       setActiveWysiwygScroll,
+      setActiveReadScroll,
       setActiveWysiwygCursorOffset,
       setActiveEditorMode,
       refreshTabFromDisk,

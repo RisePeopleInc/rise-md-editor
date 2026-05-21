@@ -1,5 +1,6 @@
 import type { Ref } from 'react';
 import { ModeSwitcher } from './ModeSwitcher';
+import { ReadView } from './ReadView';
 import { SourceEditor, type CursorPosition, type SourceEditorHandle } from './SourceEditor';
 import { SplitView } from './SplitView';
 import { WysiwygEditor, type WysiwygEditorHandle } from './WysiwygEditor';
@@ -20,6 +21,8 @@ interface EditorContainerProps {
   onContentBaseline?: (markdown: string) => void;
   onModeChange: (mode: EditorMode) => void;
   onCursorChange: (position: CursorPosition) => void;
+  /** RAISE-60: persist Read view's scroll offset on the active tab. */
+  onReadScrollChange: (top: number) => void;
   sourceRef: Ref<SourceEditorHandle>;
   wysiwygRef: Ref<WysiwygEditorHandle>;
   /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
@@ -50,6 +53,7 @@ export function EditorContainer({
   onContentBaseline,
   onModeChange,
   onCursorChange,
+  onReadScrollChange,
   sourceRef,
   wysiwygRef,
   monacoThemeId,
@@ -67,7 +71,23 @@ export function EditorContainer({
         <ModeSwitcher mode={mode} onChange={onModeChange} />
       </div>
       <div className="min-h-0 min-w-0 flex-1">
-        {mode === 'wysiwyg' ? (
+        {mode === 'read' ? (
+          // RAISE-60: Read mode — pure rendered markdown, no editor
+          // surface. Re-key on tab id + load epoch so a re-open (which
+          // bumps loadEpoch via loadFile) repaints with fresh content.
+          // Without the load-epoch key, an external-edit refresh
+          // wouldn't trigger ReadView's scroll-restore raf because the
+          // `html` memo depends only on content, and React would
+          // reconcile in place — the user would stay scrolled to
+          // their previous position even though the content changed.
+          <ReadView
+            key={`${tab.id}-${tab.loadEpoch}`}
+            content={tab.content}
+            markdownPath={tab.path}
+            initialScrollTop={tab.readScrollPosition}
+            onScrollChange={onReadScrollChange}
+          />
+        ) : mode === 'wysiwyg' ? (
           // Re-key on tab id + load epoch so a tab switch OR a re-open of
           // the same file (loadFile bumps loadEpoch) fully remounts Milkdown
           // with the new content (the editor is uncontrolled-with-reset).

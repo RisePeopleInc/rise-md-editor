@@ -29,6 +29,7 @@ export type MenuAction =
   | 'find'
   | 'replace'
   | 'toggle-sidebar'
+  | 'read-mode'
   | 'wysiwyg-mode'
   | 'source-mode'
   | 'split-mode'
@@ -284,19 +285,32 @@ export function buildMenu(deps: MenuDeps): Menu {
           click: () => send(deps, 'toggle-sidebar'),
         },
         { type: 'separator' },
+        // RAISE-60: mode accelerators are bound to match the ModeSwitcher
+        // pill's left-to-right order:
+        //   Cmd+1 = Read, Cmd+2 = WYSIWYG, Cmd+3 = Source, Cmd+4 = Split.
+        // Previous binding (pre-RAISE-60) was Cmd+1/2/3 = WYSIWYG/Source/
+        // Split with Read at Cmd+0. Renumbered so the pill chip position
+        // and the digit on the keyboard match — the "1-2-3-4 maps to
+        // left-to-right" mental model wins over preserving the older
+        // muscle memory, since the app is still pre-release.
+        {
+          label: 'Read Mode',
+          accelerator: 'CmdOrCtrl+1',
+          click: () => send(deps, 'read-mode'),
+        },
         {
           label: 'WYSIWYG Mode',
-          accelerator: 'CmdOrCtrl+1',
+          accelerator: 'CmdOrCtrl+2',
           click: () => send(deps, 'wysiwyg-mode'),
         },
         {
           label: 'Source Mode',
-          accelerator: 'CmdOrCtrl+2',
+          accelerator: 'CmdOrCtrl+3',
           click: () => send(deps, 'source-mode'),
         },
         {
           label: 'Split Mode',
-          accelerator: 'CmdOrCtrl+3',
+          accelerator: 'CmdOrCtrl+4',
           click: () => send(deps, 'split-mode'),
         },
         {
