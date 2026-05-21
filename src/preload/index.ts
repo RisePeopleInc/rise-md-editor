@@ -1,4 +1,4 @@
-import { clipboard, contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export type MenuActionType =
   | 'new'
@@ -358,13 +358,24 @@ const folder = {
  */
 export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter';
 /**
- * RAISE-51: synchronous clipboard read for the Paste and Match Style
- * flow. Menu accelerators (`Cmd/Ctrl+Shift+V`) don't give the
- * renderer a `DataTransfer` the way DOM paste events do, so we
- * need to read the system clipboard out of band. Electron's
- * `clipboard` module is available directly in the preload script —
- * no IPC round-trip required. Synchronous return keeps the renderer
- * paste-handler shape straightforward.
+ * RAISE-51: clipboard read for the Paste and Match Style flow.
+ * Menu accelerators (`Cmd/Ctrl+Shift+V`) don't give the renderer
+ * a `DataTransfer` the way DOM paste events do, so we read the
+ * system clipboard out of band.
+ *
+ * Initial implementation tried `import { clipboard } from 'electron'`
+ * directly in the preload and exposed a sync function. That doesn't
+ * work: `webPreferences.sandbox: true` (set in `main/index.ts`'s
+ * BrowserWindow) bundles the preload through Electron's sandbox
+ * bundler, which strips every `electron` module except `contextBridge`,
+ * `ipcRenderer`, `webFrame`, `webUtils`, and `crashReporter`. The
+ * `clipboard` symbol becomes `undefined` at runtime, and the
+ * sync-call shape throws inside the contextBridge proxy with the
+ * error invisible to the renderer (silent paste no-op — the symptom
+ * the smoke-test caught).
+ *
+ * IPC round-trip — async — is the correct shape. `clipboard.readText()`
+ * runs in main where it's actually available, and the renderer awaits.
  *
  * Returns the empty string when the clipboard has no `text/plain`
  * slot (image-only clipboards, etc.). The renderer treats empty
@@ -372,7 +383,7 @@ export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter'
  * short-circuit" spec.
  */
 const clipboardApi = {
-  readText: (): string => clipboard.readText(),
+  readText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
 };
 
 const contextMenu = {

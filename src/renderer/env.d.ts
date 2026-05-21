@@ -218,12 +218,13 @@ export interface RaiseContextMenuApi {
 /**
  * RAISE-51: minimal clipboard read surface for the Paste and Match
  * Style flow. Menu accelerators don't supply a DOM `DataTransfer`,
- * so we read the system clipboard out of band. Synchronous via the
- * preload script (no IPC round-trip).
+ * so we read the system clipboard out of band — via IPC, because
+ * the sandboxed preload can't import Electron's `clipboard` module
+ * directly (the sandbox bundler strips it).
  */
 export interface RaiseClipboardApi {
   /** Returns the clipboard's `text/plain` slot, or `''` if absent. */
-  readText: () => string;
+  readText: () => Promise<string>;
 }
 
 export type ExportPdfPageSize = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';

@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -599,6 +600,14 @@ ipcMain.on('dialog:show-error', (_, payload: { title: string; message: string })
 // Anything else (especially `javascript:`, `file:`, custom URI schemes
 // from extension links) is silently ignored — opening an arbitrary
 // scheme via shell.openExternal is a known Electron security footgun.
+// RAISE-51: Paste and Match Style needs to read the system clipboard
+// from outside a DOM paste event (the Cmd/Ctrl+Shift+V menu accelerator
+// doesn't synthesize a DataTransfer). The renderer's preload runs
+// sandboxed, so it can't import Electron's `clipboard` module directly —
+// that import gets stripped by the sandbox bundler. Round-trip through
+// IPC instead.
+ipcMain.handle('clipboard:read-text', (): string => clipboard.readText());
+
 ipcMain.on('shell:open-external', (_, url: unknown) => {
   if (typeof url !== 'string' || !url) return;
   let parsed: URL;

@@ -810,10 +810,10 @@ function AppContent() {
           break;
         case 'paste-plain': {
           // RAISE-51: Paste and Match Style (Cmd/Ctrl+Shift+V).
-          // Read the system clipboard via the preload bridge — the
-          // menu accelerator doesn't carry a DataTransfer the way a
-          // DOM paste event would, so we go to `clipboard.readText()`
-          // directly. Route to the active editor's imperative handle:
+          // Read the system clipboard via the preload bridge (async
+          // IPC — the sandboxed preload can't access Electron's
+          // `clipboard` module directly, so main does the read).
+          // Route to the active editor's imperative handle:
           //
           //   - WYSIWYG → Milkdown insertion as inline text + hard_break
           //   - Source / Split → Monaco `executeEdits` at the cursor
@@ -825,13 +825,22 @@ function AppContent() {
           // or empty system clipboard) short-circuits to nothing,
           // matching the ticket's "image clipboards → no plain-text
           // equivalent, paste is a no-op" spec.
-          const text = window.api.clipboard.readText();
-          if (!text) break;
-          if (isWysiwyg) {
-            wysiwygRef.current?.pastePlain(text);
-          } else if (isMonacoActive) {
-            editorRef.current?.pastePlain(text);
-          }
+          //
+          // Capture the mode flags into locals before the await —
+          // by the time the promise resolves the user could have
+          // switched modes; we want the paste to land where the
+          // accelerator was pressed.
+          const wantWysiwyg = isWysiwyg;
+          const wantMonaco = isMonacoActive;
+          void (async () => {
+            const text = await window.api.clipboard.readText();
+            if (!text) return;
+            if (wantWysiwyg) {
+              wysiwygRef.current?.pastePlain(text);
+            } else if (wantMonaco) {
+              editorRef.current?.pastePlain(text);
+            }
+          })();
           break;
         }
         case 'context-add-link':
