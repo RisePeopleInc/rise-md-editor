@@ -196,6 +196,9 @@ export interface RaiseFolderApi {
   copy: (srcPath: string, destDir: string) => Promise<string>;
   trash: (itemPath: string) => Promise<void>;
   reveal: (itemPath: string) => void;
+  /** RAISE-13 follow-up: open a file in the OS default app. Returns
+   *  the error string (empty on success). */
+  openInSystem: (itemPath: string) => Promise<string>;
   confirmDelete: (name: string, isDirectory: boolean) => Promise<boolean>;
   statPath: (p: string) => Promise<'file' | 'directory' | 'missing'>;
   showItemMenu: (payload: {

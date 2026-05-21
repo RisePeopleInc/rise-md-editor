@@ -396,6 +396,26 @@ function AppContent() {
     [file],
   );
 
+  // RAISE-13 follow-up: double-click on a non-markdown file in the
+  // sidebar opens it in the OS default application. `shell.openPath`
+  // returns the error string (empty on success) so we forward it to
+  // the user-facing error dialog when present. Common failure modes
+  // include no app associated with the extension (rare on macOS;
+  // surfaces a "no default app" system dialog from the OS itself
+  // before this handler even runs) and permission errors on
+  // network-mounted volumes.
+  const handleOpenExternal = useCallback(async (filePath: string) => {
+    try {
+      const errMessage = await window.api.folder.openInSystem(filePath);
+      if (errMessage) {
+        window.api.showError('Could not open file', errMessage);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      window.api.showError('Could not open file', message);
+    }
+  }, []);
+
   // RAISE-13 follow-up: opt-drag / ctrl-drag duplicates the dragged
   // item. Unlike move, the source is unchanged — no `relocateTabs`
   // call needed. chokidar's tree-changed signal repaints the
@@ -1109,6 +1129,7 @@ function AppContent() {
               expanded={sidebar.expanded}
               onToggle={sidebar.toggleExpanded}
               onOpenFile={(p) => void handleOpenPath(p)}
+              onOpenExternal={(p) => void handleOpenExternal(p)}
               onContextMenu={handleTreeContextMenu}
               editingPath={sidebar.editingPath}
               creating={sidebar.creating}

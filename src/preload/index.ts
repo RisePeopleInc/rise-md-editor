@@ -326,6 +326,15 @@ const folder = {
   reveal: (itemPath: string): void => {
     ipcRenderer.send('folder:reveal', itemPath);
   },
+  /**
+   * RAISE-13 follow-up: open a file in the OS default application
+   * (`.html` → browser or VS Code per the user's file
+   * associations, `.pdf` → Preview / Acrobat, etc.). Returns the
+   * error string (empty on success) so the caller can decide
+   * whether to surface a dialog.
+   */
+  openInSystem: (itemPath: string): Promise<string> =>
+    ipcRenderer.invoke('folder:open-in-system', itemPath),
   confirmDelete: (name: string, isDirectory: boolean): Promise<boolean> =>
     ipcRenderer.invoke('folder:confirm-delete', name, isDirectory),
   statPath: (p: string): Promise<'file' | 'directory' | 'missing'> =>

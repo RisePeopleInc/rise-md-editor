@@ -16,6 +16,15 @@ interface FileTreeProps {
   expanded: Set<string>;
   onToggle: (path: string) => void;
   onOpenFile: (filePath: string) => void;
+  /**
+   * RAISE-13 follow-up: open a file in the OS default application.
+   * Wired to double-click on non-markdown file rows — `.html` →
+   * browser or VS Code per the user's file associations, `.pdf` →
+   * Preview / Acrobat, etc. Single-click on the same row stays a
+   * no-op so users don't trigger an external app every time they
+   * mis-click in the tree.
+   */
+  onOpenExternal: (filePath: string) => void;
   onContextMenu: (node: TreeNode, e: MouseEvent) => void;
 
   /** Inline editing — at most one of editingPath / creating is active. */
@@ -325,6 +334,9 @@ interface RowProps {
   isRoot: boolean;
   onToggle: (path: string) => void;
   onOpenFile: (filePath: string) => void;
+  /** See `FileTreeProps.onOpenExternal` — double-click route for
+   *  non-markdown files. */
+  onOpenExternal: (filePath: string) => void;
   onContextMenu: (node: TreeNode, e: MouseEvent) => void;
   editingPath: string | null;
   creating: CreatingState | null;
@@ -353,6 +365,7 @@ function Row(props: RowProps) {
     isRoot,
     onToggle,
     onOpenFile,
+    onOpenExternal,
     onContextMenu,
     editingPath,
     creating,
@@ -376,6 +389,20 @@ function Row(props: RowProps) {
     if (node.isDirectory) onToggle(node.path);
     else if (openable) onOpenFile(node.path);
   }, [node, openable, onToggle, onOpenFile]);
+
+  // RAISE-13 follow-up: double-click on a non-markdown file opens
+  // it in the OS default application (`.html` → browser / VS Code,
+  // `.pdf` → Preview / Acrobat, etc.). Folders keep their
+  // toggle-on-double-click behaviour (the two single-clicks that
+  // make up a double-click each flip the open state, which is
+  // what the user expects from a tree); markdown files stay
+  // single-click-to-open. Only the "we wouldn't open this
+  // ourselves" branch gets the external-open behaviour.
+  const handleDoubleClick = useCallback(() => {
+    if (node.isDirectory) return;
+    if (openable) return;
+    onOpenExternal(node.path);
+  }, [node, openable, onOpenExternal]);
 
   const handleContextMenu = useCallback(
     (e: MouseEvent) => {
@@ -506,6 +533,7 @@ function Row(props: RowProps) {
           role="treeitem"
           aria-expanded={node.isDirectory ? isOpen : undefined}
           onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
           onContextMenu={handleContextMenu}
           // RAISE-13: source side is gated by `isRoot` inside the
           // dragstart handler — `draggable` is on every row so the
@@ -525,7 +553,14 @@ function Row(props: RowProps) {
               ? 'text-strong hover:bg-elevated'
               : openable
                 ? 'text-body hover:bg-elevated'
-                : 'text-disabled cursor-default hover:bg-elevated/40',
+                // RAISE-13 follow-up: non-markdown files are now
+                // actionable via double-click (open in OS default
+                // app). Keep the muted text colour as a type hint
+                // (vs. the brighter `text-body` on markdown rows
+                // that open in-app), but use the regular hover
+                // background and pointer cursor so the row reads
+                // as interactive.
+                : 'text-disabled hover:bg-elevated',
             // RAISE-13: drop-target highlight. Tinted ring + bg so
             // the user sees exactly which folder the drop will
             // land in. Brighter than `bg-elevated` (the hover
@@ -580,6 +615,7 @@ function Row(props: RowProps) {
                 isRoot={false}
                 onToggle={onToggle}
                 onOpenFile={onOpenFile}
+                onOpenExternal={onOpenExternal}
                 onContextMenu={onContextMenu}
                 editingPath={editingPath}
                 creating={creating}
@@ -604,6 +640,7 @@ export function FileTree({
   expanded,
   onToggle,
   onOpenFile,
+  onOpenExternal,
   onContextMenu,
   editingPath,
   creating,
@@ -630,6 +667,7 @@ export function FileTree({
         isRoot
         onToggle={onToggle}
         onOpenFile={onOpenFile}
+        onOpenExternal={onOpenExternal}
         onContextMenu={onContextMenu}
         editingPath={editingPath}
         creating={creating}

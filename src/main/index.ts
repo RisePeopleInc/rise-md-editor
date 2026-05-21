@@ -819,6 +819,17 @@ ipcMain.on('folder:reveal', (_, itemPath: string) => {
   folderOps.revealInFolder(itemPath);
 });
 
+// RAISE-13 follow-up: open a file in the user's system default
+// application — `.html` lands in their browser or VS Code,
+// `.pdf` in Preview or Acrobat, etc., based on OS file
+// associations. Double-clicking a non-markdown file in the
+// sidebar tree fires this. `shell.openPath` returns the error
+// string (empty on success) which we forward to the renderer
+// so it can surface a dialog if the open fails.
+ipcMain.handle('folder:open-in-system', async (_, itemPath: string): Promise<string> => {
+  return shell.openPath(itemPath);
+});
+
 ipcMain.handle(
   'folder:confirm-delete',
   async (_, name: string, isDirectory: boolean): Promise<boolean> => {
