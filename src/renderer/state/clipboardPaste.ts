@@ -481,6 +481,18 @@ export function htmlToPlainText(html: string): string {
   let text = '';
   try {
     const doc = new DOMParser().parseFromString(withBreaks, 'text/html');
+    // Drop `<style>` and `<script>` elements before reading
+    // textContent. Otherwise their contents (raw CSS / JS source)
+    // leak into the paste-plain output via the textContent walk —
+    // `Node.textContent` includes the text content of every
+    // descendant, including style/script. Word and Outlook put
+    // their `<style>` block in `<head>` (which `body.textContent`
+    // ignores naturally), but some web pages — Notion clips,
+    // CodePen "Copy as HTML", inline-scoped CSS — embed `<style>`
+    // *inside* `<body>`. The existing Turndown preprocessor
+    // (`preprocessClipboardHtml`) handles this for the regular
+    // Cmd+V path; this path needs the same defence.
+    doc.body?.querySelectorAll('style, script').forEach((el) => el.remove());
     text = doc.body?.textContent ?? '';
   } catch {
     return '';
