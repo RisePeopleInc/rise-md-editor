@@ -182,15 +182,24 @@ Save path:
   IPC files:save → main writes bytes → reply with new mtime →
   fileState clears dirty flag
 
-External-edit detection (RAISE-56):
+External-edit detection (RAISE-56, race fix in RAISE-59):
   chokidar fires → main coalesces (debounce 50ms per path) →
   webContents.send('folder:file-changed') → renderer's onFileChanged
   handler in App.tsx:
-    - Clean tab (isTabDirty === false): silently re-fetch from disk
-      and refreshTabFromDisk. No prompt. Canonical "Claude edits a
-      file while user has it open" path.
-    - Dirty tab: prompt "this file changed on disk — reload?" so
-      unsaved local edits aren't blown away.
+    - Clean tab (isTabDirty === false): defer 250ms to let any
+      in-flight Milkdown emit (200ms debounce) reach fileState,
+      then re-check via fileRef. If still clean, silently re-fetch
+      from disk and refreshTabFromDisk. No prompt. Canonical
+      "Claude edits a file while user has it open" path.
+    - Dirty tab (or became dirty during the 250ms re-check window):
+      prompt "this file changed on disk — reload?" so unsaved local
+      edits aren't blown away.
+  The 250ms deferral closes the RAISE-59 race where a user keystroke
+  within ~200ms of an external write could be lost — without it,
+  isTabDirty reads stale React state and silently overwrites the
+  in-flight emit. Cost: ~250ms of perceptible latency on the silent
+  path (Claude-edits-while-user-reads), well below human-perceptible
+  for that workflow.
   Only fires in Project Mode (folder open); single-file mode has
   no watcher today.
 ```

@@ -68,6 +68,15 @@ function AppContent() {
   const editorRef = useRef<SourceEditorHandle>(null);
   const wysiwygRef = useRef<WysiwygEditorHandle>(null);
 
+  // RAISE-59: mirror the latest `file` state in a ref so async callbacks
+  // can re-read tab state after their initial closure capture. The
+  // onFileChanged handler below defers its dirty re-check across ~250ms;
+  // during that window, fileState may pick up a Milkdown emit the
+  // closure-bound `file` doesn't yet see. Reassigning on every render
+  // keeps the ref pointed at the same object useFileState last returned.
+  const fileRef = useRef(file);
+  fileRef.current = file;
+
   // Tabs that were freshly opened from a template — these get a small
   // dismissible hint banner above the editor reminding the user to fill
   // in the placeholders. Cleared when the user dismisses or when the
@@ -1021,19 +1030,35 @@ function AppContent() {
       if (!tab) return;
 
       if (!isTabDirty(tab)) {
-        // Clean local copy — silently refresh.
-        try {
-          const result = await window.api.files.openPath(filePath);
-          file.refreshTabFromDisk(result.path, result.content);
-        } catch (err) {
-          // Transient FS errors (file briefly missing during atomic
-          // rename, locked by another process, etc.) are uninteresting
-          // for the silent path — we'll catch the next change event
-          // once the write settles. Log to console for debug visibility
-          // but don't pop a dialog.
-          console.warn('Silent reload failed for', filePath, err);
+        // RAISE-59: Milkdown debounces `markdownUpdated` emits ~200ms.
+        // A keystroke the user just typed may have dispatched a
+        // ProseMirror transaction but not yet reached fileState, so the
+        // initial isTabDirty above can be a false negative. Defer 250ms
+        // to let any in-flight emit settle, then re-check against the
+        // latest tab state via fileRef (the closure-bound `file` won't
+        // reflect updates that happen during the wait). If the user
+        // typed during the deferral the tab is now dirty and we fall
+        // through to the prompt path; otherwise silent reload as before.
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        const freshTab = fileRef.current.tabs.find((t) => t.path === filePath);
+        if (!freshTab) return;
+        if (!isTabDirty(freshTab)) {
+          // Still clean — silently refresh.
+          try {
+            const result = await window.api.files.openPath(filePath);
+            fileRef.current.refreshTabFromDisk(result.path, result.content);
+          } catch (err) {
+            // Transient FS errors (file briefly missing during atomic
+            // rename, locked by another process, etc.) are uninteresting
+            // for the silent path — we'll catch the next change event
+            // once the write settles. Log to console for debug visibility
+            // but don't pop a dialog.
+            console.warn('Silent reload failed for', filePath, err);
+          }
+          return;
         }
-        return;
+        // Fell through to the prompt path because the user typed during
+        // the deferral — the dirty state is now real.
       }
 
       // Dirty local copy — prompt as before.
@@ -1041,7 +1066,7 @@ function AppContent() {
       if (!reload) return;
       try {
         const result = await window.api.files.openPath(filePath);
-        file.refreshTabFromDisk(result.path, result.content);
+        fileRef.current.refreshTabFromDisk(result.path, result.content);
       } catch (err) {
         window.api.showError(
           'Could not reload file',
