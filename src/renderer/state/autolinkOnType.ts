@@ -181,6 +181,13 @@ export function findCompletedHits(
 ): Hit[] {
   const hits: Hit[] = [];
   re.lastIndex = 0;
+  // Hoisted non-global copy of the input regex used to re-verify that
+  // the post-trim string still satisfies the pattern. Cloning once
+  // outside the loop avoids per-iteration regex compile. The `g` flag
+  // is intentionally dropped: we want `exec(trimmed)` to behave as a
+  // one-shot match against the trimmed string, not a stateful global
+  // iteration that mutates a shared `lastIndex`.
+  const verifyRe = new RegExp(re.source);
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const fullMatch = m[0];
@@ -192,6 +199,19 @@ export function findCompletedHits(
     }
     const matchEnd = m.index + trimmed.length;
     if (trimmed.length === 0) continue;
+    // RAISE-66 defensive guard: verify the trimmed match still
+    // satisfies the regex from the start, covering the full trimmed
+    // string. Catches degenerate cases where TRAILING_PUNCT_RE chewed
+    // off characters the regex required — e.g. `https://...` greedy-
+    // matches URL_RE for the full 11-char run (the `+` after `://`
+    // accepts the three periods), then trimming `...` leaves
+    // `https://` which doesn't satisfy `[^\s<>"'`]+`. Without this
+    // check the post-trim `https://` would otherwise pass the
+    // boundary test and anchor a broken `href: 'https://'`.
+    const verifyMatch = verifyRe.exec(trimmed);
+    if (!verifyMatch || verifyMatch.index !== 0 || verifyMatch[0].length !== trimmed.length) {
+      continue;
+    }
     // RAISE-66: the boundary check needs to look at the character
     // AFTER any trailing punct we stripped, not at the punct itself.
     // matchEnd points at the first stripped punct (or, if none were

@@ -260,6 +260,56 @@ describe('findCompletedHits', () => {
       });
       expect(hits).toEqual([]);
     });
+
+    // WWW_URL_RE: the boundary fix benefits this regex too — but only
+    // when the optional path group consumed trailing punct that gets
+    // stripped. Hostname-only WWW URLs (`www.example.com.`) don't
+    // trigger the fix because the regex's `\b`-equivalent stops at the
+    // domain boundary before any punct can enter the match.
+    it('autolinks www.X with path + trailing period + space (RAISE-66 cross-regex)', () => {
+      const hits = findCompletedHits(
+        'www.example.com/path. ok',
+        WWW_URL_RE,
+        (m) => `http://${m}`,
+      );
+      expect(hits).toEqual([
+        { index: 0, length: 20, href: 'http://www.example.com/path' },
+      ]);
+    });
+
+    // BARE_HOSTNAME_RE regression pin: the fix MUST NOT enable
+    // autolinking for `example.com. ok` because BARE_HOSTNAME_RE
+    // stops at the `\b` after `com` — the trailing `.` was never
+    // inside the match, no punct gets stripped, and the boundary at
+    // position 11 is still the unstripped `.`, not whitespace. The
+    // RAISE-66 fix is a no-op here; this test pins that.
+    it('does NOT autolink bare hostname followed by trailing period + space (regression pin)', () => {
+      const hits = findCompletedHits('example.com. ok', BARE_HOSTNAME_RE, (m) => `http://${m}`, {
+        requireKnownTld: true,
+      });
+      expect(hits).toEqual([]);
+    });
+
+    // EMAIL_RE regression pin: same reasoning as BARE_HOSTNAME_RE —
+    // the email regex's domain ends at `[\w-]+`, so trailing punct
+    // is never inside the match. RAISE-66 doesn't apply, declines
+    // for the same word-boundary reason.
+    it('does NOT autolink email followed by trailing period + space (regression pin)', () => {
+      const hits = findCompletedHits('a@example.com. ok', EMAIL_RE, (m) => `mailto:${m}`);
+      expect(hits).toEqual([]);
+    });
+
+    // Degenerate URL whose entire post-scheme body is trailing punct.
+    // URL_RE accepts `https://...` (the `+` after `://` matches the
+    // three periods); TRAILING_PUNCT_RE then strips `...` leaving
+    // `https://` — which doesn't satisfy URL_RE anymore. The
+    // defensive `verifyRe.exec(trimmed)` guard added alongside the
+    // boundary fix rejects this case; without it we'd anchor a
+    // broken `href: 'https://'` here.
+    it('does NOT autolink a scheme-only URL whose body got stripped to punct', () => {
+      const hits = findCompletedHits('https://... ok', URL_RE, id);
+      expect(hits).toEqual([]);
+    });
   });
 
   describe('filename-extension gate (skipFilenameExtension)', () => {
