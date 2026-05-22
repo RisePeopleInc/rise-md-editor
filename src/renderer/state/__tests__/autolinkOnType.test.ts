@@ -192,18 +192,122 @@ describe('findCompletedHits', () => {
       expect(hits).toEqual([{ index: 0, length: 19, href: 'https://example.com' }]);
     });
 
-    // KNOWN ISSUE — flagged by RAISE-50 review, not fixed here.
-    // The boundary check uses `text.charAt(matchEnd)` against the
-    // POST-strip `matchEnd`. When the URL is followed by sentence
-    // punctuation + space (`https://example.com. ok`), the regex
-    // greedily matches `https://example.com.` (length 20), then
-    // `TRAILING_PUNCT_RE` strips the `.` (trimmed length 19) — but
-    // the boundary check then looks at index 19 in the original
-    // text, which is the `.` (not whitespace), and rejects the
-    // hit. The user-facing impact: a typed URL followed by a
-    // period + space stays plain text. Likely a follow-up ticket.
-    it('declines URL followed by trailing punctuation + space (KNOWN BUG)', () => {
+    // RAISE-66 fix: the boundary check now walks past stripped
+    // trailing-punct chars to find the actual separator. Before the
+    // fix, `https://example.com. ok` greedy-matched `https://example.com.`
+    // (length 20), trimmed to 19, and then text.charAt(19) returned
+    // `.` (the stripped char), failing the whitespace boundary check
+    // and rejecting the hit. The user-facing impact was a typed URL
+    // followed by a period + space stayed plain text.
+    it('autolinks a URL followed by trailing period + space (RAISE-66)', () => {
       const hits = findCompletedHits('https://example.com. ok', URL_RE, id);
+      expect(hits).toEqual([{ index: 0, length: 19, href: 'https://example.com' }]);
+    });
+
+    // Every char in TRAILING_PUNCT_RE's set must trim cleanly and
+    // still resolve the boundary check past the punct. Spot-check
+    // each: period, comma, exclamation, question, semicolon, colon,
+    // right-paren, right-bracket.
+    it.each([
+      ['period', 'https://example.com. ok'],
+      ['comma', 'https://example.com, ok'],
+      ['exclamation', 'https://example.com! ok'],
+      ['question', 'https://example.com? ok'],
+      ['semicolon', 'https://example.com; ok'],
+      ['colon', 'https://example.com: ok'],
+      ['right-paren', 'https://example.com) ok'],
+      ['right-bracket', 'https://example.com] ok'],
+    ])('autolinks URL followed by %s + space', (_label, text) => {
+      const hits = findCompletedHits(text, URL_RE, id);
+      expect(hits).toEqual([{ index: 0, length: 19, href: 'https://example.com' }]);
+    });
+
+    // Stacked trailing punct (`...!`, `?!`) also strips and resolves
+    // the boundary past the run.
+    it('autolinks URL followed by stacked trailing punctuation + space', () => {
+      const hits = findCompletedHits('https://example.com?! Whoa', URL_RE, id);
+      expect(hits).toEqual([{ index: 0, length: 19, href: 'https://example.com' }]);
+    });
+
+    // No space between punct and the next chunk → the greedy URL
+    // regex keeps consuming, so the boundary char is whatever's
+    // beyond. `https://example.com.https://second.com` has no
+    // valid boundary anywhere; URL_RE matches the whole thing
+    // greedily but there's no whitespace boundary, so no hit.
+    it('does NOT autolink when trailing punctuation runs into more URL-shape characters', () => {
+      const hits = findCompletedHits('https://example.com.https://second.com', URL_RE, id);
+      expect(hits).toEqual([]);
+    });
+
+    // treatEndAsBoundary + trailing punct at end of text: the
+    // boundary lives PAST the stripped period, so cursorPos must be
+    // past it too. Caret just after the period → fires; caret on
+    // the period → declines.
+    it('end-of-text URL with trailing punct fires under treatEndAsBoundary when caret is past', () => {
+      const hits = findCompletedHits('https://example.com.', URL_RE, id, {
+        treatEndAsBoundary: true,
+        nodeStart: 0,
+        cursorPos: 21, // strictly past the period at index 19, boundary at 20
+      });
+      expect(hits).toEqual([{ index: 0, length: 19, href: 'https://example.com' }]);
+    });
+
+    it('end-of-text URL with trailing punct declines under treatEndAsBoundary when caret is on the boundary', () => {
+      const hits = findCompletedHits('https://example.com.', URL_RE, id, {
+        treatEndAsBoundary: true,
+        nodeStart: 0,
+        cursorPos: 20, // caret exactly on the boundary — NOT past
+      });
+      expect(hits).toEqual([]);
+    });
+
+    // WWW_URL_RE: the boundary fix benefits this regex too — but only
+    // when the optional path group consumed trailing punct that gets
+    // stripped. Hostname-only WWW URLs (`www.example.com.`) don't
+    // trigger the fix because the regex's `\b`-equivalent stops at the
+    // domain boundary before any punct can enter the match.
+    it('autolinks www.X with path + trailing period + space (RAISE-66 cross-regex)', () => {
+      const hits = findCompletedHits(
+        'www.example.com/path. ok',
+        WWW_URL_RE,
+        (m) => `http://${m}`,
+      );
+      expect(hits).toEqual([
+        { index: 0, length: 20, href: 'http://www.example.com/path' },
+      ]);
+    });
+
+    // BARE_HOSTNAME_RE regression pin: the fix MUST NOT enable
+    // autolinking for `example.com. ok` because BARE_HOSTNAME_RE
+    // stops at the `\b` after `com` — the trailing `.` was never
+    // inside the match, no punct gets stripped, and the boundary at
+    // position 11 is still the unstripped `.`, not whitespace. The
+    // RAISE-66 fix is a no-op here; this test pins that.
+    it('does NOT autolink bare hostname followed by trailing period + space (regression pin)', () => {
+      const hits = findCompletedHits('example.com. ok', BARE_HOSTNAME_RE, (m) => `http://${m}`, {
+        requireKnownTld: true,
+      });
+      expect(hits).toEqual([]);
+    });
+
+    // EMAIL_RE regression pin: same reasoning as BARE_HOSTNAME_RE —
+    // the email regex's domain ends at `[\w-]+`, so trailing punct
+    // is never inside the match. RAISE-66 doesn't apply, declines
+    // for the same word-boundary reason.
+    it('does NOT autolink email followed by trailing period + space (regression pin)', () => {
+      const hits = findCompletedHits('a@example.com. ok', EMAIL_RE, (m) => `mailto:${m}`);
+      expect(hits).toEqual([]);
+    });
+
+    // Degenerate URL whose entire post-scheme body is trailing punct.
+    // URL_RE accepts `https://...` (the `+` after `://` matches the
+    // three periods); TRAILING_PUNCT_RE then strips `...` leaving
+    // `https://` — which doesn't satisfy URL_RE anymore. The
+    // defensive `verifyRe.exec(trimmed)` guard added alongside the
+    // boundary fix rejects this case; without it we'd anchor a
+    // broken `href: 'https://'` here.
+    it('does NOT autolink a scheme-only URL whose body got stripped to punct', () => {
+      const hits = findCompletedHits('https://... ok', URL_RE, id);
       expect(hits).toEqual([]);
     });
   });

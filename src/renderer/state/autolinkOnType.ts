@@ -181,6 +181,13 @@ export function findCompletedHits(
 ): Hit[] {
   const hits: Hit[] = [];
   re.lastIndex = 0;
+  // Hoisted non-global copy of the input regex used to re-verify that
+  // the post-trim string still satisfies the pattern. Cloning once
+  // outside the loop avoids per-iteration regex compile. The `g` flag
+  // is intentionally dropped: we want `exec(trimmed)` to behave as a
+  // one-shot match against the trimmed string, not a stateful global
+  // iteration that mutates a shared `lastIndex`.
+  const verifyRe = new RegExp(re.source);
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const fullMatch = m[0];
@@ -192,25 +199,48 @@ export function findCompletedHits(
     }
     const matchEnd = m.index + trimmed.length;
     if (trimmed.length === 0) continue;
-    // The URL is "completed" when the next character is whitespace
+    // RAISE-66 defensive guard: verify the trimmed match still
+    // satisfies the regex from the start, covering the full trimmed
+    // string. Catches degenerate cases where TRAILING_PUNCT_RE chewed
+    // off characters the regex required — e.g. `https://...` greedy-
+    // matches URL_RE for the full 11-char run (the `+` after `://`
+    // accepts the three periods), then trimming `...` leaves
+    // `https://` which doesn't satisfy `[^\s<>"'`]+`. Without this
+    // check the post-trim `https://` would otherwise pass the
+    // boundary test and anchor a broken `href: 'https://'`.
+    const verifyMatch = verifyRe.exec(trimmed);
+    if (!verifyMatch || verifyMatch.index !== 0 || verifyMatch[0].length !== trimmed.length) {
+      continue;
+    }
+    // RAISE-66: the boundary check needs to look at the character
+    // AFTER any trailing punct we stripped, not at the punct itself.
+    // matchEnd points at the first stripped punct (or, if none were
+    // stripped, at the char after the URL). boundaryPos walks past
+    // the stripped chars to find the actual separator candidate.
+    // Without this, `https://example.com. ok` failed to autolink
+    // because text.charAt(matchEnd) was `.`, not the space at
+    // matchEnd + 1.
+    const punctStripped = fullMatch.length - trimmed.length;
+    const boundaryPos = matchEnd + punctStripped;
+    // The URL is "completed" when the boundary character is whitespace
     // OR when we're at the end of a TEXT NODE that's followed by a
     // block boundary (Enter/paragraph break) AND the caret has
-    // already moved past the match. The caret-past gate is what
-    // distinguishes "user finished the URL and pressed Enter / left
-    // the line" from "user is mid-typing the URL and would hit a
-    // partial match like `steve@sslf.c` that anchors a truncated
-    // href as the typing continues".
-    if (matchEnd >= text.length) {
+    // already moved past the match (including any trailing punct).
+    // The caret-past gate is what distinguishes "user finished the
+    // URL and pressed Enter / left the line" from "user is mid-typing
+    // the URL and would hit a partial match like `steve@sslf.c` that
+    // anchors a truncated href as the typing continues".
+    if (boundaryPos >= text.length) {
       if (!options.treatEndAsBoundary) continue;
       // End-of-text-node match — only fire if the caret has moved
-      // past the match's right edge. We don't have the caret pos
-      // when nodeStart is missing; fall back to declining the match
-      // in that case (safer to not autolink than to autolink with a
-      // truncated href).
+      // past the match's right edge (boundaryPos, which is past any
+      // trailing punct). We don't have the caret pos when nodeStart
+      // is missing; fall back to declining the match in that case
+      // (safer to not autolink than to autolink with a truncated href).
       if (options.nodeStart == null || options.cursorPos == null) continue;
-      const absoluteMatchEnd = options.nodeStart + matchEnd;
-      if (options.cursorPos <= absoluteMatchEnd) continue;
-    } else if (!/\s/.test(text.charAt(matchEnd))) {
+      const absoluteBoundary = options.nodeStart + boundaryPos;
+      if (options.cursorPos <= absoluteBoundary) continue;
+    } else if (!/\s/.test(text.charAt(boundaryPos))) {
       continue;
     }
     // For the `www.X` and bare-hostname patterns, skip matches
