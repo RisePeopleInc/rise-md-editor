@@ -43,13 +43,6 @@ function nextMode(mode: EditorMode): EditorMode {
   return MODE_CYCLE[(idx + 1) % MODE_CYCLE.length] ?? 'wysiwyg';
 }
 
-function modeLabel(mode: EditorMode): 'Read' | 'Source' | 'WYSIWYG' | 'Split' {
-  if (mode === 'read') return 'Read';
-  if (mode === 'wysiwyg') return 'WYSIWYG';
-  if (mode === 'split') return 'Split';
-  return 'Source';
-}
-
 function basenameOfPath(p: string): string {
   return p.split(/[\\/]/).pop() || p;
 }
@@ -1259,7 +1252,7 @@ function AppContent() {
               line={hasCursor ? cursor.line : undefined}
               column={hasCursor ? cursor.column : undefined}
               wordCount={wordCount}
-              mode={modeLabel(mode)}
+              mode={mode}
             />
           );
         })()}
