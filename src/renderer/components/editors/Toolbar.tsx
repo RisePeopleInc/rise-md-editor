@@ -115,6 +115,17 @@ function ToolbarButton({ onClick, active, title, disabled, children }: ToolbarBu
   return (
     <button
       type="button"
+      // RAISE-76: keep focus on the editor's contenteditable surface so
+      // the user's selection visualization (highlight + cursor) doesn't
+      // disappear when they click a formatting button. By default a
+      // <button> mousedown moves focus to the button; ProseMirror needs
+      // focus on its surface to keep rendering the selection, even
+      // though the underlying selection range stays valid in state.
+      // preventDefault on mousedown blocks the focus transfer; the
+      // click event still fires on mouseup so onClick is unaffected.
+      onMouseDown={(e) => {
+        e.preventDefault();
+      }}
       onClick={onClick}
       title={title}
       disabled={disabled}
