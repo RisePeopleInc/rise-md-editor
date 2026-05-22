@@ -297,6 +297,23 @@ export async function exportToHtml(
       const htmlFileName = `${path.basename(outputPath, '.zip')}.html`;
       zip.file(htmlFileName, transformed, { date: entryDate });
 
+      // RAISE-72: JSZip auto-creates directory entries lazily when a
+      // file is added with a path prefix (e.g. `assets/foo.png` auto-
+      // creates `assets/`). Those auto-created entries get a fresh
+      // `new Date()` rather than the `entryDate` we pass to
+      // `zip.file()` — which means after the RAISE-53 file-side
+      // timezone-shift fix, extracted folders still had wrong (UTC-
+      // shifted future) mtimes while the files inside them were
+      // correct. Walk the entry map post-add and apply the same
+      // shifted entryDate to every directory entry. Catches the
+      // current `assets/` folder and any future nested folders
+      // (e.g. `assets/icons/`) automatically.
+      for (const entry of Object.values(zip.files)) {
+        if (entry.dir) {
+          entry.date = entryDate;
+        }
+      }
+
       const zipBuffer = await zip.generateAsync({
         type: 'nodebuffer',
         compression: 'DEFLATE',
