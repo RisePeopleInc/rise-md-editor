@@ -118,6 +118,16 @@ fileAssociations:
 mac:
   icon: build/icon.png
   category: public.app-category.productivity
+  # Artifact name for mac targets (covers the .zip, which doesn't get a
+  # target-specific override below; dmg.artifactName overrides this for
+  # the DMG specifically). Hard-coding `Rise-MD-Editor` rather than
+  # using `${productName}` because productName has spaces ("Rise MD
+  # Editor") and electron-builder's YAML serializer writes URLs with
+  # hyphens while GitHub Releases stores uploaded assets with dots —
+  # the resulting mismatch made `latest-mac.yml`'s download paths 404
+  # against the actual asset names, breaking auto-update silently. See
+  # the v0.1.4 release-cycle post-mortem in CHANGELOG.
+  artifactName: Rise-MD-Editor-${version}-${arch}-mac.${ext}
   # Universal binary — runs natively on both Intel and Apple Silicon
   # from a single .dmg. Larger file, but only one artifact to ship.
   target:
@@ -176,13 +186,19 @@ mac:
   # https://www.electron.build/configuration/mac#MacConfiguration-notarize
 
 dmg:
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  # See the comment on `mac.artifactName` above for why this is hard-coded
+  # to `Rise-MD-Editor` rather than `${productName}`.
+  artifactName: Rise-MD-Editor-${version}-${arch}.${ext}
 
 # ---------------------------------------------------------------------------
 # Windows
 # ---------------------------------------------------------------------------
 win:
   icon: build/icon.png
+  # Artifact name for win targets — covers the .zip (nsis.artifactName
+  # overrides this for the installer). See the comment on
+  # `mac.artifactName` above for why this is hard-coded.
+  artifactName: Rise-MD-Editor-${version}-win.${ext}
   target:
     - target: nsis
       arch: x64
@@ -226,7 +242,8 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: ${productName}-${version}-Setup.${ext}
+  # See the comment on `mac.artifactName` above for why this is hard-coded.
+  artifactName: Rise-MD-Editor-${version}-Setup.${ext}
 
 # ---------------------------------------------------------------------------
 # Linux
@@ -241,4 +258,5 @@ linux:
       arch: x64
 
 appImage:
-  artifactName: ${productName}-${version}.${ext}
+  # See the comment on `mac.artifactName` above for why this is hard-coded.
+  artifactName: Rise-MD-Editor-${version}.${ext}
