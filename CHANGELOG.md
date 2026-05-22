@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-05-22
+
+First stable release. Brings the toolchain current and zeroes out the public Dependabot dashboard via the four follow-up tickets spawned from the post-RAISE-57 triage (RAISE-67/68/69/70). Ships the open-source flip with MIT licensing per RAISE-57. Cleans up a batch of UX bugs surfaced during the v0.1.4 smoke-test pass (RAISE-59 / 66 / 72 / 73 / 74 / 75 / 76).
+
+No user-data migration vs v0.1.4 — same editor.state.json keys, same recents store, same theme store. Existing v0.1.4 installs auto-update via electron-updater on next launch.
+
+The entries below are the same content that appeared in `[Unreleased]` up through 2026-05-22; reorganised under this version heading at release time. Future changes go under a fresh `[Unreleased]` section above this one.
+
 ### Added
 
 - **Periodic auto-update re-checks for long-running sessions** ([RAISE-21](https://risepeople.atlassian.net/browse/RAISE-21)). The auto-updater now re-polls GitHub Releases every 6 hours after the initial 5-second launch check, so users who keep the app open over weekends still pick up new versions without quitting and relaunching. Failures (offline / DNS hiccup at check time) are silently swallowed — the next tick recovers on its own, no error banner flicker. Checks are skipped while a download is already in flight or has finished waiting for restart, so the periodic loop never duplicates the existing download / install flow. When a periodic check does find an update, it surfaces through the same `update-available` → `update-downloaded` event path as the launch check, so the existing non-intrusive banner handles it (no surprise dialogs mid-edit). The interval is cleared on `before-quit` so the timer never leaks. The 6-hour cadence is a constant (`RECHECK_INTERVAL_MS`) near the top of `src/main/autoUpdater.ts` if release cadence ever motivates a tune.
