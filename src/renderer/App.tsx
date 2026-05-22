@@ -120,6 +120,17 @@ function AppContent() {
   // both Source AND Split; Read mode gets neither.
   const isMonacoActive = activeMode === 'source' || activeMode === 'split';
 
+  // RAISE-74: push the current monaco-active state to main so the
+  // View menu's Zoom In / Out / Reset items (and their accelerators)
+  // are greyed out in Read and Edit modes where they're silent no-ops.
+  // Only Code (Monaco) and Split modes have the zoom IPC wired into
+  // Monaco's font-size today. Pushed on every change rather than only
+  // on user-driven mode switches so that tab close / open / switch
+  // events all converge to the right menu state.
+  useEffect(() => {
+    window.api.view.setZoomEnabled(isMonacoActive);
+  }, [isMonacoActive]);
+
   // Capture the active editor's cursor/scroll into the (about-to-leave)
   // tab before switching, so a switch back can restore. Each editor has
   // its own scroll field on Tab (Monaco pixels in scrollPosition, Milkdown

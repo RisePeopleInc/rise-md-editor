@@ -14,7 +14,7 @@ import {
 import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildMenu, type MenuDeps } from './menu';
+import { buildMenu, setZoomMenuEnabled, type MenuDeps } from './menu';
 import { showEditorContextMenu, type ShowEditorContextMenuPayload } from './contextMenu';
 import * as assetOps from './assetOps';
 import { getLastUpdateState, initAutoUpdater, quitAndInstallNow } from './autoUpdater';
@@ -795,6 +795,15 @@ ipcMain.on('update:install', () => {
 ipcMain.on('renderer:ready', () => {
   rendererReady = true;
   drainPendingMenuActions();
+});
+
+// RAISE-74: renderer notifies us when the active mode's "is monaco
+// active?" state changes; main toggles the Zoom In / Out / Reset
+// menu items (and their accelerators) accordingly. Read and Edit
+// modes have no zoom hookup today, so the items grey out in those
+// modes to make the no-op visible rather than silent.
+ipcMain.on('view:zoom-enabled', (_, enabled: unknown) => {
+  setZoomMenuEnabled(enabled === true);
 });
 
 // Recent files

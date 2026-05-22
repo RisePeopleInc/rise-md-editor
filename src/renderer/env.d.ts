@@ -240,6 +240,16 @@ export interface RaiseClipboardApi {
   readHTML: () => Promise<string>;
 }
 
+/**
+ * RAISE-74: renderer-driven menu state for the View menu's zoom items.
+ * The renderer pushes the current monaco-active boolean whenever the
+ * active tab's mode changes; main toggles the `enabled` flag on the
+ * three Zoom menu items (and their accelerators) in response.
+ */
+export interface RaiseViewApi {
+  setZoomEnabled: (enabled: boolean) => void;
+}
+
 export type ExportPdfPageSize = 'Letter' | 'Legal' | 'Tabloid' | 'A3' | 'A4' | 'A5';
 export interface ExportPdfCustomPageSize {
   width: number;
@@ -313,6 +323,8 @@ export interface RaiseApi {
   assets: RaiseAssetsApi;
   update: RaiseUpdateApi;
   contextMenu: RaiseContextMenuApi;
+  /** RAISE-74: View-menu state — currently just Zoom item enable/disable. */
+  view: RaiseViewApi;
   /** RAISE-51: synchronous clipboard read for the Paste and Match Style flow. */
   clipboard: RaiseClipboardApi;
   /** RAISE-42: Export-to-PDF bridge. */

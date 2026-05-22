@@ -417,6 +417,17 @@ const clipboardApi = {
   readHTML: (): Promise<string> => ipcRenderer.invoke('clipboard:read-html'),
 };
 
+// RAISE-74: renderer-driven menu state for the View menu's Zoom
+// items. The renderer pushes the current "is monaco active?" boolean
+// whenever the active tab's mode changes; main flips the three Zoom
+// menu items' `enabled` flag (which also disables their accelerators)
+// in response. Fire-and-forget — no reply expected.
+const view = {
+  setZoomEnabled: (enabled: boolean): void => {
+    ipcRenderer.send('view:zoom-enabled', enabled);
+  },
+};
+
 const contextMenu = {
   showEditor: (payload: {
     mode: EditorContextMode;
@@ -463,6 +474,7 @@ const api = {
   assets,
   update,
   contextMenu,
+  view,
   clipboard: clipboardApi,
   export: exportApi,
   // Active tab signal (path + isDirty) plus the global dirtyCount. Pushed

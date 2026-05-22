@@ -119,6 +119,31 @@ function buildRecentSubmenu(deps: MenuDeps): MenuItemConstructorOptions[] {
   ];
 }
 
+/**
+ * RAISE-74: flip the `enabled` flag on the three Zoom menu items
+ * (and their accelerators) based on whether the renderer's current
+ * mode supports zoom. Only Code (Monaco) and Split modes wire the
+ * zoom IPC into Monaco; Read and Edit (WYSIWYG / markdown-it) have
+ * no zoom handler today, so the items are no-ops in those modes.
+ *
+ * Called from main's `view:zoom-enabled` IPC handler in response to
+ * `window.api.view.setZoomEnabled(enabled)` pushes from the
+ * renderer. The renderer pushes on every `activeMode` change.
+ *
+ * No-op if the application menu hasn't been built yet (early calls
+ * during startup before buildMenu has run) or if a menu item id
+ * went missing — both are silent-degrade-to-current-state scenarios
+ * rather than throw-and-crash.
+ */
+export function setZoomMenuEnabled(enabled: boolean): void {
+  const menu = Menu.getApplicationMenu();
+  if (!menu) return;
+  for (const id of ['zoom-in', 'zoom-out', 'zoom-reset'] as const) {
+    const item = menu.getMenuItemById(id);
+    if (item) item.enabled = enabled;
+  }
+}
+
 export function buildMenu(deps: MenuDeps): Menu {
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
@@ -438,18 +463,33 @@ export function buildMenu(deps: MenuDeps): Menu {
           ],
         },
         { type: 'separator' },
+        // RAISE-74: zoom commands only have an effect in Code (Monaco)
+        // and Split modes. In Read and Edit (WYSIWYG) modes they were
+        // silent no-ops with an enabled-looking menu item. The renderer
+        // now pushes the current monaco-active state on every mode
+        // change via `window.api.view.setZoomEnabled` → main calls
+        // `setZoomMenuEnabled` (exported below) to flip the `enabled`
+        // flag on these three items by id. Default is `false` so the
+        // pre-first-render state has the items greyed out (consistent
+        // with no-tab-open at app start).
         {
+          id: 'zoom-in',
           label: 'Zoom In',
+          enabled: false,
           accelerator: 'CmdOrCtrl+Plus',
           click: () => send(deps, 'font-zoom-in'),
         },
         {
+          id: 'zoom-out',
           label: 'Zoom Out',
+          enabled: false,
           accelerator: 'CmdOrCtrl+-',
           click: () => send(deps, 'font-zoom-out'),
         },
         {
+          id: 'zoom-reset',
           label: 'Reset Zoom',
+          enabled: false,
           accelerator: 'CmdOrCtrl+0',
           click: () => send(deps, 'font-zoom-reset'),
         },
