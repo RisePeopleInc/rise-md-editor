@@ -313,12 +313,18 @@ export function buildMenu(deps: MenuDeps): Menu {
           click: () => send(deps, 'read-mode'),
         },
         {
-          label: 'WYSIWYG Mode',
+          // RAISE-73: menu labels match the mode-pill labels in the
+          // status bar (Read / Edit / Code / Split). The underlying
+          // action identity (`wysiwyg-mode` / `source-mode` in the
+          // MenuActionType union) intentionally stays the same — the
+          // internal vocabulary is unchanged; only the user-visible
+          // strings shift to match the pill.
+          label: 'Edit Mode',
           accelerator: 'CmdOrCtrl+2',
           click: () => send(deps, 'wysiwyg-mode'),
         },
         {
-          label: 'Source Mode',
+          label: 'Code Mode',
           accelerator: 'CmdOrCtrl+3',
           click: () => send(deps, 'source-mode'),
         },
