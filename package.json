@@ -19,6 +19,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
