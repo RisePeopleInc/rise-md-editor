@@ -197,9 +197,9 @@ External-edit detection (RAISE-56, race fix in RAISE-59):
   The 250ms deferral closes the RAISE-59 race where a user keystroke
   within ~200ms of an external write could be lost — without it,
   isTabDirty reads stale React state and silently overwrites the
-  in-flight emit. Cost: ~250ms of perceptible latency on the silent
-  path (Claude-edits-while-user-reads), well below human-perceptible
-  for that workflow.
+  in-flight emit. Cost: ~250ms of added latency on the silent path
+  (Claude-edits-while-user-reads), well below human-perceptible for
+  that workflow.
   Only fires in Project Mode (folder open); single-file mode has
   no watcher today.
 ```
