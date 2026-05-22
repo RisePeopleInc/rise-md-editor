@@ -19,6 +19,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
@@ -69,7 +70,7 @@
     "@types/react-dom": "^19.0.3",
     "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.3.0",
+    "electron": "^42.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^3.0.0",
     "eslint": "^9.18.0",

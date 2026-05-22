@@ -18,7 +18,7 @@ This repo is MIT-licensed and publicly visible at <https://github.com/RisePeople
 
 | Layer          | What                       | Notes                                                   |
 | -------------- | -------------------------- | ------------------------------------------------------- |
-| Shell          | Electron 33                | Hardened renderer, contextIsolation, no nodeIntegration |
+| Shell          | Electron 42                | Hardened renderer, contextIsolation, no nodeIntegration |
 | Bundler        | electron-vite 3 (Vite 6)   | Three Vite builds (main / preload / renderer)           |
 | Source editor  | Monaco                     | VS Code's editor; six Gruvbox theme variants            |
 | WYSIWYG editor | Milkdown 7                 | ProseMirror underneath; commonmark + gfm presets        |
@@ -119,6 +119,7 @@ These are load-bearing. If a change appears to require violating one, stop and d
 These have all bitten in real sessions. Front-load them.
 
 - **`npm install` regenerates the lockfile** and may pick up unrelated transitive dep churn. For version-only bumps use `npm install --package-lock-only`.
+- **Electron 38+ dropped the auto-download `postinstall` hook.** A fresh `npm install` no longer fetches the ~100 MB Electron binary — `npm run dev` then errors with `Error: Electron uninstall` (electron-vite's signature for "binary not found at `node_modules/electron/dist/`"). RAISE-70 worked around this by adding a `"postinstall": "node node_modules/electron/install.js"` script in our own `package.json` that re-triggers the download on every `npm install`. If you ever swap to a different Electron distribution (electron-nightly, electron-canary), verify it ships the same `install.js` entry point. The download adds ~5–15 sec to CI on a cold cache; release builds via electron-builder pull their own binaries separately so the duplicate is wasted bytes but not wasted minutes (binaries are cached per-version).
 - **`gh pr merge` may fail post-merge if your working tree is dirty.** It does the actual merge first, then tries a local checkout. The remote state is correct even if the local sync errors. After cleanup, `git checkout main && git pull --ff-only`.
 - **Empty stray files from typo'd shell redirects** — e.g. `npm install ... > electron-vite` creates a 0-byte file named `electron-vite`. Check `git status` for unexpected untracked entries.
 - **Dev mode shows "Electron" in the dock** instead of "Rise MD Editor". That's a dev artifact — `app.setName()` doesn't override the bundle name when running unpackaged. Production builds show the right name.
