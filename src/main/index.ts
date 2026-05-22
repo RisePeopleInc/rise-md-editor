@@ -15,6 +15,10 @@ import { promises as fs, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildMenu, setZoomMenuEnabled, type MenuDeps } from './menu';
+import {
+  getZoomEnabled as getPersistedZoomEnabled,
+  setZoomEnabledPersisted,
+} from './viewMenuStore';
 import { showEditorContextMenu, type ShowEditorContextMenuPayload } from './contextMenu';
 import * as assetOps from './assetOps';
 import { getLastUpdateState, initAutoUpdater, quitAndInstallNow } from './autoUpdater';
@@ -241,8 +245,22 @@ const menuDeps: MenuDeps = {
   },
 };
 
+// RAISE-74: cache for the zoom-menu-enabled state. Initialized from
+// the persisted value on startup so the menu renders with the right
+// state before the renderer's first IPC push arrives. Updated on
+// every `view:zoom-enabled` push (and persisted alongside) and
+// re-applied after every `rebuildMenu()` so the 11 call sites that
+// rebuild the menu — recent-files updates, theme changes, etc. —
+// don't wipe the state back to the default.
+let lastZoomEnabled = getPersistedZoomEnabled();
+
 function rebuildMenu(): void {
   Menu.setApplicationMenu(buildMenu(menuDeps));
+  // Apply the cached zoom-menu-enabled state to the freshly-built
+  // menu. Without this, every menu rebuild would silently re-disable
+  // the Zoom items even while the renderer is in Code / Split mode,
+  // until the next mode change happens to re-trigger the useEffect.
+  setZoomMenuEnabled(lastZoomEnabled);
 }
 
 type UnsavedChoice = 'save' | 'discard' | 'cancel';
@@ -802,8 +820,17 @@ ipcMain.on('renderer:ready', () => {
 // menu items (and their accelerators) accordingly. Read and Edit
 // modes have no zoom hookup today, so the items grey out in those
 // modes to make the no-op visible rather than silent.
+//
+// The boolean is cached in `lastZoomEnabled` (re-applied after every
+// `rebuildMenu` so menu rebuilds don't wipe the state) AND persisted
+// to disk via the view-menu store (so the next app launch can render
+// the menu with the correct state before the renderer's first push).
 ipcMain.on('view:zoom-enabled', (_, enabled: unknown) => {
-  setZoomMenuEnabled(enabled === true);
+  const v = enabled === true;
+  if (v === lastZoomEnabled) return;
+  lastZoomEnabled = v;
+  setZoomEnabledPersisted(v);
+  setZoomMenuEnabled(v);
 });
 
 // Recent files
