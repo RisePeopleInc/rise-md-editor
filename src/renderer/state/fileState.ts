@@ -17,6 +17,34 @@ export interface CursorPos {
 
 export type EditorMode = 'read' | 'wysiwyg' | 'source' | 'split';
 
+/**
+ * RAISE-75: single source of truth for the user-visible mode names.
+ * The internal EditorMode union above stays as-is (kebab-case action
+ * identities used by the IPC, menu actions, and persisted state); the
+ * map below resolves those identities into the strings the user sees
+ * in the pill, the status bar, and anywhere else the mode is displayed.
+ *
+ * Prior to RAISE-75 the labels lived in at least three separate copies
+ * (`modeLabel()` in App.tsx, `OPTIONS` in ModeSwitcher.tsx, the local
+ * `EditorMode` type in StatusBar.tsx) which drifted twice — once
+ * during RAISE-60's rename and again surfacing in RAISE-73 (View menu)
+ * and RAISE-75 (status bar). Future renames should touch this map
+ * only.
+ *
+ * The View menu in `src/main/menu.ts` keeps its literal "Edit Mode" /
+ * "Code Mode" strings — main can't import this constant without
+ * pulling renderer-only state plumbing, and the labels there carry
+ * the " Mode" suffix that doesn't apply to the pill / status bar. A
+ * comment in menu.ts cross-references this map so the next rename
+ * also touches the menu.
+ */
+export const MODE_LABELS: Record<EditorMode, string> = {
+  read: 'Read',
+  wysiwyg: 'Edit',
+  source: 'Code',
+  split: 'Split',
+};
+
 export interface Tab {
   id: string;
   path: string | null;

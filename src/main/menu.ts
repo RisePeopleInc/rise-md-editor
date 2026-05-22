@@ -344,6 +344,12 @@ export function buildMenu(deps: MenuDeps): Menu {
           // MenuActionType union) intentionally stays the same — the
           // internal vocabulary is unchanged; only the user-visible
           // strings shift to match the pill.
+          //
+          // RAISE-75: the pill and status bar read from `MODE_LABELS`
+          // in `src/renderer/state/fileState.ts`. The View menu can't
+          // share that constant directly (renderer-only module) and
+          // the menu labels carry the " Mode" suffix anyway. If you
+          // rename a mode, touch BOTH `MODE_LABELS` AND these literals.
           label: 'Edit Mode',
           accelerator: 'CmdOrCtrl+2',
           click: () => send(deps, 'wysiwyg-mode'),

@@ -1,4 +1,4 @@
-import type { EditorMode } from '../../state/fileState';
+import { MODE_LABELS, type EditorMode } from '../../state/fileState';
 
 interface ModeSwitcherProps {
   mode: EditorMode;
@@ -12,11 +12,18 @@ interface ModeSwitcherProps {
 // at Cmd+0; renumbered to match the pill, since the app is still
 // pre-release and the consistency win is worth the small muscle-
 // memory cost.
-const OPTIONS: ReadonlyArray<{ mode: EditorMode; label: string; title: string }> = [
-  { mode: 'read', label: 'Read', title: 'Read (Cmd+1)' },
-  { mode: 'wysiwyg', label: 'Edit', title: 'WYSIWYG (Cmd+2)' },
-  { mode: 'source', label: 'Code', title: 'Source (Cmd+3)' },
-  { mode: 'split', label: 'Split', title: 'Split view (Cmd+4)' },
+//
+// RAISE-75: pill labels and tooltips read from `MODE_LABELS` in
+// fileState so the strings stay in lockstep with the status-bar
+// label. The tooltip ("Edit (Cmd+2)") composes the label with the
+// shortcut suffix rather than hard-coding the old internal name —
+// previously it said "WYSIWYG (Cmd+2)" which contradicted the
+// "Edit" label on the chip itself.
+const OPTIONS: ReadonlyArray<{ mode: EditorMode; shortcut: string }> = [
+  { mode: 'read', shortcut: 'Cmd+1' },
+  { mode: 'wysiwyg', shortcut: 'Cmd+2' },
+  { mode: 'source', shortcut: 'Cmd+3' },
+  { mode: 'split', shortcut: 'Cmd+4' },
 ];
 
 export function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
@@ -28,13 +35,14 @@ export function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
     >
       {OPTIONS.map((opt) => {
         const active = opt.mode === mode;
+        const label = MODE_LABELS[opt.mode];
         return (
           <button
             key={opt.mode}
             type="button"
             role="radio"
             aria-checked={active}
-            title={opt.title}
+            title={`${label} (${opt.shortcut})`}
             onClick={() => onChange(opt.mode)}
             className={[
               'px-2.5 font-semibold transition',
@@ -43,7 +51,7 @@ export function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
                 : 'text-muted hover:bg-elevated hover:text-secondary',
             ].join(' ')}
           >
-            {opt.label}
+            {label}
           </button>
         );
       })}
