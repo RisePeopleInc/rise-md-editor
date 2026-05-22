@@ -8,8 +8,8 @@
 #               full Developer ID code signing + notarization. Produces
 #               .dmg + .zip + latest-mac.yml.
 #   build-win   windows-latest runner. NSIS installer + portable .zip.
-#               UNSIGNED for now — Windows code signing is deferred
-#               (see docs/release-process.md "Windows signing — deferred").
+#               Signed via Azure Artifact Signing (RAISE-58); see
+#               docs/azure-signing-setup.md and the build-win job below.
 #   release     Aggregates artifacts and creates a draft GitHub Release
 #               that the user reviews and publishes manually. Tag push
 #               only — workflow_dispatch never publishes.
@@ -372,7 +372,7 @@ jobs:
 
             ### Artifacts
             - **macOS** (`.dmg` + `.zip`): universal binary, Developer ID signed, Apple notarized. Drag to /Applications.
-            - **Windows** (`.exe` + `.zip`): NSIS installer, **currently unsigned**. SmartScreen will warn on first download — click *More info* → *Run anyway*. Code signing is in flight ([RAISE-45 follow-up](https://risepeople.atlassian.net/browse/RAISE-45)).
+            - **Windows** (`.exe` + `.zip`): NSIS installer, signed via [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) (Microsoft-rooted trust chain). Publisher: Rise People Inc.
 
             ### Auto-update
             Existing installs receive this version automatically via electron-updater on next launch.
