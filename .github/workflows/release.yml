@@ -8,8 +8,8 @@
 #               full Developer ID code signing + notarization. Produces
 #               .dmg + .zip + latest-mac.yml.
 #   build-win   windows-latest runner. NSIS installer + portable .zip.
-#               UNSIGNED for now — Windows code signing is deferred
-#               (see docs/release-process.md "Windows signing — deferred").
+#               Signed via Azure Artifact Signing (RAISE-58); see
+#               docs/azure-signing-setup.md and the build-win job below.
 #   release     Aggregates artifacts and creates a draft GitHub Release
 #               that the user reviews and publishes manually. Tag push
 #               only — workflow_dispatch never publishes.
