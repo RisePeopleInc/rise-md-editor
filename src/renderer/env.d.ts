@@ -63,14 +63,6 @@ export interface MenuActionEvent {
   payload?: {
     path?: string;
     content?: string;
-    /**
-     * RAISE-60: hint that this menu action was triggered by an
-     * OS-level file-open event (macOS `app.on('open-file')` or
-     * Win/Linux argv file-association). Drives the "open new tabs
-     * in Read mode" default — sidebar clicks, drag-drop, and the
-     * `File → Open…` dialog never set this, so they stay in WYSIWYG.
-     */
-    fromOs?: boolean;
   };
 }
 

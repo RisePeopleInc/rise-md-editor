@@ -543,11 +543,10 @@ if (!gotLock) {
     // RAISE-44: Explorer multi-select concatenates every selected
     // file's path into the second-instance argv. Dispatch one
     // `open-path` action per file so each lands in its own tab.
-    // `fromOs: true` matches the launch-arg path (RAISE-60) so the
-    // tabs open in Read mode — the user clicked from Explorer,
-    // not from inside the app.
+    // (RAISE-84: opens in the default Edit mode, same as every other
+    // open path — the old Read-mode-for-OS-launches default is gone.)
     for (const filePath of findFileArgs(argv)) {
-      dispatchMenuAction('open-path', { path: filePath, fromOs: true });
+      dispatchMenuAction('open-path', { path: filePath });
     }
   });
 
@@ -605,14 +604,12 @@ if (!gotLock) {
 
     // Win/Linux file-association launches deliver the path through argv
     // (macOS uses app.on('open-file') instead — handled below).
-    // RAISE-60: tag with `fromOs: true` so the renderer opens this tab
-    // in Read mode by default (Finder/Explorer double-click and
-    // "Open With" → Rise MD Editor both land here).
     // RAISE-44: multi-select from Explorer concatenates every selected
     // file's path into argv on a single launch. Dispatch one action
-    // per file so each opens in its own tab.
+    // per file so each opens in its own tab. (RAISE-84: opens in the
+    // default Edit mode, same as every other open path.)
     for (const filePath of findFileArgs(process.argv)) {
-      dispatchMenuAction('open-path', { path: filePath, fromOs: true });
+      dispatchMenuAction('open-path', { path: filePath });
     }
 
     // RAISE-42: sweep `<userData>/pdf-export-tmp/` for stale `print-*.html`
@@ -844,11 +841,11 @@ ipcMain.on('recent:clear', () => {
 
 // macOS: files passed via "Open With", Finder, or the dock arrive here.
 // Funnel through the same dispatch — it queues until the renderer is ready
-// and reopens the window if needed. RAISE-60: tag with `fromOs: true` so
-// the renderer opens the resulting tab in Read mode by default.
+// and reopens the window if needed. (RAISE-84: opens in the default Edit
+// mode, same as every other open path.)
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  dispatchMenuAction('open-path', { path: filePath, fromOs: true });
+  dispatchMenuAction('open-path', { path: filePath });
 });
 
 // ---------------------------------------------------------------------------

@@ -170,17 +170,18 @@ function AppContent() {
   }, [file]);
 
   const handleOpenPath = useCallback(
-    // RAISE-60: `fromOs` distinguishes Finder/Explorer launches from
-    // in-app opens (sidebar click, drag-drop, Open dialog, recents).
-    // OS-launched opens default the new tab to Read mode; in-app opens
-    // keep the existing WYSIWYG default. Already-open tabs are
-    // unaffected — `loadFile` deliberately doesn't touch `editorMode`
-    // on re-open so a user editing in WYSIWYG isn't yanked into Read
-    // by a Finder double-click of the same file.
-    async (filePath: string, fromOs = false) => {
+    // RAISE-84: every open path — Finder/Explorer double-click, "Open
+    // With", in-app sidebar click, drag-drop, Open dialog, recents —
+    // opens the new tab in the default Edit (WYSIWYG) mode. Pre-RAISE-84
+    // OS-launched files defaulted to Read mode (RAISE-60), but user
+    // feedback was that the more common intent is "I want to fix
+    // something," so Edit is the better default. Already-open tabs keep
+    // their current mode — `loadFile` deliberately doesn't touch
+    // `editorMode` on re-open.
+    async (filePath: string) => {
       try {
         const result = await window.api.files.openPath(filePath);
-        file.loadFile(result.path, result.content, fromOs ? 'read' : undefined);
+        file.loadFile(result.path, result.content);
         window.api.addRecent(result.path);
       } catch (err) {
         window.api.showError(
@@ -743,11 +744,8 @@ function AppContent() {
           void handleOpenFile();
           break;
         case 'open-path':
-          // RAISE-60: `fromOs` is set by macOS `app.on('open-file')`
-          // and the Win/Linux argv file-association path in main.
-          // It drives the "open in Read mode" default for those launches.
           if (event.payload?.path) {
-            void handleOpenPath(event.payload.path, event.payload.fromOs ?? false);
+            void handleOpenPath(event.payload.path);
           }
           break;
         case 'open-folder':
