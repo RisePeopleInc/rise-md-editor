@@ -1232,6 +1232,18 @@ ipcMain.handle('theme:get', async () => snapshotThemeState());
 
 ipcMain.handle('theme:set-app', async (_, pref: themeStore.ThemePreference) => {
   themeStore.setThemePreference(pref);
+  // RAISE-88: switching the preference to 'system' sets
+  // `nativeTheme.themeSource = 'system'`, but `nativeTheme.shouldUseDarkColors`
+  // (which `getResolvedTheme()` reads for the 'system' case) is stale for one
+  // event-loop tick after the flip — so a synchronous snapshot taken right
+  // here would resolve to the PREVIOUS forced value. Coming from a forced
+  // Dark, that left the app stuck dark when the user picked Follow System on a
+  // light-mode OS. Yield one tick so the OS value has settled before we
+  // snapshot + broadcast. Explicit light/dark prefs resolve straight from the
+  // preference (no shouldUseDarkColors read), so they don't need the deferral.
+  if (pref === 'system') {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
   broadcastThemeUpdate();
   return snapshotThemeState();
 });
