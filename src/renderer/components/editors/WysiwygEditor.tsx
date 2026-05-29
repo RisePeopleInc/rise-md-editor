@@ -16,7 +16,7 @@ import {
   parserCtx,
   serializerCtx,
 } from '@milkdown/core';
-import { Plugin, TextSelection } from '@milkdown/prose/state';
+import { Plugin, Selection, TextSelection } from '@milkdown/prose/state';
 import {
   Fragment,
   Slice,
@@ -482,6 +482,37 @@ function MilkdownBody({
       document.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
+  }, [scrollContainerRef]);
+
+  // RAISE-89: a click in the empty space BELOW the last block places the
+  // caret at the end of the document (and focuses the editor) rather than
+  // doing nothing. ProseMirror's contentEditable only fills its content
+  // height, so clicks in the scroll container's trailing padding never
+  // reach it — and a reader can't tell the last line apart from the empty
+  // space beneath it. Guarded tightly: only act when the click landed
+  // OUTSIDE the editable AND below its bottom edge, so clicks on content,
+  // links, images, and side-margin / above-content areas fall through
+  // untouched (the link / image / RAISE-87 handlers still win).
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleBelowContentClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const editor = editorInstanceRef.current;
+      if (!editor) return;
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const pmDom = view.dom as HTMLElement;
+        if (pmDom.contains(target)) return; // click hit real editor content
+        if (e.clientY <= pmDom.getBoundingClientRect().bottom) return; // not below
+        const selection = Selection.atEnd(view.state.doc);
+        view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
+        view.focus();
+      });
+    };
+    container.addEventListener('click', handleBelowContentClick);
+    return () => container.removeEventListener('click', handleBelowContentClick);
   }, [scrollContainerRef]);
 
   useEditor((root) =>
