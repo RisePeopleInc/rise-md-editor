@@ -689,6 +689,43 @@ function AppContent() {
     file.setActiveEditorMode(nextMode(current));
   }, [file, captureActivePosition]);
 
+  // RAISE-85: Read-mode task-list checkbox toggle. ReadView hands us the
+  // full new markdown (the clicked line already flipped); we persist it.
+  //
+  //  - Saved file: write to disk, then `setActiveContentSaved` realigns
+  //    the tab's content + savedContent + baseline so the tab stays clean
+  //    (no dirty marker, no prompt — the silent-save contract). Resolves
+  //    `true` so ReadView's optimistic DOM flip stands. On a write error
+  //    (read-only file, permissions) resolves `false` so ReadView reverts
+  //    the checkbox and shows a non-modal notice — note we deliberately
+  //    do NOT call window.api.showError here (that's a blocking dialog).
+  //  - Untitled file: there's no path to silently save to. Toggle
+  //    in-memory via `setContent` (which marks the tab dirty, the honest
+  //    state) and resolve `true` so the flip stands; the user saves it
+  //    when ready via Cmd+S. Graceful, no crash.
+  const handleReadToggleTask = useCallback(
+    async (newContent: string): Promise<boolean> => {
+      const tab = file.activeTab;
+      if (!tab) return false;
+      if (!tab.path) {
+        // Untitled — can't silent-save. Keep the edit in memory; the tab
+        // becomes dirty until the user saves it.
+        file.setContent(newContent);
+        return true;
+      }
+      try {
+        await window.api.files.save(tab.path, newContent);
+        file.setActiveContentSaved(newContent);
+        return true;
+      } catch {
+        // Read-only / locked / write error — ReadView surfaces a
+        // non-modal notice and reverts the optimistic flip.
+        return false;
+      }
+    },
+    [file],
+  );
+
   // Drag-and-drop. A dropped *folder* opens Project Mode; a dropped
   // markdown/text file opens in a tab. We can't tell which from the File
   // object alone (browsers don't expose `kind`), so we ask main to stat
@@ -1236,6 +1273,7 @@ function AppContent() {
               onModeChange={handleModeChange}
               onCursorChange={setCursor}
               onReadScrollChange={file.setActiveReadScroll}
+              onReadToggleTask={handleReadToggleTask}
               sourceRef={editorRef}
               wysiwygRef={wysiwygRef}
               monacoThemeId={theme.monacoThemeId}

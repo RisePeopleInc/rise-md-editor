@@ -23,6 +23,14 @@ interface EditorContainerProps {
   onCursorChange: (position: CursorPosition) => void;
   /** RAISE-60: persist Read view's scroll offset on the active tab. */
   onReadScrollChange: (top: number) => void;
+  /**
+   * RAISE-85: Read mode task-list checkbox toggle. Receives the full new
+   * markdown source with the clicked line already flipped; App.tsx writes
+   * it to disk and realigns the tab's saved baseline (silent save — the
+   * tab stays clean). Resolves `false` if the save couldn't happen
+   * (untitled / read-only), so ReadView can revert the optimistic flip.
+   */
+  onReadToggleTask: (newContent: string) => Promise<boolean>;
   sourceRef: Ref<SourceEditorHandle>;
   wysiwygRef: Ref<WysiwygEditorHandle>;
   /** Monaco theme id (gruvbox-{contrast}-{mode}) for the source editor. */
@@ -54,6 +62,7 @@ export function EditorContainer({
   onModeChange,
   onCursorChange,
   onReadScrollChange,
+  onReadToggleTask,
   sourceRef,
   wysiwygRef,
   monacoThemeId,
@@ -86,6 +95,7 @@ export function EditorContainer({
             markdownPath={tab.path}
             initialScrollTop={tab.readScrollPosition}
             onScrollChange={onReadScrollChange}
+            onToggleTask={onReadToggleTask}
           />
         ) : mode === 'wysiwyg' ? (
           // Re-key on tab id + load epoch so a tab switch OR a re-open of
