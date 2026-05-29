@@ -1187,28 +1187,36 @@ export function WysiwygEditor({
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+    // RAISE-38 / RAISE-87: modifier-click on a link opens it in the user's
+    // default external browser. Handled on MOUSEDOWN (not click) because
+    // ProseMirror moves the selection on mousedown — before any click event
+    // fires — so the previous click-time `preventDefault` was too late and
+    // the modifier-click left a stray line-wide NodeSelection (the "purple
+    // box across the whole line", RAISE-87). This listener is registered in
+    // the capture phase on `container`, an ancestor of the editor's
+    // contentEditable, so it runs before ProseMirror's own mousedown handler;
+    // `stopPropagation` then keeps the event from reaching ProseMirror at all
+    // and `preventDefault` blocks the native text selection. We open the URL
+    // here as well, since the click that used to do it is no longer a
+    // reliable hook once the default is prevented. Plain clicks are untouched
+    // and fall through to ProseMirror's default caret positioning.
+    const handleMouseDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const anchor = target.closest('a');
+      if (!anchor || !container.contains(anchor)) return;
+      const isMac = window.api.platform === 'darwin';
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+      if (!modifier) return;
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.api.openExternal(href);
+    };
     const handleClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      // RAISE-38: modifier-click on a link opens it in the user's
-      // default external browser. Plain clicks fall through to
-      // ProseMirror's default (caret positioning inside the link
-      // text), matching the convention used by VS Code, iA Writer,
-      // and most other editors with contentEditable links.
-      const anchor = target.closest('a');
-      if (anchor && container.contains(anchor)) {
-        const isMac = window.api.platform === 'darwin';
-        const modifier = isMac ? e.metaKey : e.ctrlKey;
-        if (modifier) {
-          const href = anchor.getAttribute('href');
-          if (href) {
-            e.preventDefault();
-            e.stopPropagation();
-            window.api.openExternal(href);
-            return;
-          }
-        }
-      }
       if (target.closest('[data-image-tooltip]')) return; // tooltip clicks
       if (target.tagName === 'IMG' && container.contains(target)) {
         // The NodeView writes the original markdown src to
@@ -1233,10 +1241,12 @@ export function WysiwygEditor({
       if (e.key === 'Escape') setImageTooltip(null);
     };
     const handleScroll = (): void => setImageTooltip(null);
+    container.addEventListener('mousedown', handleMouseDown, true);
     container.addEventListener('click', handleClick);
     container.addEventListener('scroll', handleScroll);
     document.addEventListener('keydown', handleKey);
     return () => {
+      container.removeEventListener('mousedown', handleMouseDown, true);
       container.removeEventListener('click', handleClick);
       container.removeEventListener('scroll', handleScroll);
       document.removeEventListener('keydown', handleKey);
