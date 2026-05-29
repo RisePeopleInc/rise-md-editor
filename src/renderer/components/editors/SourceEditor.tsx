@@ -6,7 +6,7 @@ import {
   type Ref,
 } from 'react';
 import { Editor, type OnMount } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { getMarkdownFromClipboard } from '../../state/clipboardPaste';
 import {
   firstImageItem,

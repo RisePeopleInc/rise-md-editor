@@ -17,7 +17,22 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "useDefineForClassFields": true,
-    "outDir": "./out/types/web"
+    "outDir": "./out/types/web",
+    // RAISE-82: we import Monaco's core editor API (`editor.api`) instead of
+    // the all-languages `monaco-editor` barrel to keep ~80 unused language
+    // packs out of the bundle. TypeScript can't resolve the deep specifier on
+    // its own — it treats the `.api` suffix as a file extension, strips it,
+    // and looks for a non-existent `editor` module (monaco's package
+    // `exports` wildcard maps the subpath verbatim with no `types` condition
+    // for TS to follow). This `paths` alias points the specifier at the
+    // sibling `editor.api.d.ts` for *type resolution only*; Vite resolves the
+    // runtime `.js` independently via the package `exports` map, so the
+    // bundler behaviour is unchanged.
+    "paths": {
+      "monaco-editor/esm/vs/editor/editor.api": [
+        "./node_modules/monaco-editor/esm/vs/editor/editor.api.d.ts"
+      ]
+    }
   },
   "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
 }
