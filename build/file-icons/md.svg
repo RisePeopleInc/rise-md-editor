@@ -20,11 +20,11 @@
       The top-right corner is replaced by a 150px dog-ear fold.
     Dog-ear: a triangular fold cut from the top-right corner; the
       under-side shows as a slightly darker fold flap.
-    Rise mark: 55% of page width = 330 x 330, centred on the page body
-      (page centre x = 512; vertical centre nudged down to 545 to sit
-      below the dog-ear). Source mark is 24x24 — scale factor
-      330 / 24 = 13.75. Sized large so it stays the dominant element at
-      16px, where a smaller mark reads as an indistinct dot.
+    Rise mark: 66% of page width = 396 x 396, centred on the page body
+      (page centre x = 512; vertical centre 520, just below the
+      dog-ear). Source mark is 24x24 — scale factor 396 / 24 = 16.5.
+      Sized large so the rings stay the dominant, recognizable element
+      at 16px, where a smaller mark reads as an indistinct dot.
 
   To regenerate md.icns / md.ico after editing this file, run
   scripts/generate-file-icons.sh (see README "File-type icons").
@@ -52,8 +52,8 @@
        Q 212 100 240 100
        Z"
     fill="#ffffff"
-    stroke="#b3c0d0"
-    stroke-width="20"
+    stroke="#8b97a9"
+    stroke-width="26"
     stroke-linejoin="round" />
   <!--
     Dog-ear fold flap: the folded-over triangle at the top-right.
@@ -65,15 +65,17 @@
        L 812 250
        Z"
     fill="#eef2f6"
-    stroke="#b3c0d0"
-    stroke-width="20"
+    stroke="#8b97a9"
+    stroke-width="26"
     stroke-linejoin="round" />
   <!--
     Rise mark: orange double-ring, the two canonical paths from
-    build/icon.svg, scaled 13.75x and centred on the page body.
-    Origin x = 512 - 165 = 347; y = 545 - 165 = 380.
+    build/icon.svg, scaled 16.5x and centred on the page body.
+    66% of the 600px page width = 396px; origin x = 512 - 198 = 314,
+    y = 520 - 198 = 322. Sized large so the rings stay the dominant,
+    recognizable element at 16px.
   -->
-  <g transform="translate(347, 380) scale(13.75)">
+  <g transform="translate(314, 322) scale(16.5)">
     <path fill-rule="evenodd" clip-rule="evenodd"
           d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20Z"
           fill="#FFA31D" />
