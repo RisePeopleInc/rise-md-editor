@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **Files opened from the OS now open in Edit mode, not Read mode** ([RAISE-84](https://risepeople.atlassian.net/browse/RAISE-84)). Double-clicking a `.md` file in Finder / Explorer, using "Open With → Rise MD Editor", or launching via a file association used to open the file in Read mode (the RAISE-60 default); they now open in the same Edit (WYSIWYG) mode as every other open path (sidebar click, drag-drop, `File → Open…`, recents, `File → New`). User feedback was that the common intent when opening a file from the desktop is to edit it, not just read it, so a single consistent default is less surprising than branching on launch context. Already-open tabs are unaffected — re-opening a file keeps whatever mode the tab is currently in. Mechanically this removes the `fromOs` flag that was threaded through the `open-path` menu-action payload; `loadFile`'s `initialMode` argument is retained (defaulting to `'wysiwyg'`) so a future "open in Read mode" preference can re-introduce a non-default mode without re-plumbing.
+
 ## [1.0.0] — 2026-05-22
 
 First stable release. Brings the toolchain current and zeroes out the public Dependabot dashboard via the four follow-up tickets spawned from the post-RAISE-57 triage (RAISE-67/68/69/70). Ships the open-source flip with MIT licensing per RAISE-57. Cleans up a batch of UX bugs surfaced during the v0.1.4 smoke-test pass (RAISE-59 / 66 / 72 / 73 / 74 / 75 / 76).

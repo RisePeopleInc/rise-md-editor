@@ -121,11 +121,12 @@ export interface FileContextValue {
    * active. Returns the tab id so callers can attach UI state — e.g. the
    * "created from template" hint banner — keyed by id.
    *
-   * `initialMode` (RAISE-60) sets the starting editor mode for newly-
-   * created tabs only. If a tab for this path already exists, its
-   * current mode is preserved — re-opening a file the user has been
-   * editing in WYSIWYG via, say, a Finder double-click shouldn't yank
-   * them back to Read. Defaults to `'wysiwyg'`.
+   * `initialMode` optionally overrides the starting editor mode for
+   * newly-created tabs. If a tab for this path already exists, its
+   * current mode is preserved regardless. Defaults to `'wysiwyg'`.
+   * (As of RAISE-84 every open path uses the Edit default — no caller
+   * passes a non-default mode today — but the hook is kept for
+   * flexibility, e.g. a future "open in Read mode" preference.)
    */
   loadFile: (path: string, content: string, initialMode?: EditorMode) => string;
   newFile: () => void;
@@ -233,13 +234,14 @@ function makeTab(path: string | null, content: string, initialMode: EditorMode =
     wysiwygScrollPosition: 0,
     readScrollPosition: 0,
     wysiwygCursorOffset: 0,
-    // RAISE-7: WYSIWYG is the welcoming default — both new files and
-    // most freshly opened files land in formatted mode. RAISE-60
-    // introduced one exception: files opened via the OS (Finder double-
-    // click, "Open With" → Rise MD Editor) start in Read mode. The
-    // `initialMode` arg is plumbed through `loadFile` for that case;
-    // all other call sites get the WYSIWYG default. Users can flip
-    // per tab via the mode switcher (or Cmd+1/2/3/4, or Cmd+\ to cycle).
+    // RAISE-7: WYSIWYG is the welcoming default — new files and freshly
+    // opened files land in formatted (Edit) mode. RAISE-60 once carved
+    // out an exception (OS-launched files started in Read mode), but
+    // RAISE-84 removed it: every open path now takes the WYSIWYG default.
+    // The `initialMode` arg is still plumbed through `loadFile` for
+    // flexibility (e.g. a future "open in Read mode" preference) but no
+    // caller overrides it today. Users can flip per tab via the mode
+    // switcher (or Cmd+1/2/3/4, or Cmd+\ to cycle).
     editorMode: initialMode,
     loadEpoch: 0,
   };
@@ -384,10 +386,11 @@ export function FileProvider({ children }: FileProviderProps) {
       // the same tick can't both miss an existing tab and create duplicates.
       const existing = tabsRef.current.find((t) => t.path === nextPath);
       if (existing) {
-        // RAISE-60: deliberately do NOT touch `editorMode` on an existing
-        // tab. If the user has been working in WYSIWYG and the OS re-opens
-        // the file (e.g. Finder double-click), they keep their mode. Read
-        // mode is only the *initial* choice for fresh tabs.
+        // Deliberately do NOT touch `editorMode` on an existing tab. If
+        // the user has switched the tab to Read or Code and the file gets
+        // re-opened (e.g. a Finder double-click, or a recents click), they
+        // keep their current mode — `initialMode` only ever applies to a
+        // freshly created tab.
         writeTabs(
           tabsRef.current.map((t) =>
             t.id === existing.id
