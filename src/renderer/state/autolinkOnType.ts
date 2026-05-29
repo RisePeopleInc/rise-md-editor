@@ -56,7 +56,13 @@ import { looksLikeFilenameExtension, looksLikeKnownTld } from './filenameExtensi
  * remove the mark. No oscillation.
  */
 
-const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
+// Exported so other plugins / commands can tag a transaction with this
+// meta (set to `true`) to opt OUT of autolink re-processing — e.g.
+// RAISE-86's link-popover Remove / Edit, which strip or replace a link
+// mark and must NOT have the autolinker immediately re-link the (still
+// URL-shaped) text in the same dispatch. The plugin's own mark-adding
+// transactions already use this to avoid an infinite loop.
+export const PLUGIN_KEY = new PluginKey('raise-autolink-on-type');
 
 // URL pattern: explicit http(s) scheme + greedy run of
 // non-whitespace chars that excludes a few markdown-meaningful

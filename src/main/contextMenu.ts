@@ -1,9 +1,4 @@
-import {
-  BrowserWindow,
-  clipboard,
-  Menu,
-  MenuItemConstructorOptions,
-} from 'electron';
+import { BrowserWindow, clipboard, Menu, MenuItemConstructorOptions } from 'electron';
 import type { MenuAction } from './menu';
 
 /**
@@ -30,11 +25,7 @@ import type { MenuAction } from './menu';
  * plain text input (cut/copy/paste/select-all), distinct mode for
  * future flexibility (e.g., a "Format YAML" item).
  */
-export type EditorContextMode =
-  | 'wysiwyg'
-  | 'source'
-  | 'preview'
-  | 'frontmatter';
+export type EditorContextMode = 'wysiwyg' | 'source' | 'preview' | 'frontmatter';
 
 export interface ShowEditorContextMenuPayload {
   mode: EditorContextMode;
@@ -92,7 +83,8 @@ export function showEditorContextMenu(
   // there's actual plain text to insert.
   const canPastePlain = clipboard.availableFormats().includes('text/plain');
   const platform = process.platform;
-  const pastePlainLabel = platform === 'darwin' ? 'Paste and Match Style' : 'Paste without Formatting';
+  const pastePlainLabel =
+    platform === 'darwin' ? 'Paste and Match Style' : 'Paste without Formatting';
 
   // The menu surfaces only the items that would do something useful in
   // the current state. Items that would be greyed out or silently no-op
@@ -181,23 +173,41 @@ export function showEditorContextMenu(
         click: () => dispatch('context-copy-as-markdown'),
       },
     );
-    // RAISE-38: link menu item — always visible in WYSIWYG. The
-    // same `context-add-link` action surfaces the in-app link
-    // prompt; the modal decides whether it's adding or editing
-    // based on whether the cursor is on an existing link mark.
+    // RAISE-38 / RAISE-86: link menu items.
     //
-    //   - Right-click on an existing link → "Edit Link…" (modal
-    //     pre-fills with the link's text and href).
-    //   - Right-click anywhere else (with or without a text
-    //     selection) → "Add Link…":
+    //   - Right-click *on an existing link* → the RAISE-86 trio:
+    //     **Open Link** (system browser), **Edit Link** (surfaces the
+    //     link popover's inline URL field), **Remove Link** (strips the
+    //     mark, keeps the text). Each dispatches its own action; the
+    //     renderer resolves the link from the caret position (the
+    //     right-click handler having moved the caret onto the link).
+    //   - Right-click *anywhere else* (with or without a text
+    //     selection) → "Add Link…", which opens the in-app link prompt:
     //       - With selection: wraps the selection in a link.
     //       - Without selection: opens the modal with both fields
     //         empty so the user can type both — same flow as
     //         clicking the toolbar's link button on a bare caret.
-    items.push({
-      label: payload.isOnLink ? 'Edit Link…' : 'Add Link…',
-      click: () => dispatch('context-add-link'),
-    });
+    if (payload.isOnLink) {
+      items.push(
+        {
+          label: 'Open Link',
+          click: () => dispatch('context-open-link'),
+        },
+        {
+          label: 'Edit Link…',
+          click: () => dispatch('context-edit-link'),
+        },
+        {
+          label: 'Remove Link',
+          click: () => dispatch('context-remove-link'),
+        },
+      );
+    } else {
+      items.push({
+        label: 'Add Link…',
+        click: () => dispatch('context-add-link'),
+      });
+    }
   }
 
   const menu = Menu.buildFromTemplate(items);

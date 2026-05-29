@@ -16,8 +16,15 @@ import {
   parserCtx,
   serializerCtx,
 } from '@milkdown/core';
-import { TextSelection } from '@milkdown/prose/state';
-import { Fragment, Slice, type Node as ProseNode, type ResolvedPos } from '@milkdown/prose/model';
+import { Plugin, TextSelection } from '@milkdown/prose/state';
+import {
+  Fragment,
+  Slice,
+  type Mark,
+  type MarkType,
+  type Node as ProseNode,
+  type ResolvedPos,
+} from '@milkdown/prose/model';
 import { commonmark, insertImageCommand } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
@@ -28,8 +35,9 @@ import { tooltipFactory } from '@milkdown/plugin-tooltip';
 import { slashFactory } from '@milkdown/plugin-slash';
 import { nord } from '@milkdown/theme-nord';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
-import { callCommand } from '@milkdown/utils';
+import { $prose, callCommand } from '@milkdown/utils';
 import { Toolbar, type ToolbarHandle } from './Toolbar';
+import { LinkPopover } from './LinkPopover';
 import {
   firstImageItem,
   pickImageFiles,
@@ -39,11 +47,7 @@ import {
 } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
 import { getMarkdownFromClipboard, unescapeHeadingNumberDot } from '../../state/clipboardPaste';
-import {
-  computeInsertedPath,
-  getTreeDragSourcePath,
-  isImagePath,
-} from '../../state/sidebarDrop';
+import { computeInsertedPath, getTreeDragSourcePath, isImagePath } from '../../state/sidebarDrop';
 import {
   commentDecorationsPlugin,
   unescapeCommentDelimiters,
@@ -52,7 +56,7 @@ import {
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import { joinFrontmatter, splitFrontmatter, type FrontmatterSplit } from '../../state/markdown';
-import { autolinkOnTypePlugin } from '../../state/autolinkOnType';
+import { autolinkOnTypePlugin, PLUGIN_KEY as autolinkPluginKey } from '../../state/autolinkOnType';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { stripBrowserAutolinkPlugin } from '../../state/stripBrowserAutolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
@@ -88,6 +92,27 @@ export interface WysiwygEditorHandle {
    * markdown / Turndown / image branches.
    */
   pastePlain: (text: string) => void;
+  /**
+   * RAISE-86: open the link the caret is currently inside in the
+   * user's default external browser. Routed from the WYSIWYG context
+   * menu's "Open Link" item; the popover's Open button calls the
+   * internal handler directly. No-op when the caret isn't on a link.
+   */
+  openLink: () => void;
+  /**
+   * RAISE-86: open the link popover's inline edit field for the link
+   * the caret is currently inside. Routed from the context menu's
+   * "Edit Link" item — surfaces the same edit UI the popover's Edit
+   * button shows. No-op when the caret isn't on a link.
+   */
+  editLink: () => void;
+  /**
+   * RAISE-86: strip the link mark the caret is currently inside,
+   * keeping the visible text. Routed from the context menu's "Remove
+   * Link" item; the popover's Remove button calls the internal
+   * handler directly. No-op when the caret isn't on a link.
+   */
+  removeLink: () => void;
 }
 
 interface WysiwygEditorProps {
@@ -233,6 +258,94 @@ function flattenToInline(parsed: ProseNode, schema: ProseNode['type']['schema'])
   return Fragment.from(inlineNodes);
 }
 
+/**
+ * RAISE-86: the contiguous span a link mark covers, plus its href.
+ * Resolved from a collapsed selection so the popover can anchor to
+ * the whole link (not just the click point) and so Edit / Remove can
+ * select the full range before running their commands.
+ */
+interface LinkMarkRange {
+  from: number;
+  to: number;
+  href: string;
+  mark: Mark;
+}
+
+/**
+ * RAISE-86: find the contiguous range of a link mark covering `$pos`,
+ * returning its bounds + href. Same prosemirror-utils "getMarkRange"
+ * recipe inlined in Toolbar.tsx (`findLinkMarkRange`) — re-implemented
+ * here rather than shared because the two call sites want slightly
+ * different return shapes (the toolbar wants the `Mark`; we also want
+ * the resolved `href`), and the dependency is one small pure walk.
+ *
+ * Walks the parent textblock's children outward from the position
+ * until it hits a sibling that no longer carries the mark.
+ */
+function resolveLinkMarkRange($pos: ResolvedPos, type: MarkType): LinkMarkRange | null {
+  if (!$pos.parent.isTextblock) return null;
+  // Look at the text node on BOTH sides of the position. A collapsed
+  // caret sitting at the boundary between a link and plain text
+  // resolves `childAfter` to the plain text — so we also check
+  // `childBefore` and prefer whichever carries the link mark. This is
+  // what makes "click at the end of a link" still detect the link.
+  const after = $pos.parent.childAfter($pos.parentOffset);
+  const before = $pos.parent.childBefore($pos.parentOffset);
+  const pick = (() => {
+    if (after.node?.marks.some((m) => m.type === type)) return after;
+    if (before.node?.marks.some((m) => m.type === type)) return before;
+    return null;
+  })();
+  if (!pick || !pick.node) return null;
+  const mark = pick.node.marks.find((m) => m.type === type);
+  if (!mark) return null;
+
+  let startIndex = pick.index;
+  let startPos = $pos.start() + pick.offset;
+  while (startIndex > 0 && mark.isInSet($pos.parent.child(startIndex - 1).marks)) {
+    startIndex -= 1;
+    startPos -= $pos.parent.child(startIndex).nodeSize;
+  }
+  let endPos = startPos + pick.node.nodeSize;
+  let endIndex = pick.index + 1;
+  while (endIndex < $pos.parent.childCount && mark.isInSet($pos.parent.child(endIndex).marks)) {
+    endPos += $pos.parent.child(endIndex).nodeSize;
+    endIndex += 1;
+  }
+  const href = mark.attrs['href'];
+  if (typeof href !== 'string' || !href) return null;
+  return { from: startPos, to: endPos, href, mark };
+}
+
+/**
+ * RAISE-86: popover state. `href` / `from` / `to` describe the link
+ * mark the caret is currently inside; `x` / `y` are the viewport-fixed
+ * anchor (link's bounding rect, bottom-left + a small gap). `null`
+ * means no link under the caret → popover hidden.
+ */
+interface LinkPopoverState {
+  href: string;
+  from: number;
+  to: number;
+  x: number;
+  /** Anchor's bottom edge — the popover's default (below-link) top. */
+  y: number;
+  /** Anchor's top edge — lets the popover flip ABOVE the link when
+   *  placing it below would overflow the viewport bottom (RAISE-86 #4). */
+  anchorTop: number;
+  /**
+   * RAISE-86: when true the popover opens straight into its inline
+   * edit field rather than the read view. Set by the context menu's
+   * "Edit Link" route (and bumped via `editNonce` so a repeat request
+   * on the same link re-opens the field). Plain click / arrow-key
+   * detection leaves it false.
+   */
+  startEditing?: boolean;
+  /** Forces LinkPopover to remount when an Edit request repeats on the
+   *  same link (so the edit field re-opens even if it was just closed). */
+  editNonce?: number;
+}
+
 interface MilkdownBodyProps {
   ref?: Ref<WysiwygEditorHandle>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -315,6 +428,61 @@ function MilkdownBody({
   // ref instead of capturing the prop.
   const markdownPathRef = useRef(markdownPath);
   markdownPathRef.current = markdownPath;
+
+  // RAISE-86: link popover. `linkPopover` drives the floating popover;
+  // the `$prose` detection plugin (registered in the `.use(...)` chain
+  // below) computes the cursor-in-link state after every transaction
+  // and reports it through `setLinkPopoverRef` — a ref so the plugin's
+  // long-lived `update(view)` closure always reaches the latest setter
+  // (same pattern as the image handlers above). Click, arrow-key, and
+  // any other selection change all flow through the same `update`.
+  const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
+  const setLinkPopoverRef = useRef(setLinkPopover);
+  setLinkPopoverRef.current = setLinkPopover;
+  // Mirror the popover state into a ref so the imperative handle's
+  // link methods (openLink / editLink / removeLink), registered once,
+  // can read the live `from`/`to`/`href` without a stale closure.
+  const linkPopoverRef = useRef<LinkPopoverState | null>(null);
+  linkPopoverRef.current = linkPopover;
+
+  // RAISE-86 (#2 + #3): track the last pointer button and the
+  // modifier-held state. `lastWasRightClickRef` lets the link-detection
+  // plugin skip the popover for right-clicks (the context menu handles
+  // those — showing both is redundant). The `data-modifier-held`
+  // attribute drives a pointer cursor on ⌘/Ctrl-hover over a link (see
+  // milkdown.css), signalling the "⌘-click to open" affordance.
+  const lastWasRightClickRef = useRef(false);
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const isMac = window.api.platform === 'darwin';
+    const setModifier = (held: boolean) => {
+      if (held) container.setAttribute('data-modifier-held', '');
+      else container.removeAttribute('data-modifier-held');
+    };
+    const onMouseDownCapture = (e: MouseEvent) => {
+      lastWasRightClickRef.current = e.button === 2;
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Keyboard navigation isn't a right-click — let the popover show.
+      lastWasRightClickRef.current = false;
+      if (isMac ? e.key === 'Meta' : e.key === 'Control') setModifier(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (isMac ? e.key === 'Meta' : e.key === 'Control') setModifier(false);
+    };
+    const onBlur = () => setModifier(false);
+    container.addEventListener('mousedown', onMouseDownCapture, true);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      container.removeEventListener('mousedown', onMouseDownCapture, true);
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [scrollContainerRef]);
 
   useEditor((root) =>
     Editor.make()
@@ -800,7 +968,74 @@ function MilkdownBody({
       // round-trips with the literal characters intact. Code
       // blocks and inline-code text are skipped. See
       // state/commentDecorations.ts.
-      .use(commentDecorationsPlugin),
+      .use(commentDecorationsPlugin)
+      // RAISE-86: cursor-in-link detection driving the link popover.
+      // A `$prose` plugin whose `view().update(view)` runs after every
+      // transaction — covering plain click, arrow-key cursor movement,
+      // and programmatic selection changes alike (the ACs call out
+      // both click and arrow-key entry). When the selection is
+      // collapsed and inside a link mark, we resolve the mark's full
+      // range, read its href, and anchor the popover to the link
+      // element's bounding rect; otherwise we clear it. The setter is
+      // reached through `setLinkPopoverRef` (a ref) so this closure —
+      // created once at editor construction — always sees the live
+      // React setter rather than a stale one. Modifier-clicks never
+      // reach here: RAISE-87's capture-phase mousedown handler stops
+      // the event before ProseMirror moves the selection, so no
+      // transaction fires and the popover stays hidden.
+      .use(
+        $prose(
+          () =>
+            new Plugin({
+              view: () => ({
+                update: (view) => {
+                  const setPopover = setLinkPopoverRef.current;
+                  // RAISE-86 (#2): a right-click resolves to the context
+                  // menu (Open / Edit / Remove Link), not the popover — so
+                  // skip showing it. The flag is reset by the next
+                  // left-click or keypress (see the tracking effect).
+                  if (lastWasRightClickRef.current) {
+                    setPopover(null);
+                    return;
+                  }
+                  const { selection } = view.state;
+                  // Only a collapsed caret triggers the popover — a
+                  // text selection (e.g. the user dragging across a
+                  // link to copy it) shouldn't pop the UI.
+                  if (!selection.empty) {
+                    setPopover(null);
+                    return;
+                  }
+                  const linkType = view.state.schema.marks['link'];
+                  if (!linkType) {
+                    setPopover(null);
+                    return;
+                  }
+                  const range = resolveLinkMarkRange(selection.$from, linkType);
+                  if (!range) {
+                    setPopover(null);
+                    return;
+                  }
+                  // Anchor to the link's on-screen box. `coordsAtPos`
+                  // gives caret coords at the mark boundaries; using
+                  // the start's `left` and the end's `bottom` places
+                  // the popover just below the link's start. Clamp the
+                  // start coord so a link wrapping to a second line
+                  // doesn't push the popover off-screen-left.
+                  const startCoords = view.coordsAtPos(range.from);
+                  setPopover({
+                    href: range.href,
+                    from: range.from,
+                    to: range.to,
+                    x: Math.max(8, startCoords.left),
+                    y: startCoords.bottom + 6,
+                    anchorTop: startCoords.top,
+                  });
+                },
+              }),
+            }),
+        ),
+      ),
   );
 
   // Bridge the imperative handle to Milkdown's history commands. The menu's
@@ -813,6 +1048,114 @@ function MilkdownBody({
   // because `get()` returns the current value at call-site whereas the
   // plugin needs lazy access from inside a future event handler.
   editorInstanceRef.current = get() ?? null;
+
+  // RAISE-86: link popover actions. All three operate on the popover's
+  // captured `from`/`to` range (read live from `linkPopoverRef` so the
+  // imperative-handle / popover-callback closures don't go stale).
+  //
+  // `dismissLinkPopover` clears the state and refocuses the editor so
+  // the caret stays put after the popover closes.
+  const dismissLinkPopover = useCallback(() => {
+    setLinkPopover(null);
+  }, []);
+
+  const handleLinkOpen = useCallback(() => {
+    const state = linkPopoverRef.current;
+    if (state) window.api.openExternal(state.href);
+    setLinkPopover(null);
+  }, []);
+
+  // Apply an edited href. Empty input removes the link (keep text);
+  // otherwise we replace the captured range's link mark with a fresh
+  // one carrying the new href, preserving any surrounding marks
+  // (bold / italic) — same single-transaction shape Toolbar.tsx uses
+  // for its link edits. `updateLinkCommand` would only touch the
+  // mark under the *current* selection, which is a collapsed caret
+  // here, so we drive the transaction directly against the range.
+  const handleLinkEdit = useCallback(
+    (rawHref: string) => {
+      const state = linkPopoverRef.current;
+      if (!state) return;
+      const next = rawHref.trim();
+      const editor = get();
+      if (!editor) return;
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const linkType = view.state.schema.marks['link'];
+        if (!linkType) return;
+        const { from, to } = state;
+        // setMeta(autolinkPluginKey) opts this transaction OUT of the
+        // autolink-on-type re-processing (RAISE-86 fix): without it, the
+        // autolinker re-links the still-URL-shaped text in the SAME
+        // dispatch — so Remove appeared to do nothing and an edited href
+        // reverted to the text-derived original.
+        if (!next) {
+          // Empty URL → treat as Remove: strip the mark, keep text.
+          const tr = view.state.tr.removeMark(from, to, linkType);
+          tr.setMeta(autolinkPluginKey, true);
+          view.dispatch(tr);
+        } else {
+          const tr = view.state.tr;
+          tr.removeMark(from, to, linkType);
+          tr.addMark(from, to, linkType.create({ href: next }));
+          tr.setMeta(autolinkPluginKey, true);
+          view.dispatch(tr);
+        }
+        view.focus();
+      });
+      setLinkPopover(null);
+    },
+    [get],
+  );
+
+  const handleLinkRemove = useCallback(() => {
+    const state = linkPopoverRef.current;
+    if (!state) return;
+    const editor = get();
+    if (!editor) return;
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const linkType = view.state.schema.marks['link'];
+      if (!linkType) return;
+      // Opt out of autolink re-processing (see handleLinkEdit) so the
+      // stripped link isn't immediately re-linked from its URL-shaped text.
+      const tr = view.state.tr.removeMark(state.from, state.to, linkType);
+      tr.setMeta(autolinkPluginKey, true);
+      view.dispatch(tr);
+      view.focus();
+    });
+    setLinkPopover(null);
+  }, [get]);
+
+  // RAISE-86: context-menu "Edit Link" → re-anchor the popover (in
+  // case it wasn't already showing) and force it into edit mode. The
+  // right-click handler has already moved the caret onto the link, so
+  // we resolve the link range from the live selection here. `editNonce`
+  // remounts LinkPopover so the edit field re-opens even on a repeat
+  // request for the same link.
+  const requestLinkEdit = useCallback(() => {
+    const editor = get();
+    if (!editor) return;
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const linkType = view.state.schema.marks['link'];
+      if (!linkType) return;
+      const range = resolveLinkMarkRange(view.state.selection.$from, linkType);
+      if (!range) return;
+      const startCoords = view.coordsAtPos(range.from);
+      setLinkPopover({
+        href: range.href,
+        from: range.from,
+        to: range.to,
+        x: Math.max(8, startCoords.left),
+        y: startCoords.bottom + 6,
+        anchorTop: startCoords.top,
+        startEditing: true,
+        editNonce: Date.now(),
+      });
+    });
+  }, [get]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -943,8 +1286,40 @@ function MilkdownBody({
           view.focus();
         });
       },
+      // RAISE-86: context-menu link routes. The right-click handler
+      // (below) moves the caret onto the link before the menu pops, so
+      // these resolve the link from the live selection — independent of
+      // whether the popover happens to be showing.
+      openLink: () => {
+        const editor = get();
+        if (!editor) return;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const linkType = view.state.schema.marks['link'];
+          if (!linkType) return;
+          const range = resolveLinkMarkRange(view.state.selection.$from, linkType);
+          if (range) window.api.openExternal(range.href);
+        });
+      },
+      editLink: () => requestLinkEdit(),
+      removeLink: () => {
+        const editor = get();
+        if (!editor) return;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const linkType = view.state.schema.marks['link'];
+          if (!linkType) return;
+          const range = resolveLinkMarkRange(view.state.selection.$from, linkType);
+          if (!range) return;
+          const tr = view.state.tr.removeMark(range.from, range.to, linkType);
+          tr.setMeta(autolinkPluginKey, true);
+          view.dispatch(tr);
+          view.focus();
+        });
+        setLinkPopover(null);
+      },
     }),
-    [get, scrollContainerRef, toolbarRef],
+    [get, scrollContainerRef, toolbarRef, requestLinkEdit],
   );
 
   // RAISE-28: right-click context menu. Lives in MilkdownBody (not the
@@ -966,6 +1341,15 @@ function MilkdownBody({
       if (!target) return;
       if (target.closest('.rise-md-frontmatter')) return;
       e.preventDefault();
+
+      // RAISE-86 (#2): mark this as a right-click so the link-detection
+      // plugin suppresses the popover when the caret-move below lands on
+      // a link — the context menu (Open / Edit / Remove Link) is the
+      // right-click affordance, not the popover. Set on the `contextmenu`
+      // event itself rather than the mousedown button, so it's robust to
+      // Ctrl-click / trackpad right-click (which can report button 0).
+      // Reset by the next left-click or keypress.
+      lastWasRightClickRef.current = true;
 
       const sel = window.getSelection();
       const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
@@ -1029,7 +1413,62 @@ function MilkdownBody({
     };
   }, [scrollContainerRef]);
 
-  return <Milkdown />;
+  // RAISE-86: dismiss the link popover on Escape, click-outside, and
+  // container scroll — mirrors the image-tooltip dismissal in the
+  // outer WysiwygEditor. (The "caret leaves the link" case is handled
+  // by the `$prose` plugin's `update` clearing the state, so it isn't
+  // duplicated here.) Only wired while a popover is showing so the
+  // listeners aren't live for the common no-link case.
+  useEffect(() => {
+    if (!linkPopover) return;
+    const container = scrollContainerRef.current;
+    const handleKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setLinkPopover(null);
+    };
+    const handleScroll = (): void => setLinkPopover(null);
+    const handlePointerDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      // Clicks inside the popover are handled by the popover itself.
+      if (target?.closest('[data-link-popover]')) return;
+      setLinkPopover(null);
+    };
+    document.addEventListener('keydown', handleKey);
+    container?.addEventListener('scroll', handleScroll);
+    // Capture phase so we see the click before ProseMirror — but we
+    // intentionally do NOT preventDefault, so a click elsewhere still
+    // moves the caret (and the `$prose` plugin re-evaluates the new
+    // position, re-showing the popover if it landed on another link).
+    document.addEventListener('mousedown', handlePointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      container?.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('mousedown', handlePointerDown, true);
+    };
+  }, [linkPopover, scrollContainerRef]);
+
+  return (
+    <>
+      <Milkdown />
+      {linkPopover && (
+        <LinkPopover
+          // Remount on link change (href + range) AND on a repeated
+          // context-menu Edit request (editNonce) so the inline edit
+          // field re-opens cleanly each time.
+          key={`${linkPopover.from}-${linkPopover.to}-${linkPopover.editNonce ?? ''}`}
+          href={linkPopover.href}
+          x={linkPopover.x}
+          y={linkPopover.y}
+          anchorTop={linkPopover.anchorTop}
+          platform={window.api.platform}
+          initialEditing={linkPopover.startEditing}
+          onOpen={handleLinkOpen}
+          onEdit={handleLinkEdit}
+          onRemove={handleLinkRemove}
+          onDismiss={dismissLinkPopover}
+        />
+      )}
+    </>
+  );
 }
 
 export function WysiwygEditor({
@@ -1132,12 +1571,9 @@ export function WysiwygEditor({
     onChangeRef.current(joinFrontmatter(nextFrontmatter, nextBody));
   }, []);
 
-  const emitBaseline = useCallback(
-    (nextFrontmatter: string | null, nextBody: string) => {
-      onBaselineRef.current?.(joinFrontmatter(nextFrontmatter, nextBody));
-    },
-    [],
-  );
+  const emitBaseline = useCallback((nextFrontmatter: string | null, nextBody: string) => {
+    onBaselineRef.current?.(joinFrontmatter(nextFrontmatter, nextBody));
+  }, []);
 
   const handleFrontmatterChange = useCallback(
     (next: string) => {
