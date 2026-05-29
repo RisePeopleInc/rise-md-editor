@@ -64,6 +64,15 @@ publish:
 # installer registry entries (per-user `HKCU`, no admin elevation
 # needed — matches VS Code's default), and the Linux `.desktop`
 # MimeType field from this one block.
+#
+# File icon (RAISE-65): each entry points at `build/file-icons/md`
+# (extension-less). electron-builder appends `.icns` on macOS and
+# `.ico` on Windows automatically, so Finder / Explorer show the
+# Rise-branded document icon (orange double-ring on a page) for these
+# files. This is the DOCUMENT icon, distinct from the APP icon
+# (`build/icon.png`). Regenerate the binaries from the SVG source with
+# `scripts/generate-file-icons.sh` after editing
+# `build/file-icons/md.svg`.
 # ---------------------------------------------------------------------------
 fileAssociations:
   - ext: md
@@ -72,36 +81,44 @@ fileAssociations:
     role: Editor
     rank: Default
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: markdown
     name: Markdown Document
     description: Markdown source file
     role: Editor
     rank: Default
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: mdown
     name: Markdown Document
     role: Editor
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: mkd
     name: Markdown Document
     role: Editor
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: mkdn
     name: Markdown Document
     role: Editor
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: mdwn
     name: Markdown Document
     role: Editor
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: mdtxt
     name: Markdown Document
     role: Editor
     mimeType: text/markdown
+    icon: build/file-icons/md
   - ext: mdtext
     name: Markdown Document
     role: Editor
     mimeType: text/markdown
+    icon: build/file-icons/md
 
 # ---------------------------------------------------------------------------
 # Icons live in build/. icon.svg is the design source (Rise mark on a
