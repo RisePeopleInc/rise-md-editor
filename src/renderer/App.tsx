@@ -1232,7 +1232,11 @@ function AppContent() {
               requireSavedPath={file.requireSavedPath}
             />
           ) : (
-            <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
+            <WelcomeScreen
+              onNewFile={handleNewFile}
+              onOpenFile={handleOpenFile}
+              onOpenFolder={handleOpenFolder}
+            />
           )}
         </main>
         {file.activeTab && (() => {
