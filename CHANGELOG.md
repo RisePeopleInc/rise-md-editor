@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
-- **New File button on the Welcome Screen** ([RAISE-83](https://risepeople.atlassian.net/browse/RAISE-83)). The no-file landing page now offers a third action — **New File** — alongside Open File and Open Folder, so starting a fresh document no longer requires reaching for the `File → New` menu. It sits leftmost (New File → Open File → Open Folder) and takes the primary button style; Open File is demoted to the secondary style so there's exactly one primary action on the screen. Clicking it runs the same code path as `File → New`, opening an empty untitled tab in Edit (WYSIWYG) mode.
+- **New File button on the Welcome Screen** ([RAISE-83](https://risepeople.atlassian.net/browse/RAISE-83)). The no-file landing page now offers a third action — **New File** — alongside Open File and Open Folder, so starting a fresh document no longer requires reaching for the `File → New` menu. It sits leftmost (New File → Open File → Open Folder) and takes the primary button style; Open File is demoted to the secondary style so there's exactly one primary action on the screen. Clicking it runs the same code path as `File → New`, opening an empty untitled tab in Edit (WYSIWYG) mode. The two secondary buttons (Open File / Open Folder) were also aligned to the Rise Component Library's secondary-button spec — white resting fill, purple outline and label, fading to a solid purple fill with white text on hover — using the existing `--rise-interaction*` tokens (which are defined as the RCL `p450`/`p500`/`p550` palette, so the colours match the component library exactly).
 
 ### Changed
 

@@ -45,14 +45,14 @@ export function WelcomeScreen({ onNewFile, onOpenFile, onOpenFolder }: WelcomeSc
           <button
             type="button"
             onClick={onOpenFile}
-            className="rounded-lg border border-stroke bg-surface px-4 py-2 text-sm font-semibold text-strong shadow-sm transition hover:bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
+            className="rounded-lg border border-interaction bg-app px-4 py-2 text-sm font-semibold text-interaction shadow-sm transition-colors hover:border-interaction-hover hover:bg-interaction-hover hover:text-white active:border-interaction-active active:bg-interaction-active active:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
           >
             Open File
           </button>
           <button
             type="button"
             onClick={onOpenFolder}
-            className="rounded-lg border border-stroke bg-surface px-4 py-2 text-sm font-semibold text-strong shadow-sm transition hover:bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
+            className="rounded-lg border border-interaction bg-app px-4 py-2 text-sm font-semibold text-interaction shadow-sm transition-colors hover:border-interaction-hover hover:bg-interaction-hover hover:text-white active:border-interaction-active active:bg-interaction-active active:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
           >
             Open Folder
           </button>
