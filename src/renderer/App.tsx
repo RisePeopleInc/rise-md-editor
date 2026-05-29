@@ -932,17 +932,14 @@ function AppContent() {
               // `htmlToPlainText` already normalises U+00A0 / U+FEFF.
               const fromHtml = html ? htmlToPlainText(html) : '';
               const text =
-                fromHtml ||
-                normalizeInvisibleSpaces(await window.api.clipboard.readText());
+                fromHtml || normalizeInvisibleSpaces(await window.api.clipboard.readText());
               if (!text) return;
               wysiwygRef.current?.pastePlain(text);
             } else if (wantMonaco) {
               // Source / Split also benefit from U+00A0 normalisation
               // — pasted webpage text into Monaco would otherwise
               // leave non-breaking spaces in the markdown source.
-              const text = normalizeInvisibleSpaces(
-                await window.api.clipboard.readText(),
-              );
+              const text = normalizeInvisibleSpaces(await window.api.clipboard.readText());
               if (!text) return;
               editorRef.current?.pastePlain(text);
             }
@@ -1232,28 +1229,33 @@ function AppContent() {
               requireSavedPath={file.requireSavedPath}
             />
           ) : (
-            <WelcomeScreen onOpenFile={handleOpenFile} onOpenFolder={handleOpenFolder} />
+            <WelcomeScreen
+              onNewFile={handleNewFile}
+              onOpenFile={handleOpenFile}
+              onOpenFolder={handleOpenFolder}
+            />
           )}
         </main>
-        {file.activeTab && (() => {
-          // RAISE-60 follow-up: Ln/Col only makes sense in modes
-          // backed by a source view (Source, Split). In Read there's
-          // no cursor at all; in WYSIWYG the ProseMirror offset
-          // doesn't translate to source line/col cheaply. Pass
-          // undefined in those modes so the statusbar renders blank
-          // instead of stale Monaco state from the last time the
-          // user was in Source/Split.
-          const mode = file.activeTab.editorMode;
-          const hasCursor = mode === 'source' || mode === 'split';
-          return (
-            <StatusBar
-              line={hasCursor ? cursor.line : undefined}
-              column={hasCursor ? cursor.column : undefined}
-              wordCount={wordCount}
-              mode={mode}
-            />
-          );
-        })()}
+        {file.activeTab &&
+          (() => {
+            // RAISE-60 follow-up: Ln/Col only makes sense in modes
+            // backed by a source view (Source, Split). In Read there's
+            // no cursor at all; in WYSIWYG the ProseMirror offset
+            // doesn't translate to source line/col cheaply. Pass
+            // undefined in those modes so the statusbar renders blank
+            // instead of stale Monaco state from the last time the
+            // user was in Source/Split.
+            const mode = file.activeTab.editorMode;
+            const hasCursor = mode === 'source' || mode === 'split';
+            return (
+              <StatusBar
+                line={hasCursor ? cursor.line : undefined}
+                column={hasCursor ? cursor.column : undefined}
+                wordCount={wordCount}
+                mode={mode}
+              />
+            );
+          })()}
       </div>
       {/* RAISE-42: Export-to-PDF modal. Mounted here (top-level
           App layout) rather than inside the editor surfaces so a

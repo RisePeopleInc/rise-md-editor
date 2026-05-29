@@ -1,4 +1,5 @@
 interface WelcomeScreenProps {
+  onNewFile: () => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
 }
@@ -12,7 +13,7 @@ interface WelcomeScreenProps {
  * (P100 in light, a deepened tint in dark) as a subtle hero accent that
  * fades into the primary surface.
  */
-export function WelcomeScreen({ onOpenFile, onOpenFolder }: WelcomeScreenProps) {
+export function WelcomeScreen({ onNewFile, onOpenFile, onOpenFolder }: WelcomeScreenProps) {
   return (
     /* `relative` is load-bearing: without a positioned ancestor the
        absolute gradient div below leaks across the entire window — over
@@ -36,8 +37,15 @@ export function WelcomeScreen({ onOpenFile, onOpenFolder }: WelcomeScreenProps) 
         <div className="mt-2 flex gap-3">
           <button
             type="button"
-            onClick={onOpenFile}
+            onClick={onNewFile}
             className="rounded-lg bg-interaction px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-interaction-hover active:bg-interaction-active focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
+          >
+            New File
+          </button>
+          <button
+            type="button"
+            onClick={onOpenFile}
+            className="rounded-lg border border-stroke bg-surface px-4 py-2 text-sm font-semibold text-strong shadow-sm transition hover:bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-interaction focus-visible:ring-offset-2 focus-visible:ring-offset-app"
           >
             Open File
           </button>

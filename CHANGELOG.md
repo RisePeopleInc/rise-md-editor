@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **New File button on the Welcome Screen** ([RAISE-83](https://risepeople.atlassian.net/browse/RAISE-83)). The no-file landing page now offers a third action — **New File** — alongside Open File and Open Folder, so starting a fresh document no longer requires reaching for the `File → New` menu. It sits leftmost (New File → Open File → Open Folder) and takes the primary button style; Open File is demoted to the secondary style so there's exactly one primary action on the screen. Clicking it runs the same code path as `File → New`, opening an empty untitled tab in Edit (WYSIWYG) mode.
+
 ### Changed
 
 - **Files opened from the OS now open in Edit mode, not Read mode** ([RAISE-84](https://risepeople.atlassian.net/browse/RAISE-84)). Double-clicking a `.md` file in Finder / Explorer, using "Open With → Rise MD Editor", or launching via a file association used to open the file in Read mode (the RAISE-60 default); they now open in the same Edit (WYSIWYG) mode as every other open path (sidebar click, drag-drop, `File → Open…`, recents, `File → New`). User feedback was that the common intent when opening a file from the desktop is to edit it, not just read it, so a single consistent default is less surprising than branching on launch context. Already-open tabs are unaffected — re-opening a file keeps whatever mode the tab is currently in. Mechanically this removes the `fromOs` flag that was threaded through the `open-path` menu-action payload; `loadFile`'s `initialMode` argument is retained (defaulting to `'wysiwyg'`) so a future "open in Read mode" preference can re-introduce a non-default mode without re-plumbing.
