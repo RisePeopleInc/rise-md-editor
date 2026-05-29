@@ -207,6 +207,20 @@ npx --yes @resvg/resvg-js-cli --fit-width 1024 build/icon.svg build/icon.png
 
 Any tool that produces a 1024×1024 PNG works. Electron-builder generates the platform-specific `.icns` / `.ico` from `icon.png` at build time — no manual export needed. To swap the design entirely, replace `icon.svg` and re-run the command above.
 
+### File-type icons
+
+The document icon shown in Finder / Explorer for the claimed markdown extensions (`.md`, `.markdown`, …) is a page silhouette with the Rise mark on it — distinct from the app icon above. Source is `build/file-icons/md.svg`; unlike the app icon, electron-builder reads the platform binaries directly (`build/file-icons/md.icns` on macOS, `build/file-icons/md.ico` on Windows), wired via the `icon:` key on each `fileAssociations` entry in `electron-builder.yml`.
+
+To regenerate both binaries after editing the SVG:
+
+```sh
+./scripts/generate-file-icons.sh
+```
+
+The script rasterizes the SVG to each required size with the resvg-js CLI, builds the `.icns` via `iconutil` (macOS-only step), and builds the multi-resolution `.ico` via `png-to-ico`. Run it on macOS to refresh both. The intermediate `build/file-icons/md.iconset/` PNGs are disposable and gitignored — only `md.icns` and `md.ico` are committed.
+
+> The file-type icons only apply to packaged builds (`npm run build:mac` / `build:win`). `npm run dev` ignores `electron-builder.yml`, and `npm run build` (electron-vite) doesn't exercise the packaging config either. To see the icon in Finder / Explorer you need a packaged, installed build — and the OS icon cache may need a refresh (log out / in, or `killall Finder` on macOS).
+
 ## Auto-update
 
 `electron-updater` runs in production builds (skipped in `npm run dev`). On launch it checks `RisePeopleInc/rise-md-editor`'s GitHub Releases for a newer version. If one's found:

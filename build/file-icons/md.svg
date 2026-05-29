@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Rise MD Editor file icon (RAISE-65). Shown in Finder / Explorer for
+  the claimed markdown extension family (.md, .markdown, .mdown, …).
+
+  This is the DOCUMENT icon, distinct from the APP icon (build/icon.svg).
+  Convention: a portrait page silhouette with a folded top-right corner
+  (the universal "document" dog-ear used by iA Writer, Bear, Typora) and
+  the canonical Rise mark — the orange (#FFA31D) double-ring from
+  build/icon.svg — centred on the page as the dominant element.
+
+  Sizing follows the app icon's template: a 1024x1024 canvas with
+  generous transparent margin so the icon doesn't render oversized next
+  to system file icons. Legibility at 16x16 (the dominant Finder /
+  Explorer size) is the primary constraint, so the artwork is kept to
+  page + rings — no fine detail that muddies at small sizes.
+
+  Geometry:
+    Page body: 600 x 812, top-left (212, 100), corner radius 28.
+      The top-right corner is replaced by a 150px dog-ear fold.
+    Dog-ear: a triangular fold cut from the top-right corner; the
+      under-side shows as a slightly darker fold flap.
+    Rise mark: 66% of page width = 396 x 396, centred on the page body
+      (page centre x = 512; vertical centre 520, just below the
+      dog-ear). Source mark is 24x24 — scale factor 396 / 24 = 16.5.
+      Sized large so the rings stay the dominant, recognizable element
+      at 16px, where a smaller mark reads as an indistinct dot.
+
+  To regenerate md.icns / md.ico after editing this file, run
+  scripts/generate-file-icons.sh (see README "File-type icons").
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1024 1024"
+     width="1024" height="1024">
+  <!--
+    Page silhouette. The path traces the page outline with the
+    top-right corner folded: start below the top-left rounded corner,
+    across the top to where the fold begins, diagonally down-left to
+    the fold's inner corner, then out to the right edge and down.
+    The fold flap is drawn as a separate triangle on top.
+    Fold size: 150px. Right edge x = 812; fold begins at x = 662.
+  -->
+  <path
+    d="M 240 100
+       L 662 100
+       L 812 250
+       L 812 884
+       Q 812 912 784 912
+       L 240 912
+       Q 212 912 212 884
+       L 212 128
+       Q 212 100 240 100
+       Z"
+    fill="#ffffff"
+    stroke="#8b97a9"
+    stroke-width="26"
+    stroke-linejoin="round" />
+  <!--
+    Dog-ear fold flap: the folded-over triangle at the top-right.
+    Slightly darker than the page so the fold reads as depth.
+  -->
+  <path
+    d="M 662 100
+       L 662 250
+       L 812 250
+       Z"
+    fill="#eef2f6"
+    stroke="#8b97a9"
+    stroke-width="26"
+    stroke-linejoin="round" />
+  <!--
+    Rise mark: orange double-ring, the two canonical paths from
+    build/icon.svg, scaled 16.5x and centred on the page body.
+    66% of the 600px page width = 396px; origin x = 512 - 198 = 314,
+    y = 520 - 198 = 322. Sized large so the rings stay the dominant,
+    recognizable element at 16px.
+  -->
+  <g transform="translate(314, 322) scale(16.5)">
+    <path fill-rule="evenodd" clip-rule="evenodd"
+          d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20Z"
+          fill="#FFA31D" />
+    <path opacity="0.5" fill-rule="evenodd" clip-rule="evenodd"
+          d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24ZM12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17Z"
+          fill="#FFA31D" />
+  </g>
+</svg>
