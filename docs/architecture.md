@@ -130,10 +130,10 @@ Two distinct editor implementations, deliberately decoupled.
 
 Used for: source-mode editing, the source pane of split-mode, and find/replace.
 
-- Loaded once per renderer process via `monaco-setup.ts`.
+- Loaded once per renderer process via `monaco-setup.ts`, which imports Monaco's **core editor API** (`monaco-editor/esm/vs/editor/editor.api`) rather than the all-languages `monaco-editor` barrel. The barrel eagerly registers ~80 syntax-highlighting language packs plus the TypeScript / CSS / HTML rich-feature workers — pure dead weight for a markdown editor. Instead `monaco-setup.ts` opts into a **curated set** of basic-language contributions (javascript, typescript, python, shell, yaml, html, css, markdown, sql, go, rust, java, cpp, csharp, xml, dockerfile, ini) plus the JSON rich feature, covering ~95% of the fenced code blocks seen in CLAUDE.md / SKILL.md. Languages outside the set degrade gracefully to unhighlighted monospace (RAISE-82).
 - Six theme variants (Gruvbox light/dark × hard/medium/soft contrast) defined in `monaco-themes.ts`.
 - Cursor and scroll position are preserved per-tab across mode switches — `useFileState` snapshots them when leaving source mode and restores when returning.
-- Monaco's web-worker model means JSON / TypeScript / CSS language services run off-thread. No language service for Markdown (Monaco doesn't ship one); we just get syntax highlighting.
+- Monaco's web-worker model means language services run off-thread. With the curated set we ship two workers: the shared editor worker and the JSON language-service worker (`self.MonacoEnvironment.getWorker` returns the JSON worker for label `'json'`, the editor worker otherwise). The dropped TypeScript / CSS / HTML rich features took their workers with them. No language service for Markdown (Monaco doesn't ship one); we just get syntax highlighting.
 
 ### WYSIWYG — Milkdown / ProseMirror
 
