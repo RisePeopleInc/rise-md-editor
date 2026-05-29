@@ -7,6 +7,7 @@ import { looksLikeFilenameExtension } from '../../state/filenameExtensions';
 import { splitFrontmatter } from '../../state/markdown';
 import { markdownItComments } from '../../state/markdownItComments';
 import { expandSingleTildeStrikethrough } from '../../state/exportPdfHtml';
+import { toggleTaskLine } from '../../state/taskListToggle';
 
 /**
  * ReadView — read-only rendered markdown
@@ -15,10 +16,18 @@ import { expandSingleTildeStrikethrough } from '../../state/exportPdfHtml';
  * The fourth editor mode, alongside WYSIWYG / Source / Split. Renders
  * the active tab's markdown through the same markdown-it pipeline as
  * `SplitView`'s preview pane, but as a single full-width pane with no
- * accompanying editor surface. The buffer is never edited from this
- * view, so tabs in Read mode are always clean — no dirty tracking,
- * no save prompts on close, the external-edit auto-reload from
- * RAISE-56 always silently refreshes.
+ * accompanying editor surface. The only edit affordance is the GFM
+ * task-list checkbox (RAISE-85, below); every other interaction is
+ * read-only.
+ *
+ * RAISE-85: clicking a task-list checkbox toggles the underlying
+ * `[ ]` / `[x]` and *silently saves the file to disk* — the user
+ * stays in Read mode, no dirty marker, no prompt. The write-back
+ * runs through `onToggleTask`, which App.tsx wires to a `files.save`
+ * + `setActiveContentSaved` pair so the tab's content and saved
+ * baseline move together and the tab reads clean. A failed save
+ * (read-only file, permissions) reverts the clicked checkbox and
+ * surfaces a small non-modal notice rather than a blocking dialog.
  *
  * Design choices:
  *
@@ -32,11 +41,14 @@ import { expandSingleTildeStrikethrough } from '../../state/exportPdfHtml';
  *     ReadView each maintain their own near-identical builder); held
  *     off in this PR to keep the diff focused.
  *
- *   - **`taskLists.enabled: false`** — the rendered checkboxes are
- *     visible but click-disabled. Read mode is genuinely read-only;
- *     toggling a checkbox would mutate the source buffer, which
- *     defeats the point. The Split view's `enabled: true` + click
- *     handler is the right behaviour for *that* mode.
+ *   - **`taskLists.enabled: true`** (RAISE-85) — the rendered
+ *     checkboxes are interactive; a click flips the marker in the
+ *     source and silently persists it. Same `enabled: true` + click
+ *     handler shape as SplitView's preview, but where SplitView routes
+ *     the new source through `onChange` (marking the tab dirty), Read
+ *     mode routes through `onToggleTask` (silent save, tab stays
+ *     clean). Was `enabled: false` before RAISE-85, when Read mode was
+ *     a strictly read-only surface.
  *
  *   - **Centered max-width column** matching the WYSIWYG layout
  *     (`mx-auto max-w-[720px] px-6 py-8`). Read mode is the polished
@@ -71,6 +83,17 @@ interface ReadViewProps {
    *  the view and corrupts the live text selection (RAISE-78 / RAISE-79);
    *  see the scroll handler in the body. */
   onScrollChange: (top: number) => void;
+  /**
+   * RAISE-85: invoked when the user clicks a task-list checkbox. Receives
+   * the full new markdown source (the toggled line already flipped) and
+   * is responsible for the silent write-back: persist to disk and realign
+   * the tab's saved baseline so it stays clean. Resolves `true` if the
+   * source was persisted (the optimistic DOM toggle stands), `false` if
+   * the save failed or the document can't be saved (untitled / read-only)
+   * — in which case ReadView reverts the clicked checkbox and shows a
+   * non-modal notice.
+   */
+  onToggleTask: (newContent: string) => Promise<boolean>;
 }
 
 export function ReadView({
@@ -78,8 +101,22 @@ export function ReadView({
   markdownPath,
   initialScrollTop,
   onScrollChange,
+  onToggleTask,
 }: ReadViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // RAISE-85: transient "couldn't save" notice. Shown when the silent
+  // checkbox write-back fails (read-only file, permissions). Non-modal,
+  // auto-dismissing — no blocking dialog.
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const saveNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (saveNoticeTimerRef.current !== null) {
+        clearTimeout(saveNoticeTimerRef.current);
+      }
+    };
+  }, []);
 
   // Hide-comments toggle (shared with SplitView via the same
   // localStorage key — flipping it in one surface affects the other,
@@ -158,11 +195,13 @@ export function ReadView({
       };
     instance.renderer.rules['link_open'] = wrapLinkRule(defaultLinkOpen);
     instance.renderer.rules['link_close'] = wrapLinkRule(defaultLinkClose);
-    // RAISE-29: task lists rendered as checkboxes, BUT `enabled: false`
-    // so the input element renders with the `disabled` attribute and
-    // the user can't toggle them. Read mode is read-only; mutating
-    // the source buffer from here would defeat the whole point.
-    instance.use(markdownItTaskLists, { enabled: false, label: true });
+    // RAISE-29 + RAISE-85: task lists rendered as checkboxes. `enabled:
+    // true` (changed from `false` in RAISE-85) drops the `disabled`
+    // attribute so the input fires events; a `change` listener on the
+    // container (further down) flips the source marker and silently
+    // saves the file. `label: true` wraps the item text in a <label>
+    // for accessibility / a CSS hook for completed-item greying.
+    instance.use(markdownItTaskLists, { enabled: true, label: true });
     instance.use(markdownItEmoji);
     instance.use(markdownItComments);
     // RAISE-11: relative `<img src>` → `rise-md-asset://` URL at render time.
@@ -187,45 +226,47 @@ export function ReadView({
   // at a different location. The image rule reads markdownPath via a
   // ref so it doesn't appear in `md.render`'s signature; eslint can't
   // see that, hence the disable.
-  const html = useMemo(() => {
-    const { frontmatter, body } = splitFrontmatter(content);
+  //
+  // RAISE-85: alongside the rendered HTML, build a parallel array of
+  // absolute source line numbers for each task-list item — same
+  // technique as SplitView's preview. markdown-it-task-lists marks each
+  // task `<li>`'s `list_item_open` token with a `task-list-item` class;
+  // that token's `.map[0]` is the body-relative 0-indexed source line.
+  // We offset it by `bodyLineOffset` (the frontmatter line count) so the
+  // checkbox click handler targets the right absolute line when it
+  // rewrites the full source. Indexed by checkbox order in the rendered
+  // output, which matches the DOM order the click handler walks.
+  const { html, taskLines } = useMemo(() => {
+    const { frontmatter, body, bodyLineOffset } = splitFrontmatter(content);
     // Single-tilde strikethrough preprocess (RAISE-53 follow-up) so
     // `~text~` renders consistently with WYSIWYG and the HTML export.
+    // The rewrite never adds or removes newlines, so task-list source
+    // line numbers survive it intact.
     const preprocessed = expandSingleTildeStrikethrough(body);
-    const bodyHtml = md.render(preprocessed);
+    const env = {};
+    const tokens = md.parse(preprocessed, env);
+    const bodyHtml = md.renderer.render(tokens, md.options, env);
+    const lines: number[] = [];
+    for (const t of tokens) {
+      if (t.type !== 'list_item_open') continue;
+      const cls = t.attrGet('class') ?? '';
+      if (!cls.includes('task-list-item')) continue;
+      const lineIdx = t.map?.[0];
+      if (lineIdx != null) lines.push(bodyLineOffset + lineIdx);
+    }
     if (frontmatter !== null) {
       const escaped = frontmatter
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      return (
-        `<div class="rise-md-frontmatter-preview"><pre>${escaped}</pre></div>` + bodyHtml
-      );
+      return {
+        html: `<div class="rise-md-frontmatter-preview"><pre>${escaped}</pre></div>` + bodyHtml,
+        taskLines: lines,
+      };
     }
-    return bodyHtml;
+    return { html: bodyHtml, taskLines: lines };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [md, content, markdownPath]);
-
-  // Restore the saved scroll position once after mount / content swap.
-  // Use a layout effect-style raf to wait for the rendered HTML to lay
-  // out — setting `scrollTop` before the DOM has actual height clamps
-  // to 0 and silently loses the restore.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let cancelled = false;
-    const raf = requestAnimationFrame(() => {
-      if (cancelled) return;
-      container.scrollTop = initialScrollTop;
-    });
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-    };
-    // Intentionally exhaustive-deps-disabled: the restore is "first
-    // mount / content reload only", not every initialScrollTop change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [html]);
 
   // RAISE-78 / RAISE-79: persist scroll WITHOUT a per-scroll React state
   // update. Read mode renders into a `dangerouslySetInnerHTML` div and the
@@ -244,7 +285,45 @@ export function ReadView({
   // unmount this view via EditorContainer's keyed remount, so the final
   // offset is still captured for the next restore — but nothing re-renders
   // while the user is reading and selecting.
+  //
+  // RAISE-85: this ref is initialised to `initialScrollTop` so the genuine
+  // restore-on-mount below still lands the reader where they left off. But
+  // the scroll-restore effect now reads `latestScrollTopRef.current` rather
+  // than the `initialScrollTop` prop: a checkbox toggle mutates `content`,
+  // which recomputes `html`, which re-fires the `[html]`-keyed restore
+  // effect. If that effect restored the (now-stale) `initialScrollTop`,
+  // every checkbox click would jump the reader back to their mount
+  // position. Reading the live ref instead preserves the current scroll
+  // across a toggle while still restoring correctly on the first mount.
   const latestScrollTopRef = useRef(initialScrollTop);
+
+  // Restore the saved scroll position once after mount / content swap.
+  // Use a layout effect-style raf to wait for the rendered HTML to lay
+  // out — setting `scrollTop` before the DOM has actual height clamps
+  // to 0 and silently loses the restore.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let cancelled = false;
+    const raf = requestAnimationFrame(() => {
+      if (cancelled) return;
+      // RAISE-85: restore to the LIVE position (ref), not the mount-time
+      // prop. On first mount the ref equals `initialScrollTop`; after a
+      // checkbox toggle it holds the reader's current offset — so the
+      // re-render from the content change doesn't scroll-jump.
+      container.scrollTop = latestScrollTopRef.current;
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+    // Keyed on `html` only: the restore should fire on first mount and on
+    // a content reload (both recompute `html`), reading the live scroll
+    // ref. RAISE-85 dropped the `initialScrollTop` reference from the body
+    // (we read `latestScrollTopRef.current` instead), so exhaustive-deps
+    // no longer wants it listed — no disable directive needed.
+  }, [html]);
+
   // Live ref to the callback so the unmount-only effect always invokes the
   // current one without re-subscribing (and thus without re-running cleanup
   // mid-session, which would defeat the purpose).
@@ -258,6 +337,85 @@ export function ReadView({
   useEffect(() => {
     return () => {
       onScrollChangeRef.current(latestScrollTopRef.current);
+    };
+  }, []);
+
+  // RAISE-85: live refs for the checkbox `change` listener (registered
+  // once, below). Keeping the latest content / taskLines / callback in
+  // refs means the listener never re-subscribes — and, crucially, that
+  // each toggle computes from the CURRENT content. `contentRef` is
+  // advanced synchronously inside the handler before awaiting the save,
+  // so a rapid second click composes on top of the first flip rather
+  // than racing against a stale base (see the handler for detail).
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const taskLinesRef = useRef<number[]>(taskLines);
+  taskLinesRef.current = taskLines;
+  const onToggleTaskRef = useRef(onToggleTask);
+  onToggleTaskRef.current = onToggleTask;
+  // Tracks the in-flight save chain so rapid clicks serialize: each
+  // toggle's write-back waits for the previous one to settle, which
+  // keeps disk writes ordered and lets a failure cleanly revert.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+
+  // RAISE-85: clicking a task-list checkbox toggles the corresponding
+  // `[ ]` / `[x]` in the source and silently saves the file. Mirrors
+  // SplitView's preview-pane handler (listen for `change`, not `click`,
+  // to catch mouse + keyboard Space + label-for synthesis without
+  // double-firing), but routes the new source through `onToggleTask`
+  // (silent save) instead of `onChange` (dirty edit).
+  //
+  // The browser has already flipped `target.checked` visually by the
+  // time `change` fires; we treat that as optimistic. The toggle math
+  // runs against `contentRef.current` (advanced synchronously so rapid
+  // clicks compose), then the write-back is queued behind any in-flight
+  // save. If the save resolves `false` (untitled / read-only / write
+  // error), we roll `contentRef` back and revert the DOM checkbox so the
+  // rendered state matches what's actually on disk, and show a notice.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleChange = (e: Event): void => {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.type !== 'checkbox') return;
+      if (!target.classList.contains('task-list-item-checkbox')) return;
+      const allCheckboxes = container.querySelectorAll('input.task-list-item-checkbox');
+      const index = Array.from(allCheckboxes).indexOf(target);
+      if (index < 0) return;
+      const lineIdx = taskLinesRef.current[index];
+      if (lineIdx == null) return;
+      const base = contentRef.current;
+      const next = toggleTaskLine(base, lineIdx);
+      // No-op (out-of-range / no marker on the line) — toggleTaskLine
+      // returns the input unchanged. Revert the optimistic DOM flip.
+      if (next === base) {
+        target.checked = !target.checked;
+        return;
+      }
+      // Advance the ref synchronously BEFORE awaiting, so a rapid second
+      // click composes on top of this flip rather than the stale base.
+      contentRef.current = next;
+      const wasChecked = target.checked;
+      saveChainRef.current = saveChainRef.current
+        .catch(() => undefined)
+        .then(() => onToggleTaskRef.current(next))
+        .then((ok) => {
+          if (ok) return;
+          // Save failed / not saveable — undo this flip in the ref and the
+          // DOM so the view reflects the unchanged on-disk source.
+          contentRef.current = toggleTaskLine(contentRef.current, lineIdx);
+          target.checked = !wasChecked;
+          setSaveNotice("This file is read-only — couldn't update.");
+          if (saveNoticeTimerRef.current !== null) {
+            clearTimeout(saveNoticeTimerRef.current);
+          }
+          saveNoticeTimerRef.current = setTimeout(() => setSaveNotice(null), 4000);
+        });
+    };
+    container.addEventListener('change', handleChange);
+    return () => {
+      container.removeEventListener('change', handleChange);
     };
   }, []);
 
@@ -374,6 +532,20 @@ export function ReadView({
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
+      {/* RAISE-85: non-modal "couldn't save" notice for a failed silent
+          checkbox write-back (read-only file, permissions). Bottom-center
+          toast that auto-dismisses; `role="status"` + `aria-live` so a
+          screen reader announces it without stealing focus the way a
+          dialog would. */}
+      {saveNotice !== null && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded border border-stroke bg-app/95 px-3 py-2 text-[12px] font-medium text-body shadow-[var(--rise-shadow-depth-1)] backdrop-blur"
+        >
+          {saveNotice}
+        </div>
+      )}
     </div>
   );
 }

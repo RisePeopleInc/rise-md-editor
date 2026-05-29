@@ -151,6 +151,17 @@ export interface FileContextValue {
   reorderTabs: (fromIndex: number, toIndex: number) => void;
 
   setActiveCursor: (cursor: CursorPos) => void;
+  /**
+   * RAISE-85: replace the active tab's content AND saved baseline in one
+   * update, so the tab stays clean (not dirty). Used by Read mode's
+   * silent checkbox-toggle write-back: App.tsx writes the new markdown to
+   * disk via `files.save`, then calls this to realign the in-memory tab
+   * with what just landed on disk. Does NOT bump `loadEpoch` — Read mode
+   * renders from `content` directly (no uncontrolled-with-reset editor to
+   * remount), and a bump would re-fire ReadView's scroll-restore raf and
+   * jump the reader's position.
+   */
+  setActiveContentSaved: (content: string) => void;
   setActiveScroll: (top: number) => void;
   setActiveWysiwygScroll: (top: number) => void;
   /** RAISE-60: Read view scroll persistence — same shape as the WYSIWYG one. */
@@ -290,9 +301,7 @@ export function FileProvider({ children }: FileProviderProps) {
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab>) => {
-      writeTabs(
-        tabsRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-      );
+      writeTabs(tabsRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     },
     [writeTabs],
   );
@@ -468,6 +477,23 @@ export function FileProvider({ children }: FileProviderProps) {
     [updateTab],
   );
 
+  const setActiveContentSaved = useCallback(
+    (content: string) => {
+      const id = activeTabIdRef.current;
+      if (!id) return;
+      // Mirror the post-save shape from `save` / `saveAs`: content,
+      // savedContent and editorBaseline all move to the new value so
+      // `isTabDirty` reads false. No loadEpoch bump (see the interface
+      // doc — Read mode would scroll-jump on a remount).
+      updateTab(id, {
+        content,
+        savedContent: content,
+        editorBaseline: content,
+      });
+    },
+    [updateTab],
+  );
+
   const setActiveScroll = useCallback(
     (top: number) => {
       const id = activeTabIdRef.current;
@@ -535,9 +561,7 @@ export function FileProvider({ children }: FileProviderProps) {
       const oldPosixPrefix = `${oldPath}/`;
       const oldWinPrefix = `${oldPath}\\`;
       const matches = (p: string): boolean =>
-        p === oldPath ||
-        p.startsWith(oldPosixPrefix) ||
-        p.startsWith(oldWinPrefix);
+        p === oldPath || p.startsWith(oldPosixPrefix) || p.startsWith(oldWinPrefix);
 
       const before = tabsRef.current;
       const closedIds: string[] = [];
@@ -576,12 +600,8 @@ export function FileProvider({ children }: FileProviderProps) {
       // If the active tab was closed, fall back to the next-best neighbour
       // (matches `closeTab`'s behaviour: prefer the tab at the same index,
       // else the one before, else null when nothing remains).
-      if (
-        activeTabIdRef.current !== null &&
-        closedIds.includes(activeTabIdRef.current)
-      ) {
-        const neighbour =
-          next[prevActiveIdx] ?? next[prevActiveIdx - 1] ?? next[0] ?? null;
+      if (activeTabIdRef.current !== null && closedIds.includes(activeTabIdRef.current)) {
+        const neighbour = next[prevActiveIdx] ?? next[prevActiveIdx - 1] ?? next[0] ?? null;
         writeActiveTabId(neighbour ? neighbour.id : null);
       }
 
@@ -776,8 +796,7 @@ export function FileProvider({ children }: FileProviderProps) {
   // or a tab-by-tab walkthrough; we run the chosen flow and report success.
   useEffect(() => {
     const off = window.api.onResolveDirty(async (mode) => {
-      const ok =
-        mode === 'save-all' ? await saveAllDirty() : await reviewEachDirtyTab();
+      const ok = mode === 'save-all' ? await saveAllDirty() : await reviewEachDirtyTab();
       window.api.respondResolveDirty(ok);
     });
     return off;
@@ -826,6 +845,7 @@ export function FileProvider({ children }: FileProviderProps) {
       prevTab,
       reorderTabs,
       setActiveCursor,
+      setActiveContentSaved,
       setActiveScroll,
       setActiveWysiwygScroll,
       setActiveReadScroll,
@@ -857,6 +877,7 @@ export function FileProvider({ children }: FileProviderProps) {
       prevTab,
       reorderTabs,
       setActiveCursor,
+      setActiveContentSaved,
       setActiveScroll,
       setActiveWysiwygScroll,
       setActiveReadScroll,
