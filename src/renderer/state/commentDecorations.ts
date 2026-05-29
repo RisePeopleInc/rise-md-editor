@@ -192,7 +192,19 @@ function collectBlockSegment(node: ProseNode, pos: number): BlockSegment {
   return { start, text, positions };
 }
 
-function buildDecorations(doc: ProseNode): DecorationSet {
+/**
+ * Build the comment-styling `DecorationSet` for a document.
+ *
+ * Module-internal to the plugin in production (the plugin's
+ * `state.init` / `state.apply` are the only callers), but
+ * `export`ed so the regression suite ([RAISE-41](https://risepeople.atlassian.net/browse/RAISE-41))
+ * can drive it directly with hand-built ProseMirror docs without
+ * standing up a full Milkdown editor + `EditorView`. Mirrors how
+ * RAISE-50 / RAISE-40 promoted module internals to `export` for
+ * testing — no production consumer imports this, so the wider
+ * surface is test-only.
+ */
+export function buildDecorations(doc: ProseNode): DecorationSet {
   const decorations: Decoration[] = [];
   const blockSegments: BlockSegment[] = [];
 
