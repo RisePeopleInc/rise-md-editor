@@ -1,0 +1,12 @@
+# Sprint Retro
+
+A quick recap of what we discussed. See the [board](https://notion.so/board) for the full list.
+
+## What went well
+
+- Shipped the **paste pipeline** ahead of schedule
+- Pairing sessions unblocked the tricky cases
+
+```ts
+const ok = looksLikeMarkdown(text);
+```
