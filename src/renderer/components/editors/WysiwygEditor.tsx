@@ -56,7 +56,7 @@ import {
 import { stripEmptyParagraphMarkers } from '../../state/emptyParagraphMarker';
 import { emojiToShortcodes, gemojiPlugins } from '../../state/gemojiNode';
 import { joinFrontmatter, splitFrontmatter, type FrontmatterSplit } from '../../state/markdown';
-import { autolinkOnTypePlugin } from '../../state/autolinkOnType';
+import { autolinkOnTypePlugin, PLUGIN_KEY as autolinkPluginKey } from '../../state/autolinkOnType';
 import { remarkUnautolinkPlugin } from '../../state/remarkUnautolink';
 import { stripBrowserAutolinkPlugin } from '../../state/stripBrowserAutolink';
 import { trailingParagraphPlugin } from '../../state/trailingParagraph';
@@ -328,7 +328,11 @@ interface LinkPopoverState {
   from: number;
   to: number;
   x: number;
+  /** Anchor's bottom edge — the popover's default (below-link) top. */
   y: number;
+  /** Anchor's top edge — lets the popover flip ABOVE the link when
+   *  placing it below would overflow the viewport bottom (RAISE-86 #4). */
+  anchorTop: number;
   /**
    * RAISE-86: when true the popover opens straight into its inline
    * edit field rather than the read view. Set by the context menu's
@@ -440,6 +444,45 @@ function MilkdownBody({
   // can read the live `from`/`to`/`href` without a stale closure.
   const linkPopoverRef = useRef<LinkPopoverState | null>(null);
   linkPopoverRef.current = linkPopover;
+
+  // RAISE-86 (#2 + #3): track the last pointer button and the
+  // modifier-held state. `lastWasRightClickRef` lets the link-detection
+  // plugin skip the popover for right-clicks (the context menu handles
+  // those — showing both is redundant). The `data-modifier-held`
+  // attribute drives a pointer cursor on ⌘/Ctrl-hover over a link (see
+  // milkdown.css), signalling the "⌘-click to open" affordance.
+  const lastWasRightClickRef = useRef(false);
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const isMac = window.api.platform === 'darwin';
+    const setModifier = (held: boolean) => {
+      if (held) container.setAttribute('data-modifier-held', '');
+      else container.removeAttribute('data-modifier-held');
+    };
+    const onMouseDownCapture = (e: MouseEvent) => {
+      lastWasRightClickRef.current = e.button === 2;
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Keyboard navigation isn't a right-click — let the popover show.
+      lastWasRightClickRef.current = false;
+      if (isMac ? e.key === 'Meta' : e.key === 'Control') setModifier(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (isMac ? e.key === 'Meta' : e.key === 'Control') setModifier(false);
+    };
+    const onBlur = () => setModifier(false);
+    container.addEventListener('mousedown', onMouseDownCapture, true);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      container.removeEventListener('mousedown', onMouseDownCapture, true);
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [scrollContainerRef]);
 
   useEditor((root) =>
     Editor.make()
@@ -947,6 +990,14 @@ function MilkdownBody({
               view: () => ({
                 update: (view) => {
                   const setPopover = setLinkPopoverRef.current;
+                  // RAISE-86 (#2): a right-click resolves to the context
+                  // menu (Open / Edit / Remove Link), not the popover — so
+                  // skip showing it. The flag is reset by the next
+                  // left-click or keypress (see the tracking effect).
+                  if (lastWasRightClickRef.current) {
+                    setPopover(null);
+                    return;
+                  }
                   const { selection } = view.state;
                   // Only a collapsed caret triggers the popover — a
                   // text selection (e.g. the user dragging across a
@@ -978,6 +1029,7 @@ function MilkdownBody({
                     to: range.to,
                     x: Math.max(8, startCoords.left),
                     y: startCoords.bottom + 6,
+                    anchorTop: startCoords.top,
                   });
                 },
               }),
@@ -1032,13 +1084,21 @@ function MilkdownBody({
         const linkType = view.state.schema.marks['link'];
         if (!linkType) return;
         const { from, to } = state;
+        // setMeta(autolinkPluginKey) opts this transaction OUT of the
+        // autolink-on-type re-processing (RAISE-86 fix): without it, the
+        // autolinker re-links the still-URL-shaped text in the SAME
+        // dispatch — so Remove appeared to do nothing and an edited href
+        // reverted to the text-derived original.
         if (!next) {
           // Empty URL → treat as Remove: strip the mark, keep text.
-          view.dispatch(view.state.tr.removeMark(from, to, linkType));
+          const tr = view.state.tr.removeMark(from, to, linkType);
+          tr.setMeta(autolinkPluginKey, true);
+          view.dispatch(tr);
         } else {
           const tr = view.state.tr;
           tr.removeMark(from, to, linkType);
           tr.addMark(from, to, linkType.create({ href: next }));
+          tr.setMeta(autolinkPluginKey, true);
           view.dispatch(tr);
         }
         view.focus();
@@ -1057,7 +1117,11 @@ function MilkdownBody({
       const view = ctx.get(editorViewCtx);
       const linkType = view.state.schema.marks['link'];
       if (!linkType) return;
-      view.dispatch(view.state.tr.removeMark(state.from, state.to, linkType));
+      // Opt out of autolink re-processing (see handleLinkEdit) so the
+      // stripped link isn't immediately re-linked from its URL-shaped text.
+      const tr = view.state.tr.removeMark(state.from, state.to, linkType);
+      tr.setMeta(autolinkPluginKey, true);
+      view.dispatch(tr);
       view.focus();
     });
     setLinkPopover(null);
@@ -1085,6 +1149,7 @@ function MilkdownBody({
         to: range.to,
         x: Math.max(8, startCoords.left),
         y: startCoords.bottom + 6,
+        anchorTop: startCoords.top,
         startEditing: true,
         editNonce: Date.now(),
       });
@@ -1246,7 +1311,9 @@ function MilkdownBody({
           if (!linkType) return;
           const range = resolveLinkMarkRange(view.state.selection.$from, linkType);
           if (!range) return;
-          view.dispatch(view.state.tr.removeMark(range.from, range.to, linkType));
+          const tr = view.state.tr.removeMark(range.from, range.to, linkType);
+          tr.setMeta(autolinkPluginKey, true);
+          view.dispatch(tr);
           view.focus();
         });
         setLinkPopover(null);
@@ -1274,6 +1341,15 @@ function MilkdownBody({
       if (!target) return;
       if (target.closest('.rise-md-frontmatter')) return;
       e.preventDefault();
+
+      // RAISE-86 (#2): mark this as a right-click so the link-detection
+      // plugin suppresses the popover when the caret-move below lands on
+      // a link — the context menu (Open / Edit / Remove Link) is the
+      // right-click affordance, not the popover. Set on the `contextmenu`
+      // event itself rather than the mousedown button, so it's robust to
+      // Ctrl-click / trackpad right-click (which can report button 0).
+      // Reset by the next left-click or keypress.
+      lastWasRightClickRef.current = true;
 
       const sel = window.getSelection();
       const hasSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
@@ -1382,6 +1458,7 @@ function MilkdownBody({
           href={linkPopover.href}
           x={linkPopover.x}
           y={linkPopover.y}
+          anchorTop={linkPopover.anchorTop}
           platform={window.api.platform}
           initialEditing={linkPopover.startEditing}
           onOpen={handleLinkOpen}

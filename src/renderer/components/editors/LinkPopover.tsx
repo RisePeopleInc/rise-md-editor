@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * RAISE-86: link popover for Edit (WYSIWYG) mode.
@@ -26,9 +26,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export interface LinkPopoverProps {
   /** The link's `href` attribute (already protocol-qualified). */
   href: string;
-  /** Viewport-fixed top-left anchor, in CSS px (left/top). */
+  /** Viewport-fixed left anchor, in CSS px. */
   x: number;
+  /** Default top: just below the link. The popover flips above this when
+   *  placing it below would overflow the viewport bottom (RAISE-86 #4). */
   y: number;
+  /** The link's top edge (CSS px) — the flip target when going above. */
+  anchorTop: number;
   /** `window.api.platform` — drives the ⌘ vs Ctrl pro-tip wording. */
   platform: NodeJS.Platform;
   /**
@@ -57,6 +61,7 @@ export function LinkPopover({
   href,
   x,
   y,
+  anchorTop,
   platform,
   initialEditing = false,
   onOpen,
@@ -105,6 +110,20 @@ export function LinkPopover({
     onEdit(draftHref.trim());
   }, [draftHref, onEdit]);
 
+  // RAISE-86 (#4): flip the popover ABOVE the link when placing it below
+  // (`y`) would overflow the viewport bottom. Measured post-layout —
+  // useLayoutEffect runs before paint, so there's no flash at the wrong
+  // spot. Re-runs when the anchor moves or the body height changes
+  // (edit mode swaps the row set, changing the height).
+  const [computedTop, setComputedTop] = useState(y);
+  useLayoutEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    const height = el.offsetHeight;
+    const overflowsBottom = y + height > window.innerHeight - 8;
+    setComputedTop(overflowsBottom ? Math.max(8, anchorTop - height - 6) : y);
+  }, [x, y, anchorTop, editing]);
+
   const isMac = platform === 'darwin';
   const proTip = isMac
     ? 'Pro tip: ⌘-click to open the link directly in your browser.'
@@ -119,7 +138,7 @@ export function LinkPopover({
       // Viewport-fixed so the screen coords from coordsAtPos line up.
       // The container scroll listener in WysiwygEditor dismisses the
       // popover on scroll, so drift isn't a concern.
-      style={{ left: x, top: y }}
+      style={{ left: x, top: computedTop }}
       className="fixed z-50 flex max-w-[360px] flex-col gap-2 rounded-[var(--rise-radius-card)] border border-stroke bg-app p-2.5 text-xs text-strong shadow-[var(--rise-shadow-depth-1)]"
       // Keep mousedowns inside the popover from bubbling to the
       // container's capture-phase handlers (which would otherwise treat

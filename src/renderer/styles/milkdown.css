@@ -270,6 +270,15 @@
 .rise-md-prose a:hover {
   text-decoration: underline;
 }
+/* RAISE-86 (#3): while the open-modifier (⌘ on macOS / Ctrl elsewhere)
+   is held, links show a pointer cursor to signal "click to open in
+   browser". WysiwygEditor toggles `data-modifier-held` on the scroll
+   container on modifier keydown/keyup. Default cursor in Edit mode is
+   the text caret (you're editing), so this only appears with the
+   modifier down — matching the ⌘-click-to-open affordance. */
+[data-modifier-held] .rise-md-prose a {
+  cursor: pointer;
+}
 
 /* Images */
 .rise-md-prose img {
