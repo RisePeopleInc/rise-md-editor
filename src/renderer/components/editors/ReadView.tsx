@@ -65,8 +65,11 @@ interface ReadViewProps {
   markdownPath: string | null;
   /** Initial scroll offset to restore (per-tab persistence). */
   initialScrollTop: number;
-  /** Notify on each scroll so the tab's `readScrollPosition` can be
-   *  kept in sync (debounced inside the consumer). */
+  /** Called once, on unmount, with the final scroll offset so the tab's
+   *  `readScrollPosition` is persisted for a later re-mount. Deliberately
+   *  NOT called per scroll event — a per-scroll state update re-renders
+   *  the view and corrupts the live text selection (RAISE-78 / RAISE-79);
+   *  see the scroll handler in the body. */
   onScrollChange: (top: number) => void;
 }
 
@@ -224,15 +227,39 @@ export function ReadView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html]);
 
-  // Persist scroll on each event. The consumer is responsible for
-  // debouncing if it cares about state-update churn — this fires
-  // synchronously to keep the model honest.
-  const handleScroll = useCallback(
-    (e: React.UIEvent<HTMLDivElement>) => {
-      onScrollChange(e.currentTarget.scrollTop);
-    },
-    [onScrollChange],
-  );
+  // RAISE-78 / RAISE-79: persist scroll WITHOUT a per-scroll React state
+  // update. Read mode renders into a `dangerouslySetInnerHTML` div and the
+  // user selects text directly in that DOM. Pushing the offset into
+  // `fileState` on every scroll event re-rendered this view, and that
+  // re-render corrupted the live `window.getSelection()` — it collapsed and
+  // re-anchored the range to document-start (confirmed by instrumentation:
+  // a single scroll tick reset the range to offset 0 of the first node).
+  // That surfaced two ways from one cause: the selection visibly vanished
+  // while scrolling (RAISE-78), and a subsequent Cmd+C copied from the top
+  // of the document to the old selection end (RAISE-79), because the copy
+  // reflected the corrupted, top-anchored range.
+  //
+  // Fix: keep the latest offset in a ref (no setState, no re-render) and
+  // commit it once on unmount. A tab switch, mode switch, or re-open all
+  // unmount this view via EditorContainer's keyed remount, so the final
+  // offset is still captured for the next restore — but nothing re-renders
+  // while the user is reading and selecting.
+  const latestScrollTopRef = useRef(initialScrollTop);
+  // Live ref to the callback so the unmount-only effect always invokes the
+  // current one without re-subscribing (and thus without re-running cleanup
+  // mid-session, which would defeat the purpose).
+  const onScrollChangeRef = useRef(onScrollChange);
+  onScrollChangeRef.current = onScrollChange;
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    latestScrollTopRef.current = e.currentTarget.scrollTop;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      onScrollChangeRef.current(latestScrollTopRef.current);
+    };
+  }, []);
 
   // Open links in the OS browser, same handler shape as SplitView's
   // preview-pane. Read mode is read-only so plain click is the right
