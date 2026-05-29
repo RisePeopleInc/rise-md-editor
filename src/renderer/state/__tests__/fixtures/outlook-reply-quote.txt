@@ -1,0 +1,12 @@
+Thanks for the update. A few quick replies inline below.
+
+> From: Dana Lee
+> Sent: Monday, May 26, 2026 9:14 AM
+> To: Project Team
+> Subject: Re: Q2 planning
+>
+> Here is where we landed:
+> * Ship the editor by end of quarter
+> * Hold the migration until next sprint
+> 1. Finalize the spec
+> 2. Book the review

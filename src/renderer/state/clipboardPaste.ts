@@ -132,9 +132,7 @@ export function cleanupGoogleDocsMarkdown(text: string): string {
       // Strip `\.` after any digit on heading lines (broader than
       // RAISE-39 iteration 1's `^(#+\s+\d+)\\.` which missed
       // `### Item 1\. Foo`).
-      .replace(/^(#+\s+.*)$/gm, (line) =>
-        line.replace(/(\d)\\\./g, '$1.'),
-      )
+      .replace(/^(#+\s+.*)$/gm, (line) => line.replace(/(\d)\\\./g, '$1.'))
       // Ordered list start: `1\. Foo` or `  1\. Foo` → `1. Foo`.
       .replace(/^(\s*\d+)\\\./gm, '$1.')
       // Table cell `\#` → `#`. Applies anywhere; outside tables
@@ -190,20 +188,22 @@ function getTurndown(): TurndownService {
  *     keep the content (Turndown leaves these on unknown
  *     elements; the wrapped text is what we want)
  */
-function sanitizeTurndownOutput(md: string): string {
-  return md
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    // HTML comments — `preprocessClipboardHtml` removes these
-    // upstream via DOMParser, but a string-level pass is cheap
-    // belt-and-braces against any path that bypasses the parse
-    // step (malformed HTML that DOMParser couldn't handle, etc.).
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/?(?:div|span)[^>]*>/gi, '')
-    // Collapse the runs of spaces that the <br> → ' ' replacement
-    // and the dropped tags can leave behind.
-    .replace(/[ \t]{2,}/g, ' ');
+export function sanitizeTurndownOutput(md: string): string {
+  return (
+    md
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      // HTML comments — `preprocessClipboardHtml` removes these
+      // upstream via DOMParser, but a string-level pass is cheap
+      // belt-and-braces against any path that bypasses the parse
+      // step (malformed HTML that DOMParser couldn't handle, etc.).
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/?(?:div|span)[^>]*>/gi, '')
+      // Collapse the runs of spaces that the <br> → ' ' replacement
+      // and the dropped tags can leave behind.
+      .replace(/[ \t]{2,}/g, ' ')
+  );
 }
 
 /**
@@ -392,9 +392,7 @@ export function htmlToMarkdown(html: string): string {
  */
 export function unescapeHeadingNumberDot(markdown: string): string {
   if (!markdown || !markdown.includes('\\.')) return markdown;
-  return markdown.replace(/^(#+\s+.*)$/gm, (line) =>
-    line.replace(/(\d)\\\./g, '$1.'),
-  );
+  return markdown.replace(/^(#+\s+.*)$/gm, (line) => line.replace(/(\d)\\\./g, '$1.'));
 }
 
 /**

@@ -3,3 +3,9 @@ release
 dist
 node_modules
 package-lock.json
+
+# Test fixtures are byte-exact inputs/outputs for the clipboard-paste
+# regression suite (RAISE-40). Prettier would reformat the raw Word /
+# Google Docs HTML and normalise trailing newlines on the .expected.md
+# files, breaking the exact-match assertions that pin the real output.
+src/renderer/state/__tests__/fixtures/
