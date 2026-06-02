@@ -30,7 +30,7 @@ vi.mock('electron-updater', () => ({
   },
 }));
 
-import { shouldSkipPeriodicCheck } from '../autoUpdater';
+import { isManagedDeployment, shouldSkipPeriodicCheck } from '../autoUpdater';
 
 describe('shouldSkipPeriodicCheck', () => {
   it('skips when a download is in flight', () => {
@@ -54,5 +54,31 @@ describe('shouldSkipPeriodicCheck', () => {
     expect(shouldSkipPeriodicCheck('available')).toBe(false);
     expect(shouldSkipPeriodicCheck('not-available')).toBe(false);
     expect(shouldSkipPeriodicCheck('error')).toBe(false);
+  });
+});
+
+describe('isManagedDeployment (RAISE-90)', () => {
+  it('treats a non-writable Windows install dir as managed (per-machine / MSI)', () => {
+    // The Intune-deployed MSI lands in Program Files in the system
+    // context, so a standard user can't write it. electron-updater can't
+    // self-update there → skip checks and let Intune own the version.
+    expect(isManagedDeployment('win32', false)).toBe(true);
+  });
+
+  it('treats a writable Windows install dir as self-updating (per-user NSIS)', () => {
+    // The NSIS per-user build installs to a writable %LOCALAPPDATA%
+    // location, so it keeps auto-updating as before.
+    expect(isManagedDeployment('win32', true)).toBe(false);
+  });
+
+  it('never treats non-Windows platforms as managed, regardless of writability', () => {
+    // macOS (Squirrel.Mac) and Linux use different update mechanisms;
+    // the writability heuristic is Windows-only, so these always keep
+    // updating. Both writability values are pinned to prove the platform
+    // guard short-circuits before the writability check.
+    expect(isManagedDeployment('darwin', false)).toBe(false);
+    expect(isManagedDeployment('darwin', true)).toBe(false);
+    expect(isManagedDeployment('linux', false)).toBe(false);
+    expect(isManagedDeployment('linux', true)).toBe(false);
   });
 });

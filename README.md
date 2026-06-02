@@ -58,7 +58,7 @@ Each platform target wraps `electron-vite build` and then runs `electron-builder
 
 ```sh
 npm run build:mac     # → dist/Rise MD Editor-{version}-universal.dmg + .zip
-npm run build:win     # → dist/Rise MD Editor-{version}-Setup.exe + .zip
+npm run build:win     # → dist/Rise-MD-Editor-{version}-Setup.exe (per-user) + -win.msi (per-machine/Intune) + .zip
 npm run build:linux   # → dist/Rise MD Editor-{version}.AppImage + .deb
 npm run build:all     # all three (only useful on a CI host with the toolchains)
 ```
@@ -151,6 +151,8 @@ Signing flow:
 No `.pfx` on the runner, no long-lived service-principal secret. The federated credential is scoped to this repo's `rise-md-editor-signing` environment, so only workflow runs that opt into that environment can sign.
 
 For local `npm run build:win` (no Azure auth), the sign callback logs a "skipping" warning and returns — producing an unsigned `.exe`. Same behavior as before for dev builds.
+
+**Two Windows installers.** Releases ship both a per-user **NSIS `.exe`** (individual downloads, auto-updates via electron-updater) and a per-machine **MSI** (`Rise-MD-Editor-{version}-win.msi`) for managed deployment through Microsoft Intune. The same sign callback signs the MSI too, and CI verifies both are signed. MSI installs deliberately do **not** self-update — IT owns the version through Intune. See the [release guide's Intune section](docs/release-process.md#windows-msi-for-intune-deployment).
 
 - Operational release guide (cutting releases, secrets, troubleshooting): [`docs/release-process.md`](docs/release-process.md)
 - One-time Azure provisioning recipe (resource topology, identity validation, app registration, federated credential): [`docs/azure-signing-setup.md`](docs/azure-signing-setup.md)
