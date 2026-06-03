@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-06-02
+
+Adds a second Windows installer — a per-machine **MSI** for managed deployment via Microsoft Intune — alongside the existing per-user NSIS `.exe`. IT can now push Rise MD Editor to user machines: Intune detects the MSI by product code, installs it in the system context, and supersedes prior versions cleanly. The MSI is signed by the same Azure Artifact Signing flow as the `.exe`, and the release build now fails if either installer is unsigned. MSI installs deliberately don't self-update (IT owns the version through Intune); the NSIS per-user build is unchanged and keeps auto-updating.
+
+No user-data migration vs 1.0.1 — same electron-store keys. Existing NSIS / macOS installs auto-update via electron-updater on next launch.
+
 ### Added
 
 - **Windows MSI installer for managed deployment via Microsoft Intune** ([RAISE-90](https://risepeople.atlassian.net/browse/RAISE-90)). Releases now produce a second Windows artifact — a per-machine `.msi` (`Rise-MD-Editor-<version>-win.msi`) — alongside the existing per-user NSIS `.exe`. It's the format IT departments deploy through Intune: Intune detects install state from the MSI product code (no hand-authored detection rule), installs it in the system context so the app is available to every user on the device, and supersedes prior versions cleanly (electron-builder derives a stable `UpgradeCode` from the app ID). Silent install is the standard `msiexec /i Rise-MD-Editor-<version>-win.msi /qn`. The MSI is signed by the same Azure Artifact Signing callback as the `.exe`, and CI now fails the build if either installer is missing or unsigned. **MSI installs deliberately do not self-update**: a per-machine install lives in `Program Files`, which a standard user can't write, so electron-updater can't update in place and would only surface un-actionable "update available" banners while fighting Intune's managed version. The app detects this at runtime (on Windows, the install directory isn't user-writable) and skips update checks entirely — IT owns the version through Intune supersedence. The per-user NSIS build is unaffected and keeps auto-updating. The MSI builds via the WiX toolchain that electron-builder fetches on demand on the `windows-latest` runner; no new secrets or signing setup. See the [release guide's Intune section](docs/release-process.md#windows-msi-for-intune-deployment).
