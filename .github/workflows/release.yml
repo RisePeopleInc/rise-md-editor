@@ -301,20 +301,31 @@ jobs:
       # reach Azure), this would be NotSigned and the step would fail
       # the job. SignerCertificate.Subject contains the cert subject
       # (e.g. "CN=Rise People Inc, O=...").
-      - name: Verify signature on the installer
+      # RAISE-90: verify BOTH shipped installers are signed — the NSIS
+      # Setup.exe (per-user, auto-updating) and the MSI (per-machine, for
+      # Intune). A required installer that's missing or not `Valid` fails
+      # the job, so an unsigned artifact can never reach a Release.
+      - name: Verify signatures on the installers
         shell: pwsh
         run: |
-          $installer = Get-ChildItem -Path dist -Filter '*-Setup.exe' | Select-Object -First 1
-          if (-not $installer) {
-            Write-Error "No NSIS installer found under dist/"
-            exit 1
-          }
-          $sig = Get-AuthenticodeSignature $installer.FullName
-          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
-          Write-Host "Status: $($sig.Status)"
-          if ($sig.Status -ne 'Valid') {
-            Write-Error "Signature status is $($sig.Status); expected Valid"
-            exit 1
+          $required = @(
+            @{ Label = 'NSIS installer'; Filter = '*-Setup.exe' },
+            @{ Label = 'MSI installer';  Filter = '*-win.msi'   }
+          )
+          foreach ($r in $required) {
+            $installer = Get-ChildItem -Path dist -Filter $r.Filter | Select-Object -First 1
+            if (-not $installer) {
+              Write-Error "No $($r.Label) ($($r.Filter)) found under dist/"
+              exit 1
+            }
+            $sig = Get-AuthenticodeSignature $installer.FullName
+            Write-Host "$($r.Label): $($installer.Name)"
+            Write-Host "  Signer: $($sig.SignerCertificate.Subject)"
+            Write-Host "  Status: $($sig.Status)"
+            if ($sig.Status -ne 'Valid') {
+              Write-Error "$($r.Label) signature status is $($sig.Status); expected Valid"
+              exit 1
+            }
           }
 
       - uses: actions/upload-artifact@v7
@@ -322,6 +333,7 @@ jobs:
           name: win-artifacts
           path: |
             dist/*.exe
+            dist/*.msi
             dist/*.zip
             dist/*.blockmap
             dist/latest.yml
@@ -362,6 +374,7 @@ jobs:
             dist/**/*.dmg
             dist/**/*.zip
             dist/**/*.exe
+            dist/**/*.msi
             dist/**/*.blockmap
             dist/**/latest-mac.yml
             dist/**/latest.yml
@@ -372,7 +385,8 @@ jobs:
 
             ### Artifacts
             - **macOS** (`.dmg` + `.zip`): universal binary, Developer ID signed, Apple notarized. Drag to /Applications.
-            - **Windows** (`.exe` + `.zip`): NSIS installer, signed via [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) (Microsoft-rooted trust chain). Publisher: Rise People Inc.
+            - **Windows** (`.exe`): NSIS installer for individual users — per-user install, auto-updates. Signed via [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) (Microsoft-rooted trust chain). Publisher: Rise People Inc.
+            - **Windows** (`.msi`): per-machine installer for managed deployment via Microsoft Intune (`msiexec /i Rise-MD-Editor-*-win.msi /qn`). Same signing. Does **not** self-update — IT manages the version through Intune.
 
             ### Auto-update
-            Existing installs receive this version automatically via electron-updater on next launch.
+            Existing **NSIS / macOS** installs receive this version automatically via electron-updater on next launch. **MSI** installs are updated by IT through Intune, not electron-updater.

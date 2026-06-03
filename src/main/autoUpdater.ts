@@ -1,3 +1,5 @@
+import { accessSync, constants } from 'node:fs';
+import { dirname } from 'node:path';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
@@ -93,6 +95,49 @@ export function shouldSkipPeriodicCheck(status: UpdateState['status']): boolean 
 }
 
 /**
+ * RAISE-90: decide whether this is a managed / per-machine install that
+ * must NOT self-update. Pure so it's unit-testable without touching the
+ * filesystem or electron — the runtime wrapper below feeds it the live
+ * platform and an install-dir writability probe.
+ *
+ * The signal is "the directory the app runs from is not writable by the
+ * current user." That's exactly the per-machine case: our MSI (RAISE-90)
+ * installs to `Program Files` in the system context for Intune, so a
+ * standard user can't write there. `electron-updater` (NSIS differential
+ * update) can't rewrite the install in place under those conditions — it
+ * would only ever surface an un-actionable "update available" banner while
+ * fighting Intune, which now owns the version. So we skip update checks
+ * entirely for this build.
+ *
+ * Scoped to Windows: the NSIS per-user build installs to a writable
+ * `%LOCALAPPDATA%` location (stays self-updating), and macOS / Linux use
+ * different update mechanisms whose writability semantics we don't want to
+ * second-guess here — they always return false (keep updating).
+ */
+export function isManagedDeployment(
+  platform: NodeJS.Platform,
+  installDirWritable: boolean,
+): boolean {
+  if (platform !== 'win32') return false;
+  return !installDirWritable;
+}
+
+/** Probe whether the directory containing the app executable is writable. */
+function installDirIsWritable(): boolean {
+  try {
+    accessSync(dirname(app.getPath('exe')), constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Runtime convenience wrapper around {@link isManagedDeployment}. */
+function isManagedInstall(): boolean {
+  return isManagedDeployment(process.platform, installDirIsWritable());
+}
+
+/**
  * RAISE-19: read the most recent UpdateState from outside this module —
  * `src/main/index.ts` needs the pending version string for the dirty-tab
  * dialog copy ("Save changes before restarting to install Rise MD Editor
@@ -166,6 +211,17 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   // Skip the actual check in dev / unpackaged. autoUpdater would log a
   // benign error ("update info file not found") otherwise.
   if (!app.isPackaged) {
+    broadcast({ status: 'idle' }, getWindow());
+    return;
+  }
+
+  // RAISE-90: skip auto-update for a managed / per-machine install (the
+  // MSI we ship for Intune deployment). Such installs live in Program
+  // Files — not user-writable — so electron-updater can't self-update and
+  // would only nag with un-actionable banners while fighting Intune, which
+  // owns the version. IT pushes new versions through Intune supersedence.
+  // The NSIS per-user build is writable and keeps auto-updating.
+  if (isManagedInstall()) {
     broadcast({ status: 'idle' }, getWindow());
     return;
   }

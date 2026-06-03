@@ -219,6 +219,19 @@ win:
   target:
     - target: nsis
       arch: x64
+    # RAISE-90: MSI for managed deployment (IT pushes this to user
+    # machines via Microsoft Intune). Intune detects install state from
+    # the MSI product code — no hand-authored detection rules — and
+    # installs it per-machine in the system context. This is an ADDITIONAL
+    # artifact: NSIS above stays the auto-updating build for direct
+    # end-user downloads; the MSI deliberately does NOT self-update (the
+    # app gates electron-updater off for per-machine installs — see
+    # `src/main/autoUpdater.ts` — because Program Files isn't user-writable
+    # and Intune owns the version). Built via the WiX toolchain that
+    # electron-builder fetches on demand; signed by the same
+    # `signtoolOptions.sign` callback as the .exe (it's path-agnostic).
+    - target: msi
+      arch: x64
     - target: zip
       arch: x64
   # Code signing via Azure Artifact Signing (RAISE-58).
@@ -261,6 +274,23 @@ nsis:
   allowToChangeInstallationDirectory: true
   # See the comment on `mac.artifactName` above for why this is hard-coded.
   artifactName: Rise-MD-Editor-${version}-Setup.${ext}
+
+# RAISE-90: MSI options for the Intune-deployed build.
+msi:
+  # Per-machine (system context) install — Intune runs the MSI as SYSTEM
+  # and the app must be available to every user on the device. This is the
+  # whole reason for the MSI; it also lands the app in Program Files, which
+  # is the signal the auto-updater uses to disable itself for this build.
+  perMachine: true
+  # oneClick stays at its default (true): Intune drives a silent install
+  # (`msiexec /i ... /qn`), so there's no wizard to show regardless.
+  # upgradeCode is left to electron-builder, which derives a stable GUID
+  # from appId — successive versions share it, so Intune supersedes a prior
+  # install cleanly instead of installing side-by-side.
+  #
+  # Artifact name comes from `win.artifactName` above → the MSI is emitted
+  # as `Rise-MD-Editor-${version}-win.msi` (the .exe overrides to -Setup via
+  # `nsis.artifactName`; the MSI keeps the generic win name).
 
 # ---------------------------------------------------------------------------
 # Linux

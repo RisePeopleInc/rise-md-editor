@@ -81,6 +81,32 @@ None of these are sensitive in the traditional sense (they're publicly-visible i
 - Status: This digital signature is OK
 - Timestamp: stamped by `http://timestamp.acs.microsoft.com`
 
+## Windows MSI for Intune deployment
+
+Every release produces **two** Windows installers ([RAISE-90](https://risepeople.atlassian.net/browse/RAISE-90)):
+
+| Artifact                             | Install scope     | Audience                  | Auto-update                  |
+| ------------------------------------ | ----------------- | ------------------------- | ---------------------------- |
+| `Rise-MD-Editor-<version>-Setup.exe` | Per-user (NSIS)   | Individual downloads      | Yes — electron-updater       |
+| `Rise-MD-Editor-<version>-win.msi`   | Per-machine (MSI) | Managed deploy via Intune | **No** — IT owns the version |
+
+Both are signed by the same Azure Artifact Signing callback, and CI's "Verify signatures on the installers" step fails the build if either is missing or not `Valid`.
+
+**Why MSI for Intune.** Intune treats an MSI as a line-of-business app and detects install state from the MSI **product code** automatically — no hand-authored detection rule. electron-builder derives a stable `UpgradeCode` from the app ID, so each new version supersedes the prior install instead of stacking side-by-side. The MSI installs **per-machine** (system context) so the app is available to every user on the device.
+
+**Silent install** (what Intune runs under the hood):
+
+```sh
+msiexec /i Rise-MD-Editor-<version>-win.msi /qn
+# uninstall: msiexec /x Rise-MD-Editor-<version>-win.msi /qn
+```
+
+**No self-update for MSI installs.** A per-machine install lives in `Program Files`, which a standard user can't write — so electron-updater can't rewrite it in place and would only surface un-actionable "update available" banners while fighting Intune's managed version. The app detects this at runtime (`isManagedDeployment` in [`src/main/autoUpdater.ts`](../src/main/autoUpdater.ts): on Windows, the install directory isn't user-writable) and skips update checks entirely. IT ships new versions by uploading the new `.msi` to Intune; Intune's supersedence handles the upgrade. The NSIS per-user build is unaffected and keeps auto-updating.
+
+**WiX toolchain.** The MSI target builds via the WiX Toolset, which electron-builder fetches on demand on the `windows-latest` runner — no extra setup step. Before relying on it in a tagged release, smoke-test via `workflow_dispatch` (see the dry-run section above): the build jobs run but no Release is published.
+
+**Handing off to IT.** IT needs the signed `.msi` from the published Release (it's attached alongside the `.exe`). They wrap it as a `.intunewin` / line-of-business app in the Intune admin center and assign it — that side is theirs; we only provide the signed per-machine MSI.
+
 ## Troubleshooting
 
 ### "Notarization failed"
