@@ -57,7 +57,7 @@ All four (lint / typecheck / build / test) should pass before opening a PR. CI r
 Each platform target wraps `electron-vite build` and then runs `electron-builder` with the matching flag. Output lands in `dist/`.
 
 ```sh
-npm run build:mac     # → dist/Rise MD Editor-{version}-universal.dmg + .zip
+npm run build:mac     # → dist/Rise-MD-Editor-{version}-universal.dmg + -universal-mac.pkg (MDM) + .zip
 npm run build:win     # → dist/Rise-MD-Editor-{version}-Setup.exe (per-user) + -win.msi (per-machine/Intune) + .zip
 npm run build:linux   # → dist/Rise MD Editor-{version}.AppImage + .deb
 npm run build:all     # all three (only useful on a CI host with the toolchains)
@@ -94,6 +94,18 @@ The current cert is `Developer ID Application: Rise People Inc (TJFLUA3UJ3)`, ha
    codesign -dvv dist/mac-universal/Rise MD Editor.app | head -10
    # Should print: "Authority=Developer ID Application: Rise People Inc..."
    ```
+
+#### Signing the `.pkg` (managed-deployment build)
+
+Releases also produce a per-machine **`.pkg`** for MDM deployment (Jamf / Kandji / Intune-for-Mac). A `.pkg` must be signed with a **Developer ID _Installer_** certificate — a _different_ cert from the Developer ID _Application_ cert above. Provision it the same way (Certificate Assistant CSR → developer.apple.com → _Developer ID Installer_, **G2 Sub-CA** intermediate → install the `.cer`), then verify both identities exist:
+
+```sh
+security find-identity -v | grep "Developer ID"
+#  …  "Developer ID Application: Rise People Inc (TJFLUA3UJ3)"
+#  …  "Developer ID Installer: Rise People Inc (TJFLUA3UJ3)"
+```
+
+In CI, electron-builder reads the Installer cert from `CSC_INSTALLER_LINK` / `CSC_INSTALLER_KEY_PASSWORD` (the `MAC_INSTALLER_CSC_*` repo secrets) and signs the pkg automatically. The `.pkg` is for MDM only and does **not** self-update — see the [release guide's macOS MDM section](docs/release-process.md#macos-pkg-for-mdm-deployment).
 
 #### Building unsigned (CI without secrets)
 

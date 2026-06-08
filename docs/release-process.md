@@ -33,10 +33,12 @@ All five live under _Settings → Secrets and variables → Actions_ on the repo
 
 ### macOS signing
 
-| Secret name            | Source                                                                                     | Notes                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `MAC_CSC_LINK`         | Base64-encoded `.p12` of the _Developer ID Application: Rise People Inc (TJFLUA3UJ3)_ cert | Generate with `base64 -i cert.p12 \| pbcopy`. The `.p12` itself lives in 1Password. |
-| `MAC_CSC_KEY_PASSWORD` | Password set when exporting the `.p12` from Keychain Access                                | Same 1Password entry as the `.p12`                                                  |
+| Secret name                      | Source                                                                                                  | Notes                                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `MAC_CSC_LINK`                   | Base64-encoded `.p12` of the _Developer ID **Application**: Rise People Inc (TJFLUA3UJ3)_ cert          | Signs the `.app`/`.dmg`. Generate with `base64 -i cert.p12 \| pbcopy`. The `.p12` itself lives in 1Password.         |
+| `MAC_CSC_KEY_PASSWORD`           | Password set when exporting the `.p12` from Keychain Access                                             | Same 1Password entry as the `.p12`                                                                                   |
+| `MAC_INSTALLER_CSC_LINK`         | Base64-encoded `.p12` of the _Developer ID **Installer**: Rise People Inc (TJFLUA3UJ3)_ cert (RAISE-91) | Signs the `.pkg` (MDM). Separate cert from the Application one — electron-builder reads it via `CSC_INSTALLER_LINK`. |
+| `MAC_INSTALLER_CSC_KEY_PASSWORD` | Password set when exporting the Installer `.p12`                                                        | Same 1Password entry as the Installer `.p12`                                                                         |
 
 ### macOS notarization
 
@@ -80,6 +82,26 @@ None of these are sensitive in the traditional sense (they're publicly-visible i
 - Issuer: chains up to Microsoft's trusted root
 - Status: This digital signature is OK
 - Timestamp: stamped by `http://timestamp.acs.microsoft.com`
+
+## macOS .pkg for MDM deployment
+
+Every release produces **two** macOS artifacts ([RAISE-91](https://risepeople.atlassian.net/browse/RAISE-91)):
+
+| Artifact                                     | Install scope               | Audience               | Auto-update                  |
+| -------------------------------------------- | --------------------------- | ---------------------- | ---------------------------- |
+| `Rise-MD-Editor-<version>-universal.dmg`     | Drag to /Applications       | Individual downloads   | Yes — electron-updater       |
+| `Rise-MD-Editor-<version>-universal-mac.pkg` | Per-machine (/Applications) | Managed deploy via MDM | **No** — IT owns the version |
+
+**Two signing certs.** macOS uses _different_ Developer ID certs for the app vs. the installer:
+
+- The `.app`/`.dmg` are signed with **Developer ID Application** (`MAC_CSC_LINK`), as before.
+- The `.pkg` is signed with **Developer ID Installer** (`MAC_INSTALLER_CSC_LINK`) — a separate cert. electron-builder reads it from `CSC_INSTALLER_LINK` / `CSC_INSTALLER_KEY_PASSWORD`, imports it into the same temporary keychain, and signs the pkg automatically. Both artifacts are notarized with the same notarytool credentials. CI's "Verify .pkg signature & notarization" step fails the build if the pkg isn't signed by a Developer ID Installer cert and accepted by `spctl --assess --type install`.
+
+**Provisioning the Installer cert** (one-time, already done): developer.apple.com → Certificates → **+** → _Developer ID Installer_ → choose the **G2 Sub-CA** intermediate → upload a CSR → download + install the `.cer` (it pairs with the private key your CSR created) → in Keychain Access, export the cert **and** its key as a `.p12` → set `MAC_INSTALLER_CSC_LINK` (base64 of the `.p12`) and `MAC_INSTALLER_CSC_KEY_PASSWORD`. Note: macOS-exported `.p12` files use the legacy RC2 cipher; inspect with `openssl pkcs12 … -legacy`, but CI loads them fine (electron-builder uses `security import`).
+
+**Deploying via MDM.** Hand IT the signed `.pkg` from the published Release. They upload it to the MDM (Jamf, Kandji, Munki, Intune-for-Mac) and assign it; the MDM installs it in the system context. A standard `installer` invocation is `sudo installer -pkg Rise-MD-Editor-<version>-universal-mac.pkg -target /`.
+
+**No self-update for pkg installs.** A `/Applications` install on a managed (non-admin) Mac isn't user-writable, so Squirrel.Mac can't update in place and would only surface un-actionable banners. The app detects this at runtime (`isManagedDeployment` in [`src/main/autoUpdater.ts`](../src/main/autoUpdater.ts): the install dir isn't user-writable) and skips update checks. IT ships new versions through the MDM. The `.dmg` install (and any admin who drags it into a writable `/Applications`) keeps auto-updating.
 
 ## Windows MSI for Intune deployment
 
