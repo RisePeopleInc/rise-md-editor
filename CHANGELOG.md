@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-06-08
+
+Adds a per-machine **`.pkg`** macOS installer for managed deployment via device management (Jamf, Kandji, Intune-for-Mac), alongside the existing `.dmg`. IT can now push Rise MD Editor to Macs the same way the v1.0.2 MSI enabled for Windows. The `.pkg` is signed with a Developer ID Installer certificate and notarized; managed installs don't self-update (IT owns the version through MDM), while the `.dmg` build keeps auto-updating. Completes the cross-platform managed-deployment story (Windows MSI + macOS pkg).
+
+No user-data migration vs 1.0.2 — same electron-store keys. Existing `.dmg` / NSIS installs auto-update via electron-updater on next launch.
+
 ### Added
 
 - **macOS `.pkg` installer for managed (MDM) deployment** ([RAISE-91](https://risepeople.atlassian.net/browse/RAISE-91)). Releases now produce a signed + notarized per-machine `.pkg` (`Rise-MD-Editor-<version>-universal-mac.pkg`) alongside the per-user `.dmg` — the macOS counterpart to the Windows MSI (RAISE-90). IT can deploy it to Macs through any device-management system (Jamf, Kandji, Munki, Intune-for-Mac); it installs the app into `/Applications` in the system context (`sudo installer -pkg … -target /` under the hood). The `.pkg` is signed with a **Developer ID Installer** certificate — distinct from the Developer ID Application cert that signs the `.app`/`.dmg` — which electron-builder reads from `CSC_INSTALLER_LINK`; both artifacts are notarized, and CI now fails the build if the pkg isn't signed by a Developer ID Installer cert and accepted by `spctl --assess --type install`. **`.pkg` installs deliberately do not self-update**: a `/Applications` install on a managed (non-admin) Mac isn't user-writable, so electron-updater can't update in place and would only surface un-actionable banners while fighting the MDM, which owns the version. The app detects this at runtime and skips update checks — the same `isManagedDeployment` gate added for the Windows MSI, now extended to macOS. The `.dmg` build (and any admin who drags it into a writable `/Applications`) is unaffected and keeps auto-updating. See the [release guide's macOS MDM section](docs/release-process.md#macos-pkg-for-mdm-deployment).
