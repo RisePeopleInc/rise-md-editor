@@ -150,6 +150,18 @@ mac:
   target:
     - target: dmg
       arch: universal
+    # RAISE-91: signed + notarized .pkg for managed deployment (IT pushes
+    # this to Macs via device management — Jamf / Kandji / Munki /
+    # Intune-for-Mac). Installs the app per-machine into /Applications.
+    # This is the macOS counterpart to the Windows MSI (RAISE-90) and an
+    # ADDITIONAL artifact: the .dmg above stays the auto-updating build for
+    # direct end-user downloads. The .pkg deliberately does NOT self-update
+    # (the app gates electron-updater off when /Applications isn't
+    # user-writable — see src/main/autoUpdater.ts). Signed with the
+    # Developer ID *Installer* cert (distinct from the Application cert used
+    # for the .app/.dmg) via CSC_INSTALLER_LINK in the release workflow.
+    - target: pkg
+      arch: universal
     - target: zip
       arch: universal
   # Code signing.
@@ -206,6 +218,24 @@ dmg:
   # See the comment on `mac.artifactName` above for why this is hard-coded
   # to `Rise-MD-Editor` rather than `${productName}`.
   artifactName: Rise-MD-Editor-${version}-${arch}.${ext}
+
+# RAISE-91: MSI's macOS twin — the .pkg installer for MDM deployment.
+pkg:
+  # Install the app bundle straight into /Applications (system-wide), which
+  # is what MDM expects and what makes the app available to every user on
+  # the managed device.
+  installLocation: /Applications
+  # Don't let the installer relocate an existing copy found elsewhere on
+  # disk — MDM wants a deterministic /Applications install, not a move of
+  # whatever stray bundle Spotlight happens to find.
+  isRelocatable: false
+  # Per-machine: no "install for me only" option. The whole point is a
+  # system-context deploy.
+  isVersionChecked: true
+  # Artifact name comes from `mac.artifactName` above → the pkg is emitted
+  # as `Rise-MD-Editor-${version}-universal-mac.pkg` (the .dmg overrides to
+  # drop the `-mac` suffix via `dmg.artifactName`; the pkg keeps the
+  # generic mac name).
 
 # ---------------------------------------------------------------------------
 # Windows

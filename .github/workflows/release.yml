@@ -77,6 +77,13 @@ jobs:
           # https://www.electron.build/code-signing
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # RAISE-91: Apple Developer ID *Installer* cert (distinct from the
+          # Application cert above) — required to sign the .pkg target.
+          # electron-builder imports it into the same temp keychain and uses
+          # it automatically for the pkg; the .app/.dmg keep using the
+          # Application cert. https://www.electron.build/code-signing
+          CSC_INSTALLER_LINK: ${{ secrets.MAC_INSTALLER_CSC_LINK }}
+          CSC_INSTALLER_KEY_PASSWORD: ${{ secrets.MAC_INSTALLER_CSC_KEY_PASSWORD }}
           # Notarization (notarytool). All three are required — if any
           # is missing electron-builder logs a warning and ships a
           # signed-but-unnotarized DMG (Gatekeeper malware dialog on
@@ -111,11 +118,36 @@ jobs:
           # when notarization succeeded and the staple landed.
           spctl --assess --type execute --verbose=4 "$APP_PATH" 2>&1
 
+      # RAISE-91: the .pkg is signed with the Developer ID *Installer* cert
+      # and notarized separately from the .app. Verify both: pkgutil shows
+      # the installer signer chain, and `spctl --assess --type install`
+      # (note: install, not execute) confirms Gatekeeper accepts the
+      # notarized installer. Fails the job if the pkg is missing/unsigned.
+      - name: Verify .pkg signature & notarization
+        if: ${{ inputs.skip_signing != true }}
+        run: |
+          PKG_PATH=$(find dist -name '*.pkg' -maxdepth 2 -type f | head -1)
+          if [[ -z "$PKG_PATH" ]]; then
+            echo "::error::No .pkg found under dist/"
+            exit 1
+          fi
+          echo "Inspecting: $PKG_PATH"
+          # Expect a chain ending in "Developer ID Installer: Rise People Inc".
+          pkgutil --check-signature "$PKG_PATH"
+          if ! pkgutil --check-signature "$PKG_PATH" | grep -q "Developer ID Installer"; then
+            echo "::error::pkg is not signed with a Developer ID Installer cert"
+            exit 1
+          fi
+          # `--type install` is the installer-policy assessment; "accepted" +
+          # "source=Notarized Developer ID" means the staple landed.
+          spctl --assess --type install --verbose=4 "$PKG_PATH" 2>&1
+
       - uses: actions/upload-artifact@v7
         with:
           name: mac-artifacts
           path: |
             dist/*.dmg
+            dist/*.pkg
             dist/*.zip
             dist/*.blockmap
             dist/latest-mac.yml
@@ -372,6 +404,7 @@ jobs:
           name: Rise MD Editor ${{ github.ref_name }}
           files: |
             dist/**/*.dmg
+            dist/**/*.pkg
             dist/**/*.zip
             dist/**/*.exe
             dist/**/*.msi
@@ -384,9 +417,10 @@ jobs:
             Automated build via GitHub Actions ([workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})).
 
             ### Artifacts
-            - **macOS** (`.dmg` + `.zip`): universal binary, Developer ID signed, Apple notarized. Drag to /Applications.
+            - **macOS** (`.dmg`): universal binary for individual users — drag to /Applications, auto-updates. Developer ID signed, Apple notarized.
+            - **macOS** (`.pkg`): per-machine installer for managed deployment via device management (Jamf / Kandji / Intune-for-Mac). Developer ID Installer signed + notarized. Does **not** self-update — IT manages the version through MDM.
             - **Windows** (`.exe`): NSIS installer for individual users — per-user install, auto-updates. Signed via [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/) (Microsoft-rooted trust chain). Publisher: Rise People Inc.
             - **Windows** (`.msi`): per-machine installer for managed deployment via Microsoft Intune (`msiexec /i Rise-MD-Editor-*-win.msi /qn`). Same signing. Does **not** self-update — IT manages the version through Intune.
 
             ### Auto-update
-            Existing **NSIS / macOS** installs receive this version automatically via electron-updater on next launch. **MSI** installs are updated by IT through Intune, not electron-updater.
+            Existing **.dmg / .exe (NSIS)** installs receive this version automatically via electron-updater on next launch. **.pkg / .msi** managed installs are updated by IT through MDM, not electron-updater.

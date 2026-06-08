@@ -95,30 +95,37 @@ export function shouldSkipPeriodicCheck(status: UpdateState['status']): boolean 
 }
 
 /**
- * RAISE-90: decide whether this is a managed / per-machine install that
- * must NOT self-update. Pure so it's unit-testable without touching the
- * filesystem or electron — the runtime wrapper below feeds it the live
- * platform and an install-dir writability probe.
+ * RAISE-90 / RAISE-91: decide whether this is a managed / per-machine
+ * install that must NOT self-update. Pure so it's unit-testable without
+ * touching the filesystem or electron — the runtime wrapper below feeds it
+ * the live platform and an install-dir writability probe.
  *
  * The signal is "the directory the app runs from is not writable by the
- * current user." That's exactly the per-machine case: our MSI (RAISE-90)
- * installs to `Program Files` in the system context for Intune, so a
- * standard user can't write there. `electron-updater` (NSIS differential
- * update) can't rewrite the install in place under those conditions — it
+ * current user." That's exactly the managed case on both desktop OSes:
+ *   - Windows (RAISE-90): the MSI installs to `Program Files` in the system
+ *     context for Intune, which a standard user can't write.
+ *   - macOS (RAISE-91): the .pkg installs to `/Applications` via MDM, which
+ *     a standard (non-admin) managed user can't write.
+ * In both cases `electron-updater` can't rewrite the install in place, so it
  * would only ever surface an un-actionable "update available" banner while
- * fighting Intune, which now owns the version. So we skip update checks
- * entirely for this build.
+ * fighting the MDM, which now owns the version. We skip update checks
+ * entirely for these builds.
  *
- * Scoped to Windows: the NSIS per-user build installs to a writable
- * `%LOCALAPPDATA%` location (stays self-updating), and macOS / Linux use
- * different update mechanisms whose writability semantics we don't want to
- * second-guess here — they always return false (keep updating).
+ * No regression for ordinary installs: the Windows NSIS per-user build lands
+ * in a writable `%LOCALAPPDATA%` location, and a macOS .dmg dragged to
+ * /Applications by an admin leaves the bundle writable by that admin — both
+ * report `installDirWritable: true` and keep auto-updating. Only locked-down
+ * managed machines (where self-update couldn't work anyway) are gated.
+ *
+ * Linux is left out: AppImage updates differently and its writability
+ * semantics aren't a reliable managed-vs-not signal — it always returns
+ * false (keep updating).
  */
 export function isManagedDeployment(
   platform: NodeJS.Platform,
   installDirWritable: boolean,
 ): boolean {
-  if (platform !== 'win32') return false;
+  if (platform !== 'win32' && platform !== 'darwin') return false;
   return !installDirWritable;
 }
 
@@ -215,12 +222,14 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
     return;
   }
 
-  // RAISE-90: skip auto-update for a managed / per-machine install (the
-  // MSI we ship for Intune deployment). Such installs live in Program
-  // Files — not user-writable — so electron-updater can't self-update and
-  // would only nag with un-actionable banners while fighting Intune, which
-  // owns the version. IT pushes new versions through Intune supersedence.
-  // The NSIS per-user build is writable and keeps auto-updating.
+  // RAISE-90 / RAISE-91: skip auto-update for a managed / per-machine
+  // install — the Windows MSI (Program Files) or the macOS .pkg
+  // (/Applications) that IT pushes through device management. Those live in
+  // locations a standard managed user can't write, so electron-updater
+  // can't self-update and would only nag with un-actionable banners while
+  // fighting the MDM, which owns the version. IT ships new versions through
+  // MDM supersedence. The per-user NSIS build and admin .dmg installs are
+  // writable and keep auto-updating.
   if (isManagedInstall()) {
     broadcast({ status: 'idle' }, getWindow());
     return;

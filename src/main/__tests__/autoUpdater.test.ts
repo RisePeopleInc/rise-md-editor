@@ -57,7 +57,7 @@ describe('shouldSkipPeriodicCheck', () => {
   });
 });
 
-describe('isManagedDeployment (RAISE-90)', () => {
+describe('isManagedDeployment (RAISE-90 / RAISE-91)', () => {
   it('treats a non-writable Windows install dir as managed (per-machine / MSI)', () => {
     // The Intune-deployed MSI lands in Program Files in the system
     // context, so a standard user can't write it. electron-updater can't
@@ -71,13 +71,24 @@ describe('isManagedDeployment (RAISE-90)', () => {
     expect(isManagedDeployment('win32', true)).toBe(false);
   });
 
-  it('never treats non-Windows platforms as managed, regardless of writability', () => {
-    // macOS (Squirrel.Mac) and Linux use different update mechanisms;
-    // the writability heuristic is Windows-only, so these always keep
-    // updating. Both writability values are pinned to prove the platform
-    // guard short-circuits before the writability check.
-    expect(isManagedDeployment('darwin', false)).toBe(false);
+  it('treats a non-writable macOS install dir as managed (MDM-deployed .pkg)', () => {
+    // RAISE-91: the .pkg installs into /Applications via MDM; a standard
+    // managed (non-admin) user can't write it, so Squirrel.Mac can't
+    // self-update → skip checks and let the MDM own the version.
+    expect(isManagedDeployment('darwin', false)).toBe(true);
+  });
+
+  it('treats a writable macOS install dir as self-updating (admin .dmg install)', () => {
+    // An admin who drags the .dmg into /Applications leaves the bundle
+    // writable, so the .dmg install keeps auto-updating — no regression.
     expect(isManagedDeployment('darwin', true)).toBe(false);
+  });
+
+  it('never gates Linux, regardless of writability', () => {
+    // AppImage updates differently and its writability isn't a reliable
+    // managed-vs-not signal, so Linux always keeps updating. Both
+    // writability values are pinned to prove the platform guard
+    // short-circuits before the writability check.
     expect(isManagedDeployment('linux', false)).toBe(false);
     expect(isManagedDeployment('linux', true)).toBe(false);
   });
