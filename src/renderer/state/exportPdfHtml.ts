@@ -1,9 +1,5 @@
-import MarkdownIt from 'markdown-it';
-import { full as markdownItEmoji } from 'markdown-it-emoji';
-import markdownItTaskLists from 'markdown-it-task-lists';
-import { looksLikeFilenameExtension } from './filenameExtensions';
 import { splitFrontmatter } from './markdown';
-import { markdownItComments } from './markdownItComments';
+import { buildPreviewMarkdownIt } from './previewMarkdownIt';
 
 /**
  * Build the print-ready HTML for PDF export
@@ -165,10 +161,10 @@ body.rise-md-prose {
  */
 function minifyCss(css: string): string {
   return css
-    .replace(/\/\*[\s\S]*?\*\//g, '')      // strip block comments
-    .replace(/\s+/g, ' ')                   // collapse whitespace runs
-    .replace(/\s*([{}:;,>])\s*/g, '$1')     // tighten around structural punctuation
-    .replace(/;}/g, '}')                    // drop redundant trailing semicolons
+    .replace(/\/\*[\s\S]*?\*\//g, '') // strip block comments
+    .replace(/\s+/g, ' ') // collapse whitespace runs
+    .replace(/\s*([{}:;,>])\s*/g, '$1') // tighten around structural punctuation
+    .replace(/;}/g, '}') // drop redundant trailing semicolons
     .trim();
 }
 
@@ -293,101 +289,17 @@ function stripComments(markdown: string): string {
  *      will render as broken in the PDF. Untitled docs typically
  *      don't have local image references anyway.
  */
-function resolveImageForPrint(
-  src: string,
-  markdownPath: string | null,
-): string {
+function resolveImageForPrint(src: string, markdownPath: string | null): string {
   if (!src) return src;
   if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return src;
   if (!markdownPath) return src;
 
-  const lastSep = Math.max(
-    markdownPath.lastIndexOf('/'),
-    markdownPath.lastIndexOf('\\'),
-  );
+  const lastSep = Math.max(markdownPath.lastIndexOf('/'), markdownPath.lastIndexOf('\\'));
   const dir = lastSep >= 0 ? markdownPath.slice(0, lastSep) : '';
 
   let absolute = `${dir}/${src}`.replace(/\\/g, '/');
   if (!absolute.startsWith('/')) absolute = `/${absolute}`;
   return `file://${encodeURI(absolute)}`;
-}
-
-function buildMarkdownIt(markdownPath: string | null): MarkdownIt {
-  const md = new MarkdownIt({
-    html: false,
-    linkify: true,
-    typographer: true,
-    breaks: false,
-  });
-  // RAISE-47: same filename-shaped autolink suppression as
-  // SplitView — keep linkify's default `fuzzyLink: true` so real
-  // bare-domain references (`www.cbc.ca`) autolink, but unwrap
-  // any rendered link whose href points at a filename-shaped
-  // suffix (`file.md`, `notes.txt`, etc.) so the PDF doesn't
-  // contain broken-host links.
-  const defaultLinkOpen = md.renderer.rules['link_open'];
-  const defaultLinkClose = md.renderer.rules['link_close'];
-  const wrapLinkRule = (defaultRule: typeof defaultLinkOpen) =>
-    (tokens: Parameters<NonNullable<typeof defaultLinkOpen>>[0],
-     idx: Parameters<NonNullable<typeof defaultLinkOpen>>[1],
-     options: Parameters<NonNullable<typeof defaultLinkOpen>>[2],
-     env: Parameters<NonNullable<typeof defaultLinkOpen>>[3],
-     self: Parameters<NonNullable<typeof defaultLinkOpen>>[4]) => {
-      const token = tokens[idx]!;
-      if (token.type === 'link_open') {
-        const hrefIdx = token.attrIndex('href');
-        if (hrefIdx >= 0) {
-          const href = token.attrs?.[hrefIdx]?.[1] ?? '';
-          if (looksLikeFilenameExtension(href)) {
-            token.meta = { ...(token.meta ?? {}), fileShaped: true };
-            return '';
-          }
-        }
-      }
-      if (token.type === 'link_close') {
-        let depth = 1;
-        for (let i = idx - 1; i >= 0; i--) {
-          const t = tokens[i]!;
-          if (t.type === 'link_close') depth += 1;
-          else if (t.type === 'link_open') {
-            depth -= 1;
-            if (depth === 0) {
-              if (t.meta?.['fileShaped']) return '';
-              break;
-            }
-          }
-        }
-      }
-      return defaultRule
-        ? defaultRule(tokens, idx, options, env, self)
-        : self.renderToken(tokens, idx, options);
-    };
-  md.renderer.rules['link_open'] = wrapLinkRule(defaultLinkOpen);
-  md.renderer.rules['link_close'] = wrapLinkRule(defaultLinkClose);
-  // Match SplitView's plugin set — keeps the PDF visually identical
-  // to what the user sees in the split-preview pane.
-  md.use(markdownItTaskLists, { enabled: false, label: true });
-  md.use(markdownItEmoji);
-  md.use(markdownItComments);
-
-  // Image-src rewrite for print. Same pattern as SplitView, but
-  // resolves to `file://` rather than `rise-md-asset://` because
-  // the off-screen print window doesn't see the custom protocol
-  // handler registered on the main BrowserWindow.
-  const defaultImage = md.renderer.rules.image;
-  md.renderer.rules.image = (tokens, idx, options, env, self) => {
-    const token = tokens[idx]!;
-    const srcIdx = token.attrIndex('src');
-    if (srcIdx >= 0) {
-      const src = token.attrs?.[srcIdx]?.[1] ?? '';
-      const resolved = resolveImageForPrint(src, markdownPath);
-      token.attrs![srcIdx]![1] = resolved;
-    }
-    return defaultImage
-      ? defaultImage(tokens, idx, options, env, self)
-      : self.renderToken(tokens, idx, options);
-  };
-  return md;
 }
 
 function escapeHtml(s: string): string {
@@ -410,7 +322,13 @@ function escapeHtml(s: string): string {
  * pain point in the competitive set.
  */
 export function buildPrintHtml(opts: BuildHtmlOptions): string {
-  const md = buildMarkdownIt(opts.markdownPath);
+  // RAISE-61: shared preview pipeline. Print uses static (non-interactive)
+  // task-list checkboxes and resolves images to `file://` (the off-screen
+  // print window doesn't see the `rise-md-asset://` protocol handler).
+  const md = buildPreviewMarkdownIt({
+    taskListsEnabled: false,
+    imageSrcResolver: (src) => resolveImageForPrint(src, opts.markdownPath),
+  });
 
   // Reuse SplitView's frontmatter handling: split YAML off the
   // top, render the body, prepend a styled metadata block.
@@ -432,8 +350,7 @@ export function buildPrintHtml(opts: BuildHtmlOptions): string {
   if (frontmatter !== null) {
     const escapedFm = escapeHtml(frontmatter);
     bodyContent =
-      `<div class="rise-md-frontmatter-preview"><pre>${escapedFm}</pre></div>` +
-      bodyHtml;
+      `<div class="rise-md-frontmatter-preview"><pre>${escapedFm}</pre></div>` + bodyHtml;
   }
 
   // RAISE-53: pick the trailing stylesheet based on output mode.

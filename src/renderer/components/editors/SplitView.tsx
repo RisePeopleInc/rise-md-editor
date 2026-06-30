@@ -7,19 +7,11 @@ import {
   type Ref,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import MarkdownIt from 'markdown-it';
-import { full as markdownItEmoji } from 'markdown-it-emoji';
-import markdownItTaskLists from 'markdown-it-task-lists';
-import {
-  SourceEditor,
-  type CursorPosition,
-  type SourceEditorHandle,
-} from './SourceEditor';
+import { SourceEditor, type CursorPosition, type SourceEditorHandle } from './SourceEditor';
 import type { ImageInsertion, PasteImageSnapshot } from '../../state/imageInsert';
 import { resolveAssetUrl } from '../../state/assetUrl';
-import { looksLikeFilenameExtension } from '../../state/filenameExtensions';
 import { splitFrontmatter } from '../../state/markdown';
-import { markdownItComments } from '../../state/markdownItComments';
+import { buildPreviewMarkdownIt } from '../../state/previewMarkdownIt';
 import { expandSingleTildeStrikethrough } from '../../state/exportPdfHtml';
 import type { WordWrap } from '../../env';
 
@@ -101,135 +93,19 @@ export function SplitView({
   const markdownPathRef = useRef(markdownPath);
   markdownPathRef.current = markdownPath;
 
-  // markdown-it: html disabled (escape any raw HTML in input — local notes
-  // don't tend to need it and we'd rather not let arbitrary tags through),
-  // linkify on for explicit-scheme URLs and email autolinks, breaks off so
-  // single newlines don't become <br> (matches CommonMark / Milkdown
-  // behaviour).
-  const md = useMemo(() => {
-    const instance = new MarkdownIt({
-      html: false,
-      linkify: true,
-      typographer: true,
-      breaks: false,
-    });
-    // RAISE-47: keep linkify's default `fuzzyLink: true` so bare
-    // hostnames like `www.cbc.ca` and `internet.com` autolink as
-    // the user expects — but intercept the rendered link tokens
-    // and unwrap any whose href points at a filename-shaped
-    // suffix (`file.md`, `notes.txt`, etc.). The autolink-literal
-    // extension in linkify can't tell `.md` (Moldova's TLD) apart
-    // from `.md` (markdown file extension); the discrimination
-    // happens here, post-tokenisation, by checking the URL's
-    // suffix against `FILE_EXTENSION_TLDS`.
-    //
-    // What still autolinks after this:
-    //   - Explicit-scheme URLs (`https://example.com`).
-    //   - Email autolinks (`user@example.com` → `mailto:`).
-    //   - Bare hostnames with real TLDs (`www.cbc.ca`,
-    //     `internet.com`, `github.com/foo/bar`).
-    //
-    // What no longer autolinks:
-    //   - Filename-shaped text where the suffix matches a known
-    //     file extension (`file.md`, `notes.txt`, `app.config`).
-    const defaultLinkOpen = instance.renderer.rules['link_open'];
-    const defaultLinkClose = instance.renderer.rules['link_close'];
-    const wrapLinkRule = (defaultRule: typeof defaultLinkOpen) =>
-      (tokens: Parameters<NonNullable<typeof defaultLinkOpen>>[0],
-       idx: Parameters<NonNullable<typeof defaultLinkOpen>>[1],
-       options: Parameters<NonNullable<typeof defaultLinkOpen>>[2],
-       env: Parameters<NonNullable<typeof defaultLinkOpen>>[3],
-       self: Parameters<NonNullable<typeof defaultLinkOpen>>[4]) => {
-        // The matched-pair `link_close` token's open-link mate is
-        // tagged on the `link_open` token's `meta.fileShaped`. We
-        // set the flag on the open and read it back on the close.
-        const token = tokens[idx]!;
-        if (token.type === 'link_open') {
-          const hrefIdx = token.attrIndex('href');
-          if (hrefIdx >= 0) {
-            const href = token.attrs?.[hrefIdx]?.[1] ?? '';
-            if (looksLikeFilenameExtension(href)) {
-              token.meta = { ...(token.meta ?? {}), fileShaped: true };
-              return ''; // suppress the <a> open
-            }
-          }
-        }
-        if (token.type === 'link_close') {
-          // Walk back to find the matching `link_open`. markdown-it
-          // inline tokens don't carry an explicit pair index, so
-          // scan back for the nearest unmatched open of the same
-          // type. The pair is always within the same `inline`
-          // token's children, balanced.
-          let depth = 1;
-          for (let i = idx - 1; i >= 0; i--) {
-            const t = tokens[i]!;
-            if (t.type === 'link_close') depth += 1;
-            else if (t.type === 'link_open') {
-              depth -= 1;
-              if (depth === 0) {
-                if (t.meta?.['fileShaped']) return ''; // suppress </a>
-                break;
-              }
-            }
-          }
-        }
-        return defaultRule
-          ? defaultRule(tokens, idx, options, env, self)
-          : self.renderToken(tokens, idx, options);
-      };
-    instance.renderer.rules['link_open'] = wrapLinkRule(defaultLinkOpen);
-    instance.renderer.rules['link_close'] = wrapLinkRule(defaultLinkClose);
-    // RAISE-29: render `* [ ]` / `* [x]` GFM task lists as checkboxes
-    // in the preview. `enabled: true` removes the `disabled` attribute
-    // on the input so the user can click to toggle — a click handler
-    // on the preview pane container (further down in this component)
-    // intercepts the change and rewrites the source markdown.
-    // `label: true` wraps the item text in a <label> for accessibility
-    // and gives us a clean CSS hook for completed-item greying.
-    instance.use(markdownItTaskLists, { enabled: true, label: true });
-    // RAISE-30: render GitHub-style emoji shortcodes in the preview.
-    // `:warning:` → ⚠️, `:fire:` → 🔥, etc. The `full` flavour ships
-    // the GitHub set (~1500 codes); `light` would be ~40 ASCII-fallback
-    // codes which is too thin. The plugin respects code spans and
-    // fenced code blocks (`:warning:` inside `\`\`` stays literal),
-    // and unrecognised codes (e.g., `:not-an-emoji:`) pass through as
-    // text — both behaviours are inherited from markdown-it's standard
-    // tokenizer respecting code contexts.
-    //
-    // WYSIWYG-side rendering is deliberately out of scope here. A
-    // straightforward `remark-gemoji` integration would corrupt the
-    // source on round-trip (parses shortcode → emoji char in the AST,
-    // serialises back to the emoji char rather than the shortcode).
-    // Proper WYSIWYG support requires a custom Milkdown gemoji node
-    // type with its own parser/serializer pair — tracked under
-    // [RAISE-34](https://risepeople.atlassian.net/browse/RAISE-34).
-    instance.use(markdownItEmoji);
-    // RAISE-31: render review-style comments greyed-out. Two
-    // forms: `<!-- text -->` (inline or block) and `// text` (at
-    // start of a line, after optional whitespace). Both render
-    // with `class="md-comment"`; styled muted-italic via CSS in
-    // milkdown.css. Skips code spans / fenced blocks naturally
-    // because markdown-it's code rules consume those before our
-    // rules see them.
-    instance.use(markdownItComments);
-    // RAISE-11: translate `<img src="assets/foo.png">` → rise-md-asset:// URL
-    // at render time. The token's `src` attribute is the literal markdown
-    // src; we mutate it before delegating to the default renderer.
-    const defaultImage = instance.renderer.rules.image;
-    instance.renderer.rules.image = (tokens, idx, options, env, self) => {
-      const token = tokens[idx]!;
-      const srcIdx = token.attrIndex('src');
-      if (srcIdx >= 0) {
-        const src = token.attrs?.[srcIdx]?.[1] ?? '';
-        const resolved = resolveAssetUrl(markdownPathRef.current, src);
-        token.attrs![srcIdx]![1] = resolved;
-      }
-      return defaultImage
-        ? defaultImage(tokens, idx, options, env, self)
-        : self.renderToken(tokens, idx, options);
-    };
-    return instance;
-  }, []);
+  // Shared read-only preview markdown-it pipeline (RAISE-61). Task-list
+  // checkboxes are interactive in Split (click-to-toggle); the image rule
+  // resolves relative srcs to `rise-md-asset://` via the path ref, so a
+  // Save As that moves the file repoints existing images without an md
+  // rebuild on every keystroke.
+  const md = useMemo(
+    () =>
+      buildPreviewMarkdownIt({
+        taskListsEnabled: true,
+        imageSrcResolver: (src) => resolveAssetUrl(markdownPathRef.current, src),
+      }),
+    [],
+  );
   // Re-render the preview HTML whenever content OR the markdown path
   // changes — a Save As that gives the file a new dir means existing
   // relative paths point at a different location. The image rule reads
@@ -287,8 +163,7 @@ export function SplitView({
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
       renderedHtml =
-        `<div class="rise-md-frontmatter-preview"><pre>${escaped}</pre></div>` +
-        bodyHtml;
+        `<div class="rise-md-frontmatter-preview"><pre>${escaped}</pre></div>` + bodyHtml;
     }
     return { html: renderedHtml, taskLines: lines };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -404,9 +279,7 @@ export function SplitView({
       if (!(target instanceof HTMLInputElement)) return;
       if (target.type !== 'checkbox') return;
       if (!target.classList.contains('task-list-item-checkbox')) return;
-      const allCheckboxes = preview.querySelectorAll(
-        'input.task-list-item-checkbox',
-      );
+      const allCheckboxes = preview.querySelectorAll('input.task-list-item-checkbox');
       const index = Array.from(allCheckboxes).indexOf(target);
       if (index < 0) return;
       const lineIdx = taskLinesRef.current[index];
@@ -497,10 +370,7 @@ export function SplitView({
        * `overflow-hidden` ensures Monaco's own horizontal scrollbar handles
        * long lines instead of the parent layout.
        */}
-      <div
-        className="min-h-0 min-w-0 overflow-hidden"
-        style={{ width: `${splitPercent}%` }}
-      >
+      <div className="min-h-0 min-w-0 overflow-hidden" style={{ width: `${splitPercent}%` }}>
         <SourceEditor
           ref={sourceRef}
           content={content}
@@ -532,10 +402,7 @@ export function SplitView({
        * without altering preview layout. Was a single `.rise-md-prose`
        * div before the RAISE-42 follow-up that added the toggle.
        */}
-      <div
-        className="relative min-h-0 min-w-0 flex-1"
-        style={{ width: `${100 - splitPercent}%` }}
-      >
+      <div className="relative min-h-0 min-w-0 flex-1" style={{ width: `${100 - splitPercent}%` }}>
         {/*
          * Comment-visibility toggle — flips `.rise-md-prose-hide-comments`
          * on the preview node. Default OFF (comments visible) so the

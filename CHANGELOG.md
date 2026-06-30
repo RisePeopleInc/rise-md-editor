@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **Consolidated the three preview `markdown-it` instances into one shared builder** ([RAISE-61](https://risepeople.atlassian.net/browse/RAISE-61)). SplitView, ReadView, and the PDF/HTML export each constructed a near-identical `markdown-it` instance — same options, same plugin chain (task-lists, emoji, comments), and the same ~50-line RAISE-47 filename-shaped autolink suppression copy-pasted three times. They now all call a single `buildPreviewMarkdownIt({ taskListsEnabled, imageSrcResolver })` helper (`src/renderer/state/previewMarkdownIt.ts`), with the only per-surface differences — interactive vs. static task-list checkboxes, and the image-src rewrite target (`rise-md-asset://` for Split/Read vs. `file://` for print) — passed in as options. No user-visible change: task lists, emoji, comments, autolink suppression, and image-src rewrites render identically in all four surfaces. A future markdown-it tweak now happens in one place instead of three. The image-src resolver is passed as a closure so each consumer keeps its `markdownPathRef` pattern (the rule sees the latest path without an md rebuild on every keystroke).
+  - Notes: behaviour is pinned by a new unit suite (`previewMarkdownIt.test.ts`, 8 tests) covering both task-list modes, autolink suppression vs. real links, emoji, comment-greying, the image resolver, and `html: false` escaping. Unblocks the find-in-Read work ([RAISE-94](https://risepeople.atlassian.net/browse/RAISE-94)) by giving the Read/Split surfaces one render path to hook match-highlighting onto.
+
 ## [1.0.3] — 2026-06-08
 
 Adds a per-machine **`.pkg`** macOS installer for managed deployment via device management (Jamf, Kandji, Intune-for-Mac), alongside the existing `.dmg`. IT can now push Rise MD Editor to Macs the same way the v1.0.2 MSI enabled for Windows. The `.pkg` is signed with a Developer ID Installer certificate and notarized; managed installs don't self-update (IT owns the version through MDM), while the `.dmg` build keeps auto-updating. Completes the cross-platform managed-deployment story (Windows MSI + macOS pkg).

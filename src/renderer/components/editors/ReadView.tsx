@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import MarkdownIt from 'markdown-it';
-import { full as markdownItEmoji } from 'markdown-it-emoji';
-import markdownItTaskLists from 'markdown-it-task-lists';
 import { resolveAssetUrl } from '../../state/assetUrl';
-import { looksLikeFilenameExtension } from '../../state/filenameExtensions';
 import { splitFrontmatter } from '../../state/markdown';
-import { markdownItComments } from '../../state/markdownItComments';
+import { buildPreviewMarkdownIt } from '../../state/previewMarkdownIt';
 import { expandSingleTildeStrikethrough } from '../../state/exportPdfHtml';
 import { toggleTaskLine } from '../../state/taskListToggle';
 
@@ -142,84 +138,19 @@ export function ReadView({
   const markdownPathRef = useRef(markdownPath);
   markdownPathRef.current = markdownPath;
 
-  const md = useMemo(() => {
-    const instance = new MarkdownIt({
-      html: false,
-      linkify: true,
-      typographer: true,
-      breaks: false,
-    });
-    // RAISE-47: filename-shaped autolink suppression. Same pattern as
-    // SplitView — keep linkify's default `fuzzyLink` so real bare-
-    // domain references autolink, but unwrap any rendered link whose
-    // href is a filename-shaped suffix (`file.md`, `notes.txt`, etc.).
-    const defaultLinkOpen = instance.renderer.rules['link_open'];
-    const defaultLinkClose = instance.renderer.rules['link_close'];
-    const wrapLinkRule =
-      (defaultRule: typeof defaultLinkOpen) =>
-      (
-        tokens: Parameters<NonNullable<typeof defaultLinkOpen>>[0],
-        idx: Parameters<NonNullable<typeof defaultLinkOpen>>[1],
-        options: Parameters<NonNullable<typeof defaultLinkOpen>>[2],
-        env: Parameters<NonNullable<typeof defaultLinkOpen>>[3],
-        self: Parameters<NonNullable<typeof defaultLinkOpen>>[4],
-      ) => {
-        const token = tokens[idx]!;
-        if (token.type === 'link_open') {
-          const hrefIdx = token.attrIndex('href');
-          if (hrefIdx >= 0) {
-            const href = token.attrs?.[hrefIdx]?.[1] ?? '';
-            if (looksLikeFilenameExtension(href)) {
-              token.meta = { ...(token.meta ?? {}), fileShaped: true };
-              return '';
-            }
-          }
-        }
-        if (token.type === 'link_close') {
-          let depth = 1;
-          for (let i = idx - 1; i >= 0; i--) {
-            const t = tokens[i]!;
-            if (t.type === 'link_close') depth += 1;
-            else if (t.type === 'link_open') {
-              depth -= 1;
-              if (depth === 0) {
-                if (t.meta?.['fileShaped']) return '';
-                break;
-              }
-            }
-          }
-        }
-        return defaultRule
-          ? defaultRule(tokens, idx, options, env, self)
-          : self.renderToken(tokens, idx, options);
-      };
-    instance.renderer.rules['link_open'] = wrapLinkRule(defaultLinkOpen);
-    instance.renderer.rules['link_close'] = wrapLinkRule(defaultLinkClose);
-    // RAISE-29 + RAISE-85: task lists rendered as checkboxes. `enabled:
-    // true` (changed from `false` in RAISE-85) drops the `disabled`
-    // attribute so the input fires events; a `change` listener on the
-    // container (further down) flips the source marker and silently
-    // saves the file. `label: true` wraps the item text in a <label>
-    // for accessibility / a CSS hook for completed-item greying.
-    instance.use(markdownItTaskLists, { enabled: true, label: true });
-    instance.use(markdownItEmoji);
-    instance.use(markdownItComments);
-    // RAISE-11: relative `<img src>` → `rise-md-asset://` URL at render time.
-    const defaultImage = instance.renderer.rules.image;
-    instance.renderer.rules.image = (tokens, idx, options, env, self) => {
-      const token = tokens[idx]!;
-      const srcIdx = token.attrIndex('src');
-      if (srcIdx >= 0) {
-        const src = token.attrs?.[srcIdx]?.[1] ?? '';
-        const resolved = resolveAssetUrl(markdownPathRef.current, src);
-        token.attrs![srcIdx]![1] = resolved;
-      }
-      return defaultImage
-        ? defaultImage(tokens, idx, options, env, self)
-        : self.renderToken(tokens, idx, options);
-    };
-    return instance;
-  }, []);
+  // Shared read-only preview markdown-it pipeline (RAISE-61). Read mode's
+  // task-list checkboxes are interactive (RAISE-85: click-to-toggle with a
+  // silent save); the image rule resolves relative srcs to
+  // `rise-md-asset://` via the path ref so a Save As that moves the file
+  // repoints existing images without an md rebuild.
+  const md = useMemo(
+    () =>
+      buildPreviewMarkdownIt({
+        taskListsEnabled: true,
+        imageSrcResolver: (src) => resolveAssetUrl(markdownPathRef.current, src),
+      }),
+    [],
+  );
 
   // Re-render whenever content OR the markdown path changes — a Save As
   // that gives the file a new dir means existing relative paths point
